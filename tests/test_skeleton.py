@@ -132,27 +132,6 @@ def test_knowledge_store_conn_is_per_thread_cached(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. KnowledgeStore still-stubbed methods raise NotImplementedError
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "method,args",
-    [
-        ("bfs_query", ([1], 2)),
-    ],
-)
-def test_store_stubs_raise_not_implemented(
-    tmp_path: Path, method: str, args: tuple[object, ...]
-) -> None:
-    from membox.store import KnowledgeStore
-
-    store = KnowledgeStore(str(tmp_path / "test.db"))
-    with pytest.raises(NotImplementedError):
-        getattr(store, method)(*args)
-
-
-# ---------------------------------------------------------------------------
 # 7. MemoryAgent instantiation
 # ---------------------------------------------------------------------------
 
@@ -219,30 +198,7 @@ def test_to_prompt_context_with_data(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. MemoryAgent.retrieve with resolved seed calls bfs_query (Phase 5 stub)
-# ---------------------------------------------------------------------------
-
-
-def test_agent_retrieve_with_resolved_seed_raises_not_implemented(tmp_path: Path) -> None:
-    """After Phase 2, seeds that resolve to entity IDs trigger bfs_query (Phase 5)."""
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph
-
-    db = str(tmp_path / "a.db")
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)
-    # Pre-create entity so "Alice" resolves
-    graph = ExtractedGraph(
-        entities=[ExtractedEntity(name="Alice", type="Person")],
-        relations=[],
-    )
-    agent.ingest_extracted("Alice is a person.", graph)
-    with pytest.raises(NotImplementedError):
-        agent.retrieve(["Alice"], max_hops=2)
-
-
-# ---------------------------------------------------------------------------
-# 10. CLI skeleton
+# 9. CLI skeleton
 # ---------------------------------------------------------------------------
 
 
