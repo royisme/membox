@@ -1,7 +1,7 @@
 [project]
 name = "membox"
 version = "0.1.0"
-description = "membox"
+description = "Local knowledge graph + RAG memory layer for coding agents"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
@@ -12,9 +12,23 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "pydantic>=2",
+    "typer>=0.15",
+    "rich>=13",
+]
+
+[project.scripts]
+membox = "membox.cli:app"
 
 [project.optional-dependencies]
+llm = [
+    "openai>=1",
+]
+ast = [
+    "tree-sitter>=0.24",
+    "tree-sitter-python>=0.23",
+]
 dev = [
     "pytest>=8",
     "pytest-cov>=6",
@@ -34,6 +48,9 @@ dev = [
     "ruff>=0.11",
     "pre-commit>=4",
     "mypy>=1.15",
+    "openai>=1",
+    "tree-sitter>=0.24",
+    "tree-sitter-python>=0.23",
 ]
 
 # ── ruff: lint + format ───────────────────────────────────────────────
@@ -97,6 +114,14 @@ disallow_untyped_defs = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "tree_sitter.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "typer.*"
+ignore_missing_imports = true
 
 # ── coverage ───────────────────────────────────────────────────────────
 [tool.coverage.run]

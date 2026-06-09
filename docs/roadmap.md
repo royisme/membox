@@ -10,8 +10,10 @@
 - [x] pre-commit hooks
 - [x] GitHub Actions CI
 - [x] 项目目录结构
-- [ ] 运行时依赖：`typer`, `rich`, `pydantic` 加入 pyproject.toml
-- [ ] 可选依赖组：`openai`, `tree-sitter`
+- [x] 运行时依赖：`typer`, `rich`, `pydantic` 加入 pyproject.toml
+- [x] 可选依赖组：`openai`, `tree-sitter`
+- [x] CLI 入口点注册（`membox` 命令可用）
+- [x] 最小 `cli.py`（`version` 命令）
 
 ## Phase 1 — 数据模型与存储层
 
