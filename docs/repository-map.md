@@ -44,6 +44,7 @@ Functional Python files include their module header so tools can reuse the file 
 - `tests/`
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
+  - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
