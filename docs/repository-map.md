@@ -23,6 +23,8 @@ Functional Python files include their module header so tools can reuse the file 
   - `docs/roadmap.md`
   - `docs/spec.md`
   - `docs/workflow.md`
+- `examples/`
+  - `examples/demo.py` — End-to-end demo: ingest real documents and query the knowledge graph via OpenAI.
 - `scripts/`
   - `scripts/__init__.py` — Automation scripts for repository maintenance and release workflows.
   - `scripts/bump_version.py` — Synchronize the project version across release metadata files.
@@ -35,8 +37,8 @@ Functional Python files include their module header so tools can reuse the file 
     - `src/membox/__init__.py` — membox — Local knowledge graph + RAG memory layer for coding agents.
     - `src/membox/agent.py` — membox agent — MemoryAgent orchestration layer.
     - `src/membox/cli.py` — membox CLI — command-line interface for coding agents.
-    - `src/membox/embed.py` — membox embed — embedding Protocol and stub implementation.
-    - `src/membox/extract.py` — membox extract — LLM extraction Protocol and stub implementation.
+    - `src/membox/embed.py` — membox embed — embedding Protocol and implementations.
+    - `src/membox/extract.py` — membox extract — LLM extraction Protocol and implementations.
     - `src/membox/normalize.py` — membox normalize — predicate and name normalization utilities.
     - `src/membox/py.typed`
     - `src/membox/schema.py` — membox schema — Pydantic data models for the knowledge graph.

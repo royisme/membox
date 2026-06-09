@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from membox.agent import MemoryAgent
-from membox.embed import DummyEmbedder, Embedder
-from membox.extract import DummyExtractor, LLMExtractor
+from membox.embed import DummyEmbedder, Embedder, OpenAIEmbedder
+from membox.extract import DummyExtractor, LLMExtractor, OpenAIExtractor
 from membox.schema import (
     Document,
     Entity,
@@ -32,6 +32,8 @@ __all__ = [
     "KnowledgeStore",
     "LLMExtractor",
     "MemoryAgent",
+    "OpenAIEmbedder",
+    "OpenAIExtractor",
     "Relation",
     "Triple",
     "__version__",
