@@ -129,26 +129,44 @@ Every push to `develop`/`main` and every PR targeting `main` triggers:
 ## Release Process
 
 ```bash
-# 1. Ensure develop is stable
+# 1. Create a release branch from develop
 git checkout develop
 git pull origin develop
+git checkout -b release/x.y.z
+
+# 2. Run the full local verification gate
 uv run pytest
 uv run pre-commit run --all-files
 
-# 2. Bump version
-# Edit version in src/membox/__init__.py and pyproject.toml
-git commit -m "chore(release): bump version to x.y.z"
+# 3. Bump version metadata in pyproject.toml and src/membox/__init__.py
+uv run python scripts/bump_version.py x.y.z
 
-# 3. PR to main
-git push origin develop
-# Create PR: main ← develop
+# 4. Generate the release changelog section from git history
+uv run python scripts/generate_changelog.py --version x.y.z
 
-# 4. After merge, tag on main
+# 5. Review generated changes, then commit on the release branch
+git diff
+git add pyproject.toml src/membox/__init__.py CHANGELOG.md docs/repository-map.md
+git commit -m "chore(release): prepare x.y.z"
+
+# 6. Push and create PR to main
+git push -u origin release/x.y.z
+# Create PR: main ← release/x.y.z
+
+# 7. After merge, tag on main
 git checkout main
 git pull origin main
 git tag -a vx.y.z -m "Release x.y.z"
 git push origin vx.y.z
 ```
+
+### Release Automation
+
+- `scripts/bump_version.py x.y.z` is the only supported way to update release version metadata.
+- `scripts/bump_version.py x.y.z --check` verifies both version fields already match.
+- `scripts/generate_changelog.py --version x.y.z` inserts or replaces the target release section in `CHANGELOG.md`.
+- `scripts/generate_changelog.py --check` verifies the current `Unreleased` section is in sync with git history.
+- Both scripts are stdlib-only and safe to run without network access.
 
 ---
 

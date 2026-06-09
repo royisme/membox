@@ -47,3 +47,4 @@ Thumbs.db
 *.log
 .env
 .env.*
+docs/reference/
