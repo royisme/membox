@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 import sqlite3
 import threading
+import warnings
 from typing import TYPE_CHECKING
 
 import pytest
@@ -525,3 +527,82 @@ def test_concurrent_find_or_create_no_duplicate(tmp_path: Path) -> None:
     assert not errors, errors
     assert len(results) == 4
     assert len(set(results)) == 1, "All threads must get the same entity_id"
+
+
+# ---------------------------------------------------------------------------
+# 13. close() and context-manager lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_close_then_reuse_reopens_connection(tmp_path: Path) -> None:
+    """close() releases the thread's connection; the next operation reopens transparently."""
+    from membox.store import KnowledgeStore
+
+    store = KnowledgeStore(str(tmp_path / "close.db"))
+    old_conn = store._conn()
+    store.insert_document("before close")
+    store.close()
+
+    # The old connection object is genuinely closed
+    with pytest.raises(sqlite3.ProgrammingError):
+        old_conn.execute("SELECT 1")
+
+    # Subsequent operations get a fresh connection and still see committed data
+    doc_id = store.insert_document("after close")
+    assert doc_id == 2
+    assert store._conn() is not old_conn
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    from membox.store import KnowledgeStore
+
+    store = KnowledgeStore(str(tmp_path / "close.db"))
+    store.close()
+    store.close()  # no connection open — must not raise
+
+
+def test_context_manager_closes_without_resource_warning(tmp_path: Path) -> None:
+    """Using the store as a context manager closes the connection cleanly."""
+    from membox.store import KnowledgeStore
+
+    gc.collect()  # flush garbage from earlier tests so it is not attributed here
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        with KnowledgeStore(str(tmp_path / "cm.db")) as store:
+            store.insert_document("inside context")
+        # Connection released on exit
+        assert getattr(store._local, "conn", None) is None
+        del store
+        gc.collect()  # would surface a ResourceWarning if a connection leaked
+
+
+# ---------------------------------------------------------------------------
+# 14. Embedding dimension safety
+# ---------------------------------------------------------------------------
+
+
+def test_cosine_raises_on_dimension_mismatch() -> None:
+    from membox.store import _cosine
+
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        _cosine([1.0, 0.0], [1.0, 0.0, 0.0])
+
+
+def test_find_similar_entity_skips_mismatched_dimension(tmp_path: Path) -> None:
+    """Stored embeddings from an older embedder (different dim) are skipped, not matched."""
+    from membox.store import KnowledgeStore
+
+    store = KnowledgeStore(str(tmp_path / "dim.db"))
+    store.create_entity("OldDim", "Thing", "", [1.0, 1.0, 1.0, 1.0])  # 4-dim row
+    query = [1.0] * 8  # 8-dim query: must not crash and must not bogus-match
+    assert store.find_similar_entity(query, "Thing") is None
+
+
+def test_find_similar_entity_still_matches_same_dimension(tmp_path: Path) -> None:
+    """A same-dimension row alongside a mismatched one is still found."""
+    from membox.store import KnowledgeStore
+
+    store = KnowledgeStore(str(tmp_path / "dim.db"))
+    store.create_entity("OldDim", "Thing", "", [1.0, 1.0, 1.0, 1.0])  # stale 4-dim row
+    good = store.create_entity("NewDim", "Thing", "", [1.0] * 8)
+    assert store.find_similar_entity([1.0] * 8, "Thing") == good

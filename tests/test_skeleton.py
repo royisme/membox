@@ -243,9 +243,17 @@ def test_cli_ingest_file_not_found(tmp_path: Path) -> None:
 def test_store_tx_context_manager_commits(tmp_path: Path) -> None:
     from membox.store import KnowledgeStore
 
-    store = KnowledgeStore(str(tmp_path / "tx.db"))
-    with store._tx():
-        pass  # auto-commits
+    db = str(tmp_path / "tx.db")
+    store = KnowledgeStore(db)
+    with store._tx() as conn:
+        conn.execute("INSERT INTO documents(content, source) VALUES ('committed', 'tx-test')")
+
+    # The row must be visible from a completely fresh store/connection
+    store.close()
+    fresh = KnowledgeStore(db)
+    row = fresh._conn().execute("SELECT content FROM documents WHERE source='tx-test'").fetchone()
+    assert row is not None
+    assert row[0] == "committed"
 
 
 def test_store_tx_context_manager_rollbacks_on_error(tmp_path: Path) -> None:

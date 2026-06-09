@@ -22,6 +22,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `docs/HANDOFF.md`
   - `docs/repository-map.md`
   - `docs/roadmap.md`
+  - `docs/spec-v0.2-draft.md`
   - `docs/spec.md`
   - `docs/workflow.md`
 - `examples/`
@@ -33,8 +34,6 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
 - `src/`
   - `src/membox/`
-    - `src/membox/core/`
-    - `src/membox/model/`
     - `src/membox/__init__.py` — membox — Local knowledge graph + RAG memory layer for coding agents.
     - `src/membox/agent.py` — membox agent — MemoryAgent orchestration layer.
     - `src/membox/cli.py` — membox CLI — command-line interface for coding agents.
@@ -48,7 +47,8 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
-  - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock.
+  - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
+  - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.

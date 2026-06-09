@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Protocol
 
 from membox.schema import ExtractedGraph
 
 if TYPE_CHECKING:
     from openai import OpenAI
+
+    from membox.embed import Embedder
 
 
 class LLMExtractor(Protocol):
@@ -139,3 +142,29 @@ class OpenAIExtractor:
         if parsed is None:
             return []
         return parsed.keywords
+
+
+def create_default_extractor(use_llm: bool = True) -> tuple[LLMExtractor, Embedder | None]:
+    """Select the best available extraction backend.
+
+    Returns OpenAI-backed implementations when ``OPENAI_API_KEY`` is set and the
+    ``openai`` package is importable; otherwise falls back to the no-op
+    :class:`DummyExtractor` with no embedder. The ``openai`` import is lazy so
+    the package remains an optional dependency.
+
+    Args:
+        use_llm: When False, skip backend detection and return the Dummy backend.
+
+    Returns:
+        Tuple of (extractor, embedder). The embedder is None for the Dummy backend.
+    """
+    if use_llm and os.environ.get("OPENAI_API_KEY"):
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return DummyExtractor(), None
+        from membox.embed import OpenAIEmbedder
+
+        client = OpenAI()
+        return OpenAIExtractor(client), OpenAIEmbedder(client)
+    return DummyExtractor(), None

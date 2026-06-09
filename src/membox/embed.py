@@ -68,5 +68,5 @@ class OpenAIEmbedder:
         Returns:
             Float vector of length self.dim.
         """
-        rsp = self.client.embeddings.create(model=self.model, input=text)
+        rsp = self.client.embeddings.create(model=self.model, input=text, dimensions=self.dim)
         return list(rsp.data[0].embedding)

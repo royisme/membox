@@ -1,7 +1,10 @@
-"""Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock."""
+"""Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process."""
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import threading
 from typing import TYPE_CHECKING
 
@@ -146,6 +149,10 @@ def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
     store = KnowledgeStore(db)
     doc_count = store._conn().execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     assert doc_count == 50
+    # All 5x10 distinct entity names must have persisted as entity rows
+    names = {e.name for e in store.list_entities()}
+    expected = {f"Entity-{tid}-{i}" for tid in range(5) for i in range(10)}
+    assert names == expected
 
 
 def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
@@ -255,3 +262,85 @@ def test_concurrent_relation_inserts_dedup_correctly(tmp_path: Path) -> None:
     assert len(set(results)) == 1, f"Multiple relation rows: {set(results)}"
     count = store._conn().execute("SELECT COUNT(*) FROM relations").fetchone()[0]
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# 6. Multi-process safety: find_or_create_entity across real processes
+# ---------------------------------------------------------------------------
+
+_MP_NAME_COUNT = 50
+_MP_PROC_COUNT = 4
+
+# Fresh interpreters via subprocess: multiprocessing fork() deadlocks on macOS
+# after this suite has spawned threads, and spawn cannot pickle test-module
+# functions under pytest's importlib mode.
+_MP_WORKER_SCRIPT = """
+import json, sys, time
+from pathlib import Path
+from membox.store import KnowledgeStore
+
+db, go_file, name_count = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
+store = KnowledgeStore(db)
+deadline = time.monotonic() + 30.0
+while not go_file.exists():          # start gate so workers race, not stagger
+    if time.monotonic() > deadline:
+        raise SystemExit("start gate never opened")
+    time.sleep(0.001)
+ids = {}
+for i in range(name_count):
+    name = f"Contested-{i}"
+    ids[name] = store.find_or_create_entity(name, "Thing", "raced", None)
+store.close()
+print(json.dumps(ids))
+"""
+
+
+def test_multiprocess_find_or_create_same_names_no_duplicates(tmp_path: Path) -> None:
+    """4 processes racing find_or_create_entity on 50 shared names → identical ids, 50 rows.
+
+    The in-process RLock cannot serialize separate processes; this exercises
+    the IntegrityError re-resolution path in find_or_create_entity.
+    """
+    from membox.store import KnowledgeStore
+
+    db = str(tmp_path / "mp.db")
+    KnowledgeStore(db).close()  # initialize schema before workers start
+    go_file = tmp_path / "go"
+
+    procs = [
+        subprocess.Popen(  # noqa: S603
+            [sys.executable, "-c", _MP_WORKER_SCRIPT, db, str(go_file), str(_MP_NAME_COUNT)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(_MP_PROC_COUNT)
+    ]
+    go_file.touch()  # open the start gate
+
+    mappings: list[dict[str, int]] = []
+    errors: list[str] = []
+    for p in procs:
+        try:
+            out, err = p.communicate(timeout=60.0)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            errors.append(f"worker timed out: {err}")
+            continue
+        if p.returncode != 0:
+            errors.append(f"worker exited {p.returncode}: {err}")
+        else:
+            mappings.append(json.loads(out))
+
+    assert not errors, f"Worker errors: {errors}"
+    assert len(mappings) == _MP_PROC_COUNT
+    # Every process must agree on the id of every contested name
+    first = mappings[0]
+    for other in mappings[1:]:
+        assert other == first, f"Processes disagree on entity ids: {first} != {other}"
+
+    store = KnowledgeStore(db)
+    count = store._conn().execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+    assert count == _MP_NAME_COUNT
+    store.close()

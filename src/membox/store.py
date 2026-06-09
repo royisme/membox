@@ -32,7 +32,15 @@ def _blob_to_vec(b: bytes) -> list[float]:
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    s = sum(x * y for x, y in zip(a, b, strict=False))
+    """Return the cosine similarity of two equal-length vectors.
+
+    Raises:
+        ValueError: If the vectors have different dimensions.
+    """
+    if len(a) != len(b):
+        msg = f"Vector dimension mismatch: {len(a)} != {len(b)}"
+        raise ValueError(msg)
+    s = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
     if na == 0 or nb == 0:
@@ -89,6 +97,9 @@ class KnowledgeStore:
 
     Uses per-thread connections, WAL mode, and an RLock to guard the
     find-or-create entity critical section against concurrent writers.
+    Cross-process races on entity creation are resolved via the UNIQUE
+    constraints (see find_or_create_entity). Supports use as a context
+    manager; ``close()``/``__exit__`` release the calling thread's connection.
     """
 
     def __init__(self, db_path: str = "memory.db") -> None:
@@ -127,6 +138,27 @@ class KnowledgeStore:
     def _init_schema(self) -> None:
         """Create tables and indexes."""
         self._conn().executescript(_DDL)
+
+    def close(self) -> None:
+        """Close the current thread's SQLite connection, if open.
+
+        Connections are per-thread: this only closes the connection owned by
+        the calling thread. Other threads' connections are released when their
+        thread dies or when they call ``close()`` themselves. A subsequent
+        operation on this thread transparently reopens a fresh connection.
+        """
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
+
+    def __enter__(self) -> KnowledgeStore:
+        """Return self for use as a context manager."""
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Close the current thread's connection on context exit."""
+        self.close()
 
     # ---- document writes ----
 
@@ -195,7 +227,12 @@ class KnowledgeStore:
         best_id: int | None = None
         best_sim = threshold
         for eid, blob in rows:
-            sim = _cosine(embedding, _blob_to_vec(blob))
+            vec = _blob_to_vec(blob)
+            # Rows written by an older embedder may have a different dimension;
+            # skip them rather than letting one stale row break every lookup.
+            if len(vec) != len(embedding):
+                continue
+            sim = _cosine(embedding, vec)
             if sim > best_sim:
                 best_id, best_sim = int(eid), sim
         return best_id
@@ -275,12 +312,18 @@ class KnowledgeStore:
         description: str,
         embedder: Embedder | None,
     ) -> int:
-        """Resolve name to an entity_id via alias → embedding → create. Thread-safe via RLock.
+        """Resolve name to an entity_id via alias → embedding → create.
 
         Resolution order:
           1. Exact alias match (cheap, deterministic).
           2. Embedding cosine ≥ 0.85 within same type (requires embedder).
           3. Create new entity.
+
+        Safe for concurrent callers in the same process (RLock serializes the
+        critical section) and across processes: if another process wins the
+        race on the UNIQUE/PRIMARY KEY constraints, the resulting
+        ``sqlite3.IntegrityError`` is caught and the winner's entity_id is
+        re-resolved and returned instead of raising.
 
         Args:
             name: Entity surface form.
@@ -315,11 +358,49 @@ class KnowledgeStore:
                 eid = self.find_similar_entity(embedding, type_)
                 if eid is not None:
                     self.add_alias(alias, eid)
+                    # add_alias is INSERT OR IGNORE: a concurrent process may
+                    # have bound this alias to a different entity first, in
+                    # which case the existing mapping wins — defer to it.
+                    winner = self.find_entity_by_alias(alias)
+                    if winner is not None:
+                        eid = winner
                     self.update_entity_description(eid, description)
                     return eid
 
             # Layer 3: create new entity
-            return self.create_entity(name, type_, description, embedding)
+            try:
+                return self.create_entity(name, type_, description, embedding)
+            except sqlite3.IntegrityError:
+                # Another process created the entity (or its alias) between our
+                # re-check and the INSERT. Resolve to the winner's row.
+                eid = self._resolve_race_winner(name, alias)
+                if eid is None:  # pragma: no cover - defensive
+                    raise
+                self.update_entity_description(eid, description)
+                return eid
+
+    def _resolve_race_winner(self, name: str, alias: str) -> int | None:
+        """Resolve the entity created by a concurrent process after a lost race.
+
+        The alias table is keyed by the normalized name while the entities
+        UNIQUE constraint is on the raw canonical name, so check both.
+
+        Args:
+            name: Raw canonical name as passed to find_or_create_entity.
+            alias: Normalized alias for the name.
+
+        Returns:
+            entity_id of the winning row, or None if neither lookup matches.
+        """
+        eid = self.find_entity_by_alias(alias)
+        if eid is not None:
+            return eid
+        row = (
+            self._conn()
+            .execute("SELECT id FROM entities WHERE canonical_name = ?", (name,))
+            .fetchone()
+        )
+        return int(row[0]) if row else None
 
     # ---- relation writes ----
 
