@@ -19,6 +19,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/agent/02-architecture-boundaries.md`
     - `docs/agent/03-engineering-rules.md`
   - `docs/code-standards.md`
+  - `docs/HANDOFF.md`
   - `docs/repository-map.md`
   - `docs/roadmap.md`
   - `docs/spec.md`
