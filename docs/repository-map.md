@@ -31,13 +31,21 @@ Functional Python files include their module header so tools can reuse the file 
 - `src/`
   - `src/membox/`
     - `src/membox/core/`
+    - `src/membox/model/`
     - `src/membox/__init__.py` — membox — Local knowledge graph + RAG memory layer for coding agents.
+    - `src/membox/agent.py` — membox agent — MemoryAgent orchestration layer.
     - `src/membox/cli.py` — membox CLI — command-line interface for coding agents.
+    - `src/membox/embed.py` — membox embed — embedding Protocol and stub implementation.
+    - `src/membox/extract.py` — membox extract — LLM extraction Protocol and stub implementation.
+    - `src/membox/normalize.py` — membox normalize — predicate and name normalization utilities.
     - `src/membox/py.typed`
+    - `src/membox/schema.py` — membox schema — Pydantic data models for the knowledge graph.
+    - `src/membox/store.py` — membox store — SQLite-backed knowledge graph store.
 - `tests/`
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
+  - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
 - `.gitignore`
@@ -45,5 +53,6 @@ Functional Python files include their module header so tools can reuse the file 
 - `.python-version`
 - `AGENTS.md`
 - `CHANGELOG.md`
+- `CLAUDE.md`
 - `pyproject.toml`
 - `README.md`
