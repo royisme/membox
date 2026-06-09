@@ -132,27 +132,14 @@ def test_knowledge_store_conn_is_per_thread_cached(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. KnowledgeStore stubs raise NotImplementedError
+# 6. KnowledgeStore still-stubbed methods raise NotImplementedError
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "method,args",
     [
-        ("insert_document", ("text",)),
-        ("find_entity_by_alias", ("name",)),
-        ("find_similar_entity", ([0.1, 0.2, 0.3, 0.4], "Type")),
-        ("create_entity", ("name", "Type", "desc", None)),
-        ("add_alias", ("alias", 1)),
-        ("update_entity_description", (1, "new description")),
-        ("find_or_create_entity", ("name", "Type", "desc", None)),
-        ("upsert_relation", (1, 2, "uses", 1)),
-        ("get_entity", (1,)),
-        ("get_neighbors", ([1, 2],)),
-        ("get_evidence_docs", ([1, 2],)),
         ("bfs_query", ([1], 2)),
-        ("list_entities", ()),
-        ("list_relations", ()),
     ],
 )
 def test_store_stubs_raise_not_implemented(
@@ -232,45 +219,26 @@ def test_to_prompt_context_with_data(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. MemoryAgent stub methods raise NotImplementedError
+# 9. MemoryAgent.retrieve with resolved seed calls bfs_query (Phase 5 stub)
 # ---------------------------------------------------------------------------
 
 
-def test_agent_ingest_raises_not_implemented(tmp_path: Path) -> None:
+def test_agent_retrieve_with_resolved_seed_raises_not_implemented(tmp_path: Path) -> None:
+    """After Phase 2, seeds that resolve to entity IDs trigger bfs_query (Phase 5)."""
     from membox.agent import MemoryAgent
     from membox.extract import DummyExtractor
+    from membox.schema import ExtractedEntity, ExtractedGraph
 
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
+    db = str(tmp_path / "a.db")
+    agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)
+    # Pre-create entity so "Alice" resolves
+    graph = ExtractedGraph(
+        entities=[ExtractedEntity(name="Alice", type="Person")],
+        relations=[],
+    )
+    agent.ingest_extracted("Alice is a person.", graph)
     with pytest.raises(NotImplementedError):
-        agent.ingest("some text about technology")
-
-
-def test_agent_ingest_extracted_raises_not_implemented(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedGraph
-
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
-    with pytest.raises(NotImplementedError):
-        agent.ingest_extracted("text", ExtractedGraph(entities=[], relations=[]))
-
-
-def test_agent_list_entities_raises_not_implemented(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
-    with pytest.raises(NotImplementedError):
-        agent.list_entities()
-
-
-def test_agent_list_relations_raises_not_implemented(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
-    with pytest.raises(NotImplementedError):
-        agent.list_relations()
+        agent.retrieve(["Alice"], max_hops=2)
 
 
 # ---------------------------------------------------------------------------
@@ -308,50 +276,12 @@ def test_cli_query_with_empty_seeds_returns_placeholder(tmp_path: Path) -> None:
     assert "没有找到" in result.output
 
 
-def test_cli_ingest_raises_before_phase2(tmp_path: Path) -> None:
-    from membox.cli import app
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["ingest", "test text", "--db", str(tmp_path / "i.db")])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
-
-
-def test_cli_list_entities_raises_before_phase2(tmp_path: Path) -> None:
-    from membox.cli import app
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["list-entities", "--db", str(tmp_path / "e.db")])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
-
-
-def test_cli_list_relations_raises_before_phase2(tmp_path: Path) -> None:
-    from membox.cli import app
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["list-relations", "--db", str(tmp_path / "e.db")])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
-
-
 def test_cli_ingest_file_not_found(tmp_path: Path) -> None:
     from membox.cli import app
 
     runner = CliRunner()
     result = runner.invoke(app, ["ingest-file", str(tmp_path / "nope.txt")])
     assert result.exit_code == 1
-
-
-def test_cli_ingest_file_raises_before_phase2(tmp_path: Path) -> None:
-    from membox.cli import app
-
-    f = tmp_path / "data.txt"
-    f.write_text("Alice works at Acme.")
-    runner = CliRunner()
-    result = runner.invoke(app, ["ingest-file", str(f), "--db", str(tmp_path / "i.db")])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
 
 
 def test_store_tx_context_manager_commits(tmp_path: Path) -> None:
@@ -369,12 +299,3 @@ def test_store_tx_context_manager_rollbacks_on_error(tmp_path: Path) -> None:
     msg = "forced rollback"
     with pytest.raises(ValueError), store._tx():
         raise ValueError(msg)
-
-
-def test_agent_retrieve_with_seeds_raises_not_implemented(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-
-    agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
-    with pytest.raises(NotImplementedError):
-        agent.retrieve(["Alice", "Acme"], max_hops=2)

@@ -46,6 +46,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
+  - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
 - `.gitignore`
