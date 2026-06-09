@@ -9,6 +9,7 @@ Membox 是一个**本地化的知识图谱 + RAG 记忆层**，面向 **coding a
 核心主张：
 
 - **Hands-on 实现** — 不依赖 Neo4j / Weaviate / Pinecone 等外部服务，全部逻辑用 Python + SQLite 手写，开发者可以完全理解和掌控每一行代码
+- **CLI 优先** — 以命令行工具形式交付，coding agent 通过 **skill 文件**（指令文档）学会调用 shell 命令来使用，无需 MCP 或 HTTP 服务
 - **零外部服务** — SQLite 文件级存储，无需启动数据库进程，适合单机开发环境
 - **Agent 共享** — 多个 coding agent 通过同一个 SQLite 数据库文件共享记忆，避免各自维护碎片化的上下文
 
@@ -75,9 +76,12 @@ seed → 1-hop neighbors → 2-hop neighbors → ... → max_hops
 |------|------|------|
 | 语言 | Python 3.13 | coding agent 生态通用语言 |
 | 存储 | SQLite（WAL 模式） | 零运维，文件级存储，跨进程共享 |
+| CLI | **typer** + rich | 类型注解即命令定义，自动 help / shell completion；rich 格式化输出提升可读性 |
 | 类型校验 | Pydantic | 数据模型校验与序列化 |
 | LLM 接口 | Protocol（Protocol Class） | 可注入任意 LLM 实现，测试不依赖 API |
 | Embedding | Protocol（Protocol Class） | 可注入任意 Embedding 实现，无 embedding 时回退字符串去重 |
+| 代码分析（可选） | **tree-sitter** | 多语言 AST 解析，提取结构化代码知识（函数签名、class 结构、import 依赖） |
+| Agent 接入 | **skill 文件** | 非 MCP / 非 HTTP；agent 读取 skill 指令后自行调用 `membox` CLI 命令 |
 
 ### 4.2 数据模型
 
@@ -133,7 +137,9 @@ src/membox/
 ├── extract.py           # LLM 知识提取（Protocol + OpenAI 实现）
 ├── embed.py             # Embedding 计算（Protocol + OpenAI 实现）
 ├── normalize.py         # 谓词归一化、同义词字典
-├── agent.py             # MemoryAgent — 对外统一入口
+├── agent.py             # MemoryAgent — 内部编排层
+├── cli.py               # typer CLI 入口（ingest / query / list 命令）
+├── ast_parser.py        # tree-sitter 代码分析（可选模块）
 └── py.typed             # PEP 561 标记
 ```
 
@@ -146,10 +152,39 @@ src/membox/
 | 三元组唯一性 | `UNIQUE(source_id, target_id, predicate)` | 同一对实体间同一谓词只允许一条边 |
 | LLM/Embedding 解耦 | Protocol | 可注入假实现，测试完全不依赖外部 API |
 | 无 embedding 时 | 回退到字符串精确 + 大小写归一化去重 | 保证无 OpenAI key 时核心功能可用 |
+| Agent 接入方式 | skill 文件（CLI 指令文档） | agent 读取 skill 后自行调 shell 命令，无需 MCP / HTTP |
+| CLI 框架 | typer + rich | 类型注解即接口定义，agent 看 `--help` 即可学会使用 |
+| 代码结构分析 | tree-sitter（可选） | 多语言 AST 解析，提取模块依赖 / 调用图等结构化知识 |
 
-## 5. API 设计
+## 5. 接口设计
 
-### 5.1 公开接口
+### 5.1 CLI 命令（主要接口，面向 coding agent）
+
+Agent 通过 skill 文件学会以下命令，无需理解 Python API：
+
+```bash
+# 摄入文本
+membox ingest "codebase-rag 用 Python 实现" --source "README.md"
+
+# 摄入文件
+membox ingest-file docs/architecture.md --db memory.db
+
+# 查询记忆
+membox query "项目用了哪些技术？" --max-hops 2
+
+# 列出实体
+membox list-entities --db memory.db
+
+# 列出关系
+membox list-relations --db memory.db
+
+# 分析源码结构（tree-sitter，可选）
+membox analyze-src src/ --language python --db memory.db
+```
+
+所有命令支持 `--help`，agent 可自行发现用法。
+
+### 5.2 Python API（高级用法）
 
 ```python
 from membox import MemoryAgent, OpenAIExtractor, OpenAIEmbedder
@@ -161,7 +196,7 @@ agent = MemoryAgent(
 )
 ```
 
-### 5.2 核心方法
+### 5.3 核心方法
 
 ```python
 # 摄入文档 → 自动提取三元组并入库
@@ -211,10 +246,13 @@ agent.list_relations() -> list[Relation]
 ### 运行时
 
 - `pydantic` — 数据模型校验
+- `typer` — CLI 框架（类型注解即命令定义）
+- `rich` — 终端格式化输出
 
-### 可选（仅 live demo 需要）
+### 可选
 
-- `openai` — OpenAI API 客户端
+- `openai` — OpenAI API 客户端（仅 live demo / 真实 LLM 提取时需要）
+- `tree-sitter` — 多语言 AST 解析（仅代码结构分析时需要）
 
 ### 开发
 
@@ -223,7 +261,16 @@ agent.list_relations() -> list[Relation]
 - `mypy >= 1.15` — 类型检查
 - `pre-commit >= 4` — Git hooks
 
-## 8. 未来扩展方向
+## 8. 扩展方向
+
+### 已规划（见 roadmap.md）
+
+| 方向 | 说明 | 阶段 |
+|------|------|------|
+| Skill 文件 | 为各 coding agent 编写 skill 指令文件，教会 agent 使用 CLI | Phase 9 |
+| 代码结构分析 | tree-sitter 多语言 AST 解析，提取模块依赖 / 调用图 / class 结构 | Phase 10 |
+
+### 远期可选
 
 | 方向 | 说明 | 触发条件 |
 |------|------|----------|
@@ -232,5 +279,3 @@ agent.list_relations() -> list[Relation]
 | 置信度与审计 | entities 加 `confidence` / `merged_from` 字段 | 需要人工审核时 |
 | Hybrid Retrieval | BM25 over `documents.content` + 向量检索 | 纯图谱召回不足时 |
 | 时间衰减 | `relation_evidence` 加 `confidence` / `extracted_at` | 需要知识时效性时 |
-| MCP 协议支持 | 暴露为 MCP Server，coding agent 通过标准协议接入 | 多 agent 标准化对接 |
-| HTTP API | 暴露为本地 HTTP 服务 | agent 不方便直接 import 时 |
