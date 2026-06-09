@@ -45,6 +45,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
+  - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
