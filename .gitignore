@@ -1,0 +1,49 @@
+# ── Python ──────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ────────────────
+.venv/
+venv/
+ENV/
+
+# ── Testing / Coverage ─────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.nox/
+
+# ── Type checkers ───────────────────────
+.mypy_cache/
+.pytype/
+
+# ── Ruff ────────────────────────────────
+.ruff_cache/
+
+# ── uv ──────────────────────────────────
+uv.lock
+python_install__/
+
+# ── IDE ─────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ──────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Misc ────────────────────────────────
+*.log
+.env
+.env.*
