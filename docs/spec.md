@@ -152,6 +152,62 @@ When the same source document is re-ingested with updated content, old relations
 - Retrieval excludes superseded relations by default; `--include-superseded` exposes them for auditing.
 - Evidence rows are never deleted — the full provenance trail is always recoverable.
 
+### 3.9 Asynchronous Ingestion (write path)
+
+#### Motivation
+
+Ingestion is LLM-bound: per-chunk extraction plus embedding takes tens of seconds to minutes per document. Callers — coding agents saving memory at session end — must not block on that. Write acceptance must be milliseconds; knowledge-graph materialization is deferred. Reads become eventually consistent, which is acceptable for the memory use case and must be observable (silent staleness is forbidden, consistent with the truncation footer principle in §3.7).
+
+#### Design: queue in SQLite + auto-spawned short-lived worker
+
+No resident daemon. This is a direct application of the project's "no background services by default" constraint: the worker is a transient subprocess that exits when the queue is empty. It is not a daemon — its lifetime is bounded to draining one batch. Processes that need the old blocking behavior use `--sync`; everything else returns immediately with a queue id.
+
+The queue lives in the same SQLite file (WAL mode already supports concurrent writers; no second storage system).
+
+#### Queue table (`ingest_queue`, schema migration v4)
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY` | |
+| `content` | `TEXT NOT NULL` | Raw document text; chunking and extraction happen in the worker |
+| `project` | `TEXT` | Captured at enqueue time |
+| `source_path` | `TEXT` | Captured at enqueue time |
+| `doc_date` | `TEXT` | Captured at enqueue time |
+| `status` | `TEXT NOT NULL DEFAULT 'pending'` | `pending \| processing \| done \| failed` |
+| `retries` | `INTEGER NOT NULL DEFAULT 0` | |
+| `error` | `TEXT` | Last failure message |
+| `enqueued_at` | `TEXT NOT NULL` | |
+| `started_at` | `TEXT` | |
+| `finished_at` | `TEXT` | |
+
+The `worker_lease` key is added to the existing `meta` table (pid + hostname + heartbeat timestamp).
+
+#### Enqueue path (fast)
+
+`membox ingest`, `membox ingest-file`, and `MemoryAgent.ingest*` become: INSERT into `ingest_queue` + spawn worker if none is alive → return queue id immediately. No LLM calls and no chunking occur on this path. CLI prints the queue id and the current pending count.
+
+- `--no-spawn` — suppresses worker spawn; useful in tests and controlled runs where the caller starts the worker explicitly.
+- `--sync` — preserves the old blocking behavior (enqueue then drain inline) for scripts and evaluation pipelines that require determinism. `scripts/eval_memory.py` uses this path.
+
+#### Worker (`membox process`)
+
+Drain loop: claim one pending row at a time via an atomic `UPDATE … WHERE status='pending'` (pending → processing); run the existing M2/M3 pipeline (chunk → extract → embed → store); mark `done` or `failed` (record error message, increment `retries`). Exit when no pending rows remain.
+
+Failed rows stay inspectable. They are retried only via `membox process --retry-failed` (maximum 3 retries; after that the row is permanently failed until manual intervention).
+
+**Single-worker guarantee**: a lease entry in `meta` (key `worker_lease`) encodes pid + hostname + heartbeat timestamp. The worker refreshes the heartbeat after processing each item; lease TTL is ~60 s. A spawner that observes a live lease does not start a second worker. A worker that observes an expired lease takes over ownership and resets any stale `processing` rows back to `pending` (crash recovery).
+
+The worker process is spawned with `start_new_session=True` (detached); its stdout and stderr are appended to a log file adjacent to the database (`<db>.worker.log`).
+
+#### Observability
+
+- `membox queue` — prints row counts per status and the most recent failure entries with their error messages.
+- `membox query` — if `pending + processing > 0`, the coverage footer appends a note such as `(N ingests pending — results may be incomplete)`. This keeps the silent-staleness guarantee from §3.7 intact across the async boundary.
+
+#### Eval and test integration
+
+`scripts/eval_memory.py` uses the `--sync` path — determinism matters more than latency there. A dedicated unit test asserts the async properties: enqueue returns in <100 ms (API layer, excluding interpreter startup, `DummyExtractor` wired to a latency stub), and the queue drains to zero when `membox process` is run.
+
 ## 4. Architectural Design
 
 ### 4.1 Tech Stack
@@ -239,9 +295,11 @@ src/membox/
 │   │   ├── entities.py    # Entity CRUD + find-or-create dedup + aliases
 │   │   ├── relations.py   # Relation CRUD + evidence links
 │   │   ├── documents.py   # Document persistence
-│   │   └── retrieval.py   # BFS multi-hop retrieval
+│   │   ├── retrieval.py   # BFS multi-hop retrieval
+│   │   └── queue.py       # ingest_queue table CRUD + worker lease management (M6)
 │   ├── normalize.py     # Predicate normalization and synonym dictionary
-│   └── agent.py         # MemoryAgent — Orchestration layer
+│   ├── agent.py         # MemoryAgent — Orchestration layer
+│   └── worker.py        # Queue drain loop + crash recovery (M6; spawned as subprocess)
 ├── services/            # Domain capability layer (never speaks HTTP directly)
 │   ├── extraction.py    # LLMExtractor Protocol + Dummy/OpenAI implementations
 │   ├── embedding.py     # Embedder Protocol + Dummy/OpenAI implementations
@@ -253,7 +311,7 @@ src/membox/
 │   └── openai_compat.py # OpenAI-compatible adapter (OpenAI/Ollama/vLLM/DeepSeek via base_url)
 ├── cli/                 # Typer CLI (presentation only)
 │   ├── __init__.py      # App assembly; exposes the `app` entry point
-│   └── commands/        # One module per command group (ingest / query / listing / version)
+│   └── commands/        # One module per command group (ingest / query / listing / version / queue / process)
 └── py.typed             # PEP 561 marker
 ```
 
@@ -301,6 +359,14 @@ membox list-relations --db memory.db --project myrepo
 
 # Analyze source structure (tree-sitter, optional)
 membox analyze-src src/ --language python --db memory.db
+
+# Async ingestion queue (M6)
+membox ingest-file docs/HANDOFF.md --project myrepo  # enqueues and spawns worker; returns in <100ms
+membox ingest-file large.md --sync                   # blocking mode: enqueue + drain inline
+membox ingest-file large.md --no-spawn               # enqueue only; caller starts worker manually
+membox process                                        # drain the queue; exits when empty
+membox process --retry-failed                         # retry failed rows (up to 3 total attempts)
+membox queue                                          # show per-status counts and recent failures
 ```
 
 All commands support `--help`, which allows agents to discover usage details automatically.
@@ -389,7 +455,8 @@ Minimum 80% (`fail_under = 80`), with `show_missing = true`.
 
 | Target | Description | Phase |
 |------|------|------|
-| Memory Quality Validation | Real-corpus evaluation on handoff documents; hybrid retrieval; supersession semantics; local Ollama provider defaults. | Phase 7.5 |
+| Memory Quality Validation | Real-corpus evaluation on handoff documents; hybrid retrieval; supersession semantics; local Ollama provider defaults. | Phase 7.5 (M1–M3, M5) |
+| Async Ingestion Queue | Decouple write acceptance from LLM materialization; transient worker; crash recovery via lease; `process` and `queue` CLI commands. | Phase 7.5 M6 |
 | Skill File | Skill instruction documents to teach agents how to use the CLI. | Phase 9 |
 | Codebase Analysis | Multi-language AST parsing using tree-sitter to extract module dependencies, call graphs, and class structures. | Phase 8 |
 

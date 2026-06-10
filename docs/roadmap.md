@@ -194,6 +194,63 @@ cli.py                         ← Typer commands, each calling the agent
 - [ ] `membox ingest-file docs/HANDOFF.md` works end-to-end against local Ollama
 - [ ] This becomes the substrate for Phase 9's skill file (query at session start, ingest at session end)
 
+### M6 — Asynchronous Ingestion Queue
+
+> **Implementation order note**: M6 is implemented next — before M4 and M5. Coding agents call `ingest` at session end and cannot block on LLM extraction. M6 decouples write acceptance from knowledge-graph materialization so that call-site latency is bounded regardless of document size. M4 (supersession semantics) and M5 (end-to-end close-the-loop) will build on the async write path being stable, so M6 is the logical prerequisite. Revised sequence: **M6 → M4 → M5**.
+
+Ingestion is LLM-bound: per-chunk extraction plus embedding can take tens of seconds to minutes per document. Write acceptance must be milliseconds; knowledge-graph materialization is deferred to a short-lived worker process. Reads are eventually consistent — acceptable for the memory use case — but staleness is never silent.
+
+**No resident daemon.** This is consistent with the project's "no background services by default" constraint. The worker is a transient subprocess that exits when the queue is empty, not a daemon; its lifetime is bounded to the drain of one batch.
+
+#### Queue table (schema migration v4)
+
+New table `ingest_queue` in the same SQLite file (WAL mode already supports concurrent writers; no second storage system):
+
+- `id INTEGER PRIMARY KEY`
+- `content TEXT NOT NULL` — raw document text; all chunking and extraction happen in the worker
+- `project TEXT`, `source_path TEXT`, `doc_date TEXT` — metadata captured at enqueue time
+- `status TEXT NOT NULL DEFAULT 'pending'` — `pending | processing | done | failed`
+- `retries INTEGER NOT NULL DEFAULT 0`, `error TEXT`
+- `enqueued_at TEXT NOT NULL`, `started_at TEXT`, `finished_at TEXT`
+
+#### Enqueue path (fast)
+
+`membox ingest` / `ingest-file` and `MemoryAgent.ingest*` become: INSERT into `ingest_queue` + spawn worker if none is alive → return queue id immediately. No LLM calls, no chunking on this path. CLI prints the queue id and the pending count.
+
+- `--no-spawn` suppresses worker spawn (for tests and controlled runs).
+- `--sync` preserves the old blocking behavior (enqueue + drain inline) for scripts and eval runs that require determinism. `scripts/eval_memory.py` uses this path.
+
+#### Worker (`membox process`)
+
+Drain loop: claim one pending row at a time via atomic `UPDATE … WHERE status='pending'` (pending → processing); chunk → extract → embed → store (existing M2/M3 pipeline); mark `done` or `failed` (record error, increment `retries`). Exits when no pending rows remain.
+
+Failed rows stay inspectable; they are retried only via explicit `membox process --retry-failed` (maximum 3 retries, then permanently failed until manual intervention).
+
+**Single-worker guarantee** via a lease entry in the `meta` table (key `worker_lease`, value encodes pid + hostname + heartbeat timestamp). The worker refreshes its heartbeat after each item; lease TTL is ~60 s. A spawner that finds a live lease does not spawn a second worker. A worker that finds an expired lease takes over and resets any stale `processing` rows back to `pending` (crash recovery).
+
+Worker is spawned as a detached subprocess (`start_new_session=True`); its stdout and stderr are appended to a log file next to the database (e.g. `<db>.worker.log`).
+
+#### Observability
+
+- `membox queue` — prints counts per status plus the most recent failures with their error messages.
+- `membox query` — if `pending + processing > 0`, the coverage footer gains a note such as `(N ingests pending — results may be incomplete)`. Silent staleness is forbidden, consistent with the truncation footer principle.
+
+#### Eval integration
+
+`scripts/eval_memory.py` uses the `--sync` semantics — determinism matters more than latency there. A dedicated test asserts the async path: enqueue returns in <100 ms with a `DummyExtractor` wired to a slow stub, and the queue drains correctly when `membox process` runs.
+
+#### Acceptance criteria (M6)
+
+- [ ] Schema migration v4: `ingest_queue` table created, `worker_lease` key in `meta`
+- [ ] `membox ingest` / `ingest-file` returns in <100 ms for a 5 KB markdown file (measured at the API layer, excluding interpreter startup; `DummyExtractor` wired)
+- [ ] `--sync` flag: enqueue + drain complete inline before the call returns; `eval_memory.py` uses this path
+- [ ] `--no-spawn` flag: enqueue without spawning worker (queue id returned; worker started manually via `membox process`)
+- [ ] `membox process` drains the queue then exits (asserted in a test — no daemon)
+- [ ] `membox queue` prints per-status counts and recent failure details
+- [ ] `membox query` coverage footer includes a pending-ingests note when the queue is non-empty
+- [ ] Crash recovery: a killed worker's `processing` rows return to `pending`; a new worker completes them
+- [ ] `uv run pytest` + ruff + mypy green; coverage ≥ 80%
+
 **Validation**:
 
 - Gold-standard hit rate ≥ 80% overall; temporal-category questions 100%
@@ -256,6 +313,7 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
     └→ Phase 7 OpenAI Integration
          │
          └→ Phase 7.5 Memory Quality Validation
+              │  (M1+M2+M3 complete → M6 async queue → M4 supersession → M5 close-the-loop)
               │
               ├→ Phase 8 tree-sitter (Can be done in parallel)
               ├→ Phase 9 Skill Files (Can be done in parallel)
