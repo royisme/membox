@@ -89,13 +89,14 @@ Every candidate triple *t* reached by BFS receives a composite score:
 score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
 ```
 
-- **`hops(t)`** — BFS distance from the nearest seed entity (0 for seed-adjacent). The BFS lineage must be preserved into the result rather than discarded.
+- **`hops(t)`** — `hops(t) = min(depth(subject), depth(object))`, where seed entities have BFS depth 0; thus a relation incident to a seed entity has `hops(t) = 0`. The BFS lineage must be preserved into the result rather than discarded.
 - **`decay`** — per-hop attenuation, default `0.7`, config field `retrieval.hop_decay`.
-- **`sim(t)`** — cosine similarity between the query embedding and the embedding of the triple rendered as plain text (`"subject predicate object"`), normalised from \[−1, 1\] to \[0, 1\] via `(1 + cos) / 2`. Computed with the configured embedder (`embeddinggemma` locally). If no embedder is configured, `sim(t)` is omitted and its weight redistributes to `bm25` (i.e. α effectively becomes 0).
-- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current candidate set. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
+- **`sim(t)`** — cosine similarity between the query embedding and the embedding of the triple rendered as plain text (`"subject predicate object"`), normalised from \[−1, 1\] to \[0, 1\] via `(1 + cos) / 2`. The triple embedding is computed **once at ingest time** (when the relation is created or updated) and stored alongside the relation; this requires a relation-embedding column/table added by the M3 schema migration. Query time incurs exactly one embedder call — the query string itself. If no embedder is configured, `sim(t)` is omitted and its weight redistributes to `bm25` (i.e. α effectively becomes 0).
+- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current candidate set. **Important**: SQLite FTS5's `bm25()` function returns lower-is-better (negative) raw values; raw scores must be negated before min-max normalisation, otherwise ranking is inverted. If all candidates share the same raw value (degenerate min-max, zero denominator), define `bm25(t) = 0` for all candidates. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
 - **`α`** — vector-vs-lexical mix, default `0.6`, config field `retrieval.alpha`.
 - **Temporal**: superseded relations (M4) are excluded before scoring. No additional recency term in v1; using `doc_date` for confidence decay is listed as a future refinement.
 - All defaults live on `MemboxConfig` in a new `RetrievalConfig` group (`hop_decay`, `alpha`, `budget`, `top_evidence_k`) and are calibration targets for the M3 gold-standard evaluation.
+- **Deterministic tie-breaking**: when composite scores tie (notably the all-zero case where no embedder is configured and no FTS-matching evidence exists), order by `hops(t)` ascending, then by newest evidence (`doc_date` / `extracted_at`) descending. Ranking must be fully deterministic across identical inputs.
 
 #### Token-budget truncation
 
@@ -111,7 +112,9 @@ score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
 - **Greedy fill**: sort items by score descending; add each item if its estimated cost fits the remaining budget, else skip it and continue down the list (best-effort knapsack, not first-fit-stop). Stop when the list is exhausted or the remaining budget falls below a minimum item size.
 - Items have two granularities with separate costs:
   - The **triple line** itself (cheap).
-  - Its **attached evidence snippet** (expensive). Evidence is only ever attached for the top-*K* scored triples (*K* default `3`, config `retrieval.top_evidence_k`). Each evidence snippet is the markdown section chunk it came from (M2 chunking), never the whole document.
+  - Its **attached evidence snippet** (expensive). An evidence snippet is only eligible for the knapsack if its parent triple was already admitted within budget. Evidence is only ever attached for the top-*K* scored triples (*K* default `3`, config `retrieval.top_evidence_k`). Each evidence snippet is the markdown section chunk it came from (M2 chunking), never the whole document.
+- The coverage footer's own cost (a constant ~20 tokens) is excluded from the budget calculation — it is always appended regardless.
+- Because triples are grouped by subject at render time, actual output may be slightly less than the sum of per-item token estimates (the estimator is conservative); this is acceptable.
 
 #### Compact output format
 
