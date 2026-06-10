@@ -2,8 +2,8 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-10 (session 3 — Phase 7.5 designed + M1/M2/M3 implemented; first real-corpus baseline run)
-**Current phase**: Phase 7.5 in progress (M1-M3 merged; M6 spec awaiting review; M4/M5 not started). Phase 8 (AST) deliberately deferred until after 7.5.
+**Last updated**: 2026-06-10 (session 4 — M6 async ingestion queue implemented)
+**Current phase**: Phase 7.5 in progress (M1-M3 + M6 done; M4/M5 not started). Phase 8 (AST) deliberately deferred until after 7.5.
 
 ---
 
@@ -19,14 +19,18 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 - **M3 merged**: schema v3 (relation embeddings as float32 BLOB; FTS5 external-content table + sync triggers), spec §3.7 context-budgeted retrieval (composite scoring, greedy token-budget knapsack, subject-grouped compact output with mandatory coverage footer — now the DEFAULT query path), `RetrievalConfig`, meta-table embedder guard, `scripts/eval_memory.py`.
 - **Hardening from first real runs**: oversized-section sub-chunking + per-chunk failure isolation + explicit `max_tokens` (a 7k-token section had crashed the whole corpus ingest); extraction prompt direction example (small models swapped subject/object).
 - **First real baseline evaluation completed** (gemma-4-E2B + qwen3-embedding via Ollama): **11.5% hit rate (3/26)**. Failure analysis below — this number is the point of 7.5, not a setback.
-- **M6 "Asynchronous Ingestion Queue" specced** (branch `feature/phase-7.5-m6-queue-spec`, commit `fe20a53`, NOT yet merged): user identified that synchronous ingestion blocks callers for minutes; design = SQLite queue table + auto-spawned short-lived worker (lease in meta table, exits when drained — reconciled with no-daemon constraint).
+- **M6 "Asynchronous Ingestion Queue" specced** (branch `feature/phase-7.5-m6-queue-spec`, commit `fe20a53`): user identified that synchronous ingestion blocks callers for minutes; design = SQLite queue table + auto-spawned short-lived worker (lease in meta table, exits when drained — reconciled with no-daemon constraint).
+
+### Session 4 (2026-06-10)
+- **M6 spec merged to main**, then **M6 implemented** (branch `feature/phase-7.5-m6-async-queue`): schema v4 `ingest_queue` table; `QueueOps` store mixin (enqueue/claim/done/failed/retry, JSON `worker_lease` in meta with 60s TTL, expired-lease takeover resets stale `processing` rows); `core/worker.py` (`drain_queue` + `spawn_worker` detached subprocess logging to `<db>.worker.log`); `MemoryAgent.enqueue`/`enqueue_file`/`ingest_content` (the latter extracted from `ingest_file` so the worker reuses the exact M2/M3 pipeline); CLI `ingest`/`ingest-file` async by default with `--sync`/`--no-spawn`, new `membox process` (`--retry-failed`, max 3) and `membox queue` commands; query output appends "(N ingest(s) pending — results may be incomplete)" when the queue is non-empty. `python -m membox.cli` entry added for the worker spawn. All M6 acceptance criteria ticked in roadmap; 351 tests, ~93% coverage, mypy strict + ruff clean. End-to-end verified: real ingest-file enqueues in <100ms, detached worker drains and exits, lease released.
+- Note: `scripts/eval_memory.py` already used the synchronous API (`agent.ingest_file`), which is unchanged — determinism preserved without modification.
 
 ---
 
 ## Current state
 
-- **main = `58064c3`**: Phases 1-7 + Phase 7.5 spec + M1 + M2 + M3 + eval/model fixes all merged. 314 tests, ~92% coverage, mypy strict + ruff clean.
-- **Pending branch**: `feature/phase-7.5-m6-queue-spec` (M6 async-queue spec, docs-only) — awaiting user review/merge.
+- **main**: Phases 1-7 + Phase 7.5 spec (incl. M6 spec) + M1 + M2 + M3 + eval/model fixes all merged.
+- **Pending branch**: `feature/phase-7.5-m6-async-queue` (M6 implementation) — awaiting user review/merge. 351 tests, ~93% coverage, mypy strict + ruff clean.
 - **Old phase 1-7 feature branches and `develop` still exist** but are historical; main is authoritative. Safe to delete after confirmation.
 - **Baseline eval DB**: `/tmp/membox-eval-m3.db` (51 chunks ingested, 600 entities / 321 relations, 7 chunks failed on 2048-token completion limit). Rerun: `uv run python scripts/eval_memory.py --db <path>`.
 
@@ -42,7 +46,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Open questions / decisions needed
 
-1. **M6 spec branch review** — merge `feature/phase-7.5-m6-queue-spec`? Then implementation order is M6 → retrieval fallback → extraction quality → M4 → M5.
+1. **M6 implementation branch review** — merge `feature/phase-7.5-m6-async-queue`? (The docs-only spec branch was merged to main this session.) Then order is retrieval fallback → extraction quality → M4 → M5.
 2. **Retrieval fallback design (proposed, unconfirmed)**: baseline's biggest killer is seed-resolution failure (~half of misses returned only an empty footer; BM25 never fires because it only scores BFS-reached triples). Proposal: when seeds resolve to nothing (or graph recall is empty), fall back to direct FTS5 search over evidence chunks. Awaiting user confirmation.
 3. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Options: stricter prompt + few-shot, retry with smaller sub-chunks, or stronger local model. Not yet decided.
 4. **Ollama throughput**: sync ingest of 51 chunks ≈ 1-2h (serial: per-chunk generation + ~900 single embedding calls). Batch the embed calls (Ollama API supports list input) as part of M6 worker work.
@@ -53,7 +57,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. User reviews + merges M6 spec branch; implement M6 (schema v4 `ingest_queue`, `membox process`/`queue` commands, lease, crash recovery; acceptance: enqueue <100ms, no-daemon test, worker crash recovery).
+1. User reviews + merges `feature/phase-7.5-m6-async-queue` (M6 implementation — done this session).
 2. Implement FTS fallback seeding (pending confirmation of #2 above); rerun baseline, expect large single-hop/multi-hop recovery.
 3. Extraction-quality iteration + batched embeddings; rerun eval.
 4. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.

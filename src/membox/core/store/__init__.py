@@ -16,6 +16,7 @@ from membox.core.store.documents import DocumentOps
 from membox.core.store.entities import EntityOps, _blob_to_vec, _cosine, _vec_to_blob
 from membox.core.store.meta_guard import check_embedder_guard, record_embedder_meta
 from membox.core.store.migrations import apply_migrations
+from membox.core.store.queue import QueueOps
 from membox.core.store.relations import RelationOps
 from membox.core.store.retrieval import RetrievalOps
 
@@ -33,7 +34,7 @@ __all__ = [
 ]
 
 
-class KnowledgeStore(DocumentOps, EntityOps, RelationOps, RetrievalOps):
+class KnowledgeStore(DocumentOps, EntityOps, RelationOps, RetrievalOps, QueueOps):
     """Thread-safe SQLite-backed knowledge graph store.
 
     Uses per-thread connections, WAL mode, and an RLock to guard the

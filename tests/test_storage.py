@@ -466,7 +466,7 @@ def test_cli_ingest_writes_to_db(tmp_path: Path) -> None:
 
     runner = CliRunner()
     db = str(tmp_path / "cli.db")
-    result = runner.invoke(app, ["ingest", "test text", "--db", db])
+    result = runner.invoke(app, ["ingest", "test text", "--db", db, "--sync"])
     assert result.exit_code == 0, result.output
     assert "Ingested" in result.output
 
@@ -493,7 +493,7 @@ def test_cli_ingest_file_works(tmp_path: Path) -> None:
     f = tmp_path / "data.txt"
     f.write_text("Alice works at Acme Corp.")
     runner = CliRunner()
-    result = runner.invoke(app, ["ingest-file", str(f), "--db", str(tmp_path / "cli.db")])
+    result = runner.invoke(app, ["ingest-file", str(f), "--db", str(tmp_path / "cli.db"), "--sync"])
     assert result.exit_code == 0, result.output
     assert "Ingested" in result.output
 

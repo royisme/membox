@@ -103,15 +103,27 @@ class TestOpenAIEmbedderDimensions:
 class TestCliIngest:
     """CLI ingest behavior under the Dummy backend."""
 
-    def test_ingest_without_api_key_prints_noop_notice(
+    def test_ingest_sync_without_api_key_prints_noop_notice(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         db = tmp_path / "memory.db"
-        result = runner.invoke(app, ["ingest", "hello world", "--db", str(db)])
+        result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--sync"])
         assert result.exit_code == 0
         assert "no-op extractor" in result.stderr
         assert "Ingested." in result.stdout
+
+    def test_ingest_default_is_async_enqueue(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # M6: the default path enqueues without LLM calls or chunking; the
+        # no-op notice belongs to the materialization path, not the enqueue.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--no-spawn"])
+        assert result.exit_code == 0
+        assert "Enqueued" in result.stdout
+        assert "no-op extractor" not in result.stderr
 
     def test_ingest_no_llm_flag_forces_dummy_with_key_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -120,17 +132,20 @@ class TestCliIngest:
         # (the Dummy path makes no network calls).
         monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-key-no-network")
         db = tmp_path / "memory.db"
-        result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--no-llm"])
+        result = runner.invoke(
+            app, ["ingest", "hello world", "--db", str(db), "--no-llm", "--sync"]
+        )
         assert result.exit_code == 0
         assert "no-op extractor" in result.stderr
 
-    def test_ingest_writes_document_row_even_with_dummy(
+    def test_ingest_sync_writes_document_row_even_with_dummy(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         db = tmp_path / "memory.db"
         result = runner.invoke(
-            app, ["ingest", "some document text", "--db", str(db), "--source", "unit-test"]
+            app,
+            ["ingest", "some document text", "--db", str(db), "--source", "unit-test", "--sync"],
         )
         assert result.exit_code == 0
         conn = sqlite3.connect(db)
@@ -139,6 +154,22 @@ class TestCliIngest:
         finally:
             conn.close()
         assert count == 1
+
+    def test_ingest_async_writes_queue_row_not_document(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        result = runner.invoke(app, ["ingest", "some document text", "--db", str(db), "--no-spawn"])
+        assert result.exit_code == 0
+        conn = sqlite3.connect(db)
+        try:
+            docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            queued = conn.execute("SELECT COUNT(*) FROM ingest_queue").fetchone()[0]
+        finally:
+            conn.close()
+        assert docs == 0
+        assert queued == 1
 
     def test_ingest_file_missing_path_exits_1(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -156,7 +187,18 @@ class TestCliIngest:
         db = tmp_path / "memory.db"
         doc = tmp_path / "doc.md"
         doc.write_text("membox is a memory layer", encoding="utf-8")
-        result = runner.invoke(app, ["ingest-file", str(doc), "--db", str(db)])
+        result = runner.invoke(app, ["ingest-file", str(doc), "--db", str(db), "--no-spawn"])
+        assert result.exit_code == 0
+        assert "Enqueued" in result.stdout
+
+    def test_ingest_file_sync_prints_noop_notice(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        doc = tmp_path / "doc.md"
+        doc.write_text("membox is a memory layer", encoding="utf-8")
+        result = runner.invoke(app, ["ingest-file", str(doc), "--db", str(db), "--sync"])
         assert result.exit_code == 0
         assert "no-op extractor" in result.stderr
 

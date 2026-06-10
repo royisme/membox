@@ -34,6 +34,12 @@ Migration 0003 (M3 — Hybrid Retrieval) adds two structures:
    functions when needed.  Three ``AFTER INSERT / UPDATE / DELETE`` triggers on
    ``documents`` keep ``documents_fts`` in sync automatically.  A backfill
    ``INSERT INTO documents_fts`` seeds existing rows during the migration.
+
+Migration 0004 (M6 — Asynchronous Ingestion Queue) creates the
+``ingest_queue`` table: raw document text plus metadata captured at enqueue
+time, drained by a short-lived worker process (spec §3.9).  The
+``worker_lease`` single-worker guarantee reuses the existing ``meta`` table
+(no schema change needed for the lease itself).
 """
 
 from __future__ import annotations
@@ -209,10 +215,29 @@ def _migrate_0003(conn: sqlite3.Connection) -> None:
     )
 
 
+_DDL_0004 = """
+CREATE TABLE IF NOT EXISTS ingest_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    content     TEXT    NOT NULL,
+    project     TEXT,
+    source_path TEXT,
+    doc_date    TEXT,
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    retries     INTEGER NOT NULL DEFAULT 0,
+    error       TEXT,
+    enqueued_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    started_at  TEXT,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_queue_status ON ingest_queue(status);
+"""
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
     (3, _migrate_0003),
+    (4, _DDL_0004),
 ]
 
 
