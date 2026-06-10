@@ -58,7 +58,7 @@ Retrieval results contain the complete paths and original source text (evidence)
 A three-tier cascading strategy to prevent the same concept from being created as duplicate entities:
 
 1. **Exact Alias Matching** — Merges directly if an alias matches in the alias table.
-2. **Embedding Similarity** — Considers entities of the same type as identical if cosine similarity is ≥ 0.85.
+2. **Embedding Similarity** — Considers entities of the same type as identical if cosine similarity ≥ `disambiguation_threshold` (configurable; default 0.85 for OpenAI embeddings, 0.70 preset for `embeddinggemma` via Ollama).
 3. **Creation** — Creates a new entity if the first two checks miss.
 
 ### 3.5 Predicate Normalization
@@ -67,6 +67,90 @@ Normalizes semantically equivalent predicates into standard forms:
 
 - `developed` / `develop` / `开发` → `develops`
 - Lowercase normalization + English/Chinese synonym dictionary.
+
+### 3.6 Hybrid Retrieval
+
+When graph-only traversal is insufficient (e.g., long natural-language sentences, markdown prose where entities are implicit), membox fuses two retrieval signals:
+
+- **Graph traversal** — BFS along relation edges (existing `max_hops` mechanism).
+- **FTS5 BM25 keyword search** — Full-text search over `documents.content` using SQLite's built-in FTS5 engine.
+
+Results from both signals are merged before being assembled into the context prompt. The `--project` filter scopes retrieval to a single project; omitting it queries the global database.
+
+### 3.7 Context-Budgeted Retrieval (scoring, truncation, compaction)
+
+**Design principle**: the SQLite store holds the full graph and raw evidence; `query` returns the most relevant slice within a caller-declared token budget, not everything reachable. No LLM is involved in the read path — pruning is pure ranking plus budgeting.
+
+#### Scoring
+
+Every candidate triple *t* reached by BFS receives a composite score:
+
+```
+score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
+```
+
+- **`hops(t)`** — `hops(t) = min(depth(subject), depth(object))`, where seed entities have BFS depth 0; thus a relation incident to a seed entity has `hops(t) = 0`. The BFS lineage must be preserved into the result rather than discarded.
+- **`decay`** — per-hop attenuation, default `0.7`, config field `retrieval.hop_decay`.
+- **`sim(t)`** — cosine similarity between the query embedding and the embedding of the triple rendered as plain text (`"subject predicate object"`), normalised from \[−1, 1\] to \[0, 1\] via `(1 + cos) / 2`. The triple embedding is computed **once at ingest time** (when the relation is created or updated) and stored alongside the relation; this requires a relation-embedding column/table added by the M3 schema migration. Query time incurs exactly one embedder call — the query string itself. If no embedder is configured, `sim(t)` is omitted and its weight redistributes to `bm25` (i.e. α effectively becomes 0).
+- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current candidate set. **Important**: SQLite FTS5's `bm25()` function returns lower-is-better (negative) raw values; raw scores must be negated before min-max normalisation, otherwise ranking is inverted. If all candidates share the same raw value (degenerate min-max, zero denominator), define `bm25(t) = 0` for all candidates. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
+- **`α`** — vector-vs-lexical mix, default `0.6`, config field `retrieval.alpha`.
+- **Temporal**: superseded relations (M4) are excluded before scoring. No additional recency term in v1; using `doc_date` for confidence decay is listed as a future refinement.
+- All defaults live on `MemboxConfig` in a new `RetrievalConfig` group (`hop_decay`, `alpha`, `budget`, `top_evidence_k`) and are calibration targets for the M3 gold-standard evaluation.
+- **Deterministic tie-breaking**: when composite scores tie (notably the all-zero case where no embedder is configured and no FTS-matching evidence exists), order by `hops(t)` ascending, then by newest evidence (`doc_date` / `extracted_at`) descending. Ranking must be fully deterministic across identical inputs.
+
+#### Token-budget truncation
+
+- CLI and API: `membox query --budget <tokens>` (default `2000`, config `retrieval.budget`). Callers (e.g. the Phase 9 agent skill) declare how much context they are willing to spend.
+- **Deterministic token estimator** (no tokeniser dependency):
+
+  ```
+  est_tokens(s) = (# CJK chars in s) + ceil((# non-CJK chars) / 4)
+  ```
+
+  Documented as an approximation; consistency matters more than accuracy.
+
+- **Greedy fill**: sort items by score descending; add each item if its estimated cost fits the remaining budget, else skip it and continue down the list (best-effort knapsack, not first-fit-stop). Stop when the list is exhausted or the remaining budget falls below a minimum item size.
+- Items have two granularities with separate costs:
+  - The **triple line** itself (cheap).
+  - Its **attached evidence snippet** (expensive). An evidence snippet is only eligible for the knapsack if its parent triple was already admitted within budget. Evidence is only ever attached for the top-*K* scored triples (*K* default `3`, config `retrieval.top_evidence_k`). Each evidence snippet is the markdown section chunk it came from (M2 chunking), never the whole document.
+- The coverage footer's own cost (a constant ~20 tokens) is excluded from the budget calculation — it is always appended regardless.
+- Because triples are grouped by subject at render time, actual output may be slightly less than the sum of per-item token estimates (the estimator is conservative); this is acceptable.
+
+#### Compact output format
+
+- Triples are grouped by subject to avoid repeating entity names:
+
+  ```
+  membox: uses SQLite | has_phase 7.5 | next_step merge-branches
+  ```
+
+- Within each subject group, predicates are ordered by score descending.
+- An evidence block (top-*K* triples only) is printed after the triple groups, each entry tagged with `project / source_path / section / doc_date` provenance, e.g.:
+
+  ```
+  [membox docs/HANDOFF.md ## Current state 2026-06-09]
+  ```
+
+- A trailing one-line footer reports coverage honestly:
+
+  ```
+  (returned 18/42 triples, ~1,950/2,000 tokens; raise --budget for more)
+  ```
+
+  Silent truncation is forbidden; the caller must be able to see that more results exist.
+
+#### Evaluation tie-in (M3)
+
+`scripts/eval_memory.py` reports, per gold question: **hit/miss** AND **output token estimate**. Acceptance is judged on both dimensions: hit rate ≥ 80% within the default 2000-token budget (i.e. recall must be achieved while staying cheap, not by dumping everything).
+
+### 3.8 Supersession Semantics
+
+When the same source document is re-ingested with updated content, old relations derived from that source may become stale. Membox tracks this via a self-referencing `superseded_by` foreign key on the `relations` table:
+
+- A relation is **active** when `superseded_by IS NULL`.
+- When a newer document version produces a relation with the same subject + predicate but a different object, the old relation is marked `superseded_by = <new_relation_id>`.
+- Retrieval excludes superseded relations by default; `--include-superseded` exposes them for auditing.
+- Evidence rows are never deleted — the full provenance trail is always recoverable.
 
 ## 4. Architectural Design
 
@@ -104,19 +188,24 @@ CREATE TABLE entity_aliases (
 
 -- Relations (Triples)
 CREATE TABLE relations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id   INTEGER NOT NULL REFERENCES entities(id),
-    target_id   INTEGER NOT NULL REFERENCES entities(id),
-    predicate   TEXT    NOT NULL,
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id      INTEGER NOT NULL REFERENCES entities(id),
+    target_id      INTEGER NOT NULL REFERENCES entities(id),
+    predicate      TEXT    NOT NULL,
+    superseded_by  INTEGER REFERENCES relations(id),  -- NULL = active; set when a newer version supersedes this relation
     UNIQUE(source_id, target_id, predicate)  -- Triple deduplication
 );
 
--- Documents (Raw Text)
+-- Documents (Raw Text + Scoping Metadata)
 CREATE TABLE documents (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    content     TEXT    NOT NULL,
-    source      TEXT,                        -- Source identifier (file path, URL, etc.)
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    content      TEXT    NOT NULL,
+    source       TEXT,                        -- Source identifier (file path, URL, etc.)
+    project      TEXT,                        -- Repository / directory name (for --project scoping)
+    source_path  TEXT,                        -- Canonical file path of the originating document
+    section      TEXT,                        -- Section heading (e.g. "## Summary") if chunked by heading
+    doc_date     TEXT,                        -- ISO-8601 date of the source document snapshot
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Relation-Document Evidence (Many-to-Many)
@@ -125,6 +214,13 @@ CREATE TABLE relation_evidence (
     document_id  INTEGER NOT NULL REFERENCES documents(id),
     PRIMARY KEY (relation_id, document_id)
 );
+
+-- Database Metadata (written once at creation; mismatch triggers a clear error)
+CREATE TABLE meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
+-- Rows: embedding_model, embedding_dimensions
 ```
 
 ### 4.3 Core Modules
@@ -175,6 +271,11 @@ src/membox/
 | Codebase Analysis | tree-sitter (optional) | Multi-language AST parsing to extract structural knowledge like module dependencies and call graphs. |
 | Service/Adapter Layering | `services/` (domain capabilities) over `providers/` (protocol adapters) | Services own prompts, parsing, and fallback policy and never speak HTTP; providers own auth, request shape, and error normalization only — adding a new backend (e.g. Gemini) touches `providers/` plus config, not domain logic. |
 | Schema Migrations | `PRAGMA user_version` + ordered `MIGRATIONS` list | Each open applies pending migrations transactionally and bumps `user_version`; migration 0001 is the full idempotent DDL (`CREATE TABLE IF NOT EXISTS`) so pre-migration databases pass through unchanged. |
+| Single Global DB | Default `~/.membox/membox.db`; override via `--db` flag or `MEMBOX_DB` env var | Entities and relations are global (enabling cross-project queries); documents are scoped by `project` / `source_path` columns. No per-project files, no ATTACH federation. |
+| Embedding Model Guard | `meta` table stores `embedding_model` + `embedding_dimensions` at creation | On open, mismatch between stored and configured values fails with a clear error instructing re-embedding, preventing vector space corruption (e.g. 768-dim vs 1536-dim). |
+| Disambiguation Threshold | `MemboxConfig.disambiguation_threshold` (default 0.85) | Threshold is provider-dependent: 0.85 for OpenAI; 0.70 preset for `embeddinggemma` via Ollama. Calibrated empirically — same-entity pairs 0.70–0.92, different-entity pairs 0.53–0.61 on embeddinggemma. |
+| Supersession (No-Delete) | `relations.superseded_by` FK; old rows marked, never deleted | Preserves full provenance trail; retrieval filters active relations by default; `--include-superseded` enables auditing. |
+| Hybrid Retrieval | FTS5 BM25 fused with graph BFS | SQLite FTS5 is zero-dependency; covers natural-language documents where entities are implicit and pure graph recall falls short. |
 
 ## 5. Interface Design
 
@@ -186,17 +287,17 @@ Agents learn to use the following commands via the skill file without needing to
 # Ingest text
 membox ingest "codebase-rag is implemented in Python" --source "README.md"
 
-# Ingest file
+# Ingest file (with optional project scoping metadata)
 membox ingest-file docs/architecture.md --db memory.db
+membox ingest-file docs/HANDOFF.md --project myrepo --doc-date 2026-06-09
 
-# Query memory
+# Query memory (scoped to a project, or global when --project is omitted)
 membox query "What technologies are used in the project?" --max-hops 2
+membox query "What is the current state of the auth refactor?" --project myrepo
 
-# List entities
+# List entities / relations (optional --project filter)
 membox list-entities --db memory.db
-
-# List relations
-membox list-relations --db memory.db
+membox list-relations --db memory.db --project myrepo
 
 # Analyze source structure (tree-sitter, optional)
 membox analyze-src src/ --language python --db memory.db
@@ -273,6 +374,7 @@ Minimum 80% (`fail_under = 80`), with `show_missing = true`.
 
 - `openai` — OpenAI API client (needed for live demo and real LLM extraction)
 - `tree-sitter` — Multi-language AST parsing (needed for codebase structure analysis)
+- Ollama (local server, not a Python package) — Enables `embeddinggemma` (768-dim) and `huihui_ai/qwen3.5-abliterated:4b-Claude` extraction without an API key; accessed via the `openai_compat` provider adapter pointed at `http://localhost:11434`
 
 ### Development
 
@@ -287,8 +389,9 @@ Minimum 80% (`fail_under = 80`), with `show_missing = true`.
 
 | Target | Description | Phase |
 |------|------|------|
+| Memory Quality Validation | Real-corpus evaluation on handoff documents; hybrid retrieval; supersession semantics; local Ollama provider defaults. | Phase 7.5 |
 | Skill File | Skill instruction documents to teach agents how to use the CLI. | Phase 9 |
-| Codebase Analysis | Multi-language AST parsing using tree-sitter to extract module dependencies, call graphs, and class structures. | Phase 10 |
+| Codebase Analysis | Multi-language AST parsing using tree-sitter to extract module dependencies, call graphs, and class structures. | Phase 8 |
 
 ### Future Options
 
@@ -297,5 +400,4 @@ Minimum 80% (`fail_under = 80`), with `show_missing = true`.
 | Vector Index Upgrade | Replace `find_similar_entity` with sqlite-vss, FAISS, or Lance. | Entity count > ~100k |
 | Automatic Predicate Clustering | Automatic synonym predicate discovery via embedding clustering. | Predicate type explosion |
 | Confidence & Auditing | Add `confidence` / `merged_from` fields to entities. | When human-in-the-loop review is required |
-| Hybrid Retrieval | BM25 over `documents.content` + Vector search. | Pure graph recall becomes insufficient |
-| Temporal Decay | Add `confidence` / `extracted_at` to `relation_evidence`. | Time-sensitive knowledge requirements |
+| Temporal Confidence Decay | Add a `confidence` score to `relation_evidence` that decays over time for time-sensitive facts. | Requirements beyond supersession (e.g. probabilistic staleness scoring) |

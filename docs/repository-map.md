@@ -11,6 +11,8 @@ Functional Python files include their module header so tools can reuse the file 
 - `.claude/`
   - `.claude/scheduled_tasks.lock`
 - `.crew/`
+  - `.crew/audit/`
+    - `.crew/audit/prune.jsonl`
   - `.crew/state/`
     - `.crew/state/metrics/`
       - `.crew/state/metrics/2026-06-10.jsonl`

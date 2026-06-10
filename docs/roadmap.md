@@ -149,7 +149,63 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: `OPENAI_API_KEY=sk-... uv run python examples/demo.py` runs successfully.
 
+## Phase 7.5 — Memory Quality Validation
+
+**Goal**: Validate that membox functions as memory on real, evolving corpora before advancing to AST analysis. Phases 1–7 exercised mechanics with synthetic text only; this phase ingests session handoff documents to close three gaps: markdown-structured input, temporal evolution (handoffs are rewritten in place each session), and recall over long sentences where pure graph traversal may be insufficient.
+
+### M1 — Evaluation Corpus & Gold Standard
+
+- [ ] Snapshot ~10 real `HANDOFF.md` files from across the user's projects into `eval/corpus/`
+- [ ] Hand-author 20–30 gold QA pairs covering three categories:
+  - [ ] Single-hop facts
+  - [ ] Multi-hop (cross-document / cross-project)
+  - [ ] Temporal — "current state" questions whose answer must come from the **latest** document version
+
+### M2 — Ingestion Hardening
+
+- [ ] Markdown-aware chunking: split on `##` section boundaries before extraction
+- [ ] Persist document metadata: `project`, `source_path`, `section`, `doc_date` (new columns on `documents`)
+- [ ] Idempotent re-ingest: re-ingesting the same `source_path` creates a new document version instead of duplicating raw content
+- [ ] CLI: `membox ingest-file` accepts and stores metadata fields; `--project` filter on query and listing commands
+
+### M3 — Baseline Evaluation & Hybrid Retrieval
+
+- [ ] `scripts/eval_memory.py`: ingest corpus → run gold questions → report per-category hit rates
+- [ ] CI smoke variant: offline run using fake extractor/embedder (no Ollama required)
+- [ ] Full evaluation: manual run against local Ollama, results recorded in `eval/results/`
+- [ ] Measure graph-only recall baseline first
+- [ ] Implement SQLite FTS5 BM25 over `documents.content`, fused with graph retrieval (promotes hybrid retrieval from spec's future-options list into committed scope)
+- [ ] **Scored rerank**: implement composite scoring formula `score(t) = decay^hops(t) × (α·sim(t) + (1−α)·bm25(t))` with BFS lineage preservation; add `RetrievalConfig` group to `MemboxConfig` (`hop_decay=0.7`, `alpha=0.6`, `budget=2000`, `top_evidence_k=3`); schema migration adds a relation-embedding column so `sim(t)` is precomputed at ingest time (one embedder call per relation write, not per query); negate raw FTS5 `bm25()` values before min-max normalisation (SQLite returns lower-is-better negatives — inverting this is a known gotcha)
+- [ ] **Token-budget truncation**: implement deterministic token estimator (`est_tokens(s) = CJK_count + ceil(non_CJK_count / 4)`); greedy best-effort knapsack fill sorted by score descending; expose `membox query --budget <tokens>` CLI flag
+- [ ] **Compact subject-grouped output format**: group triples by subject with predicates ordered by score descending; print top-K evidence snippets with `project/source_path/section/doc_date` provenance tags; append honest coverage footer `(returned N/M triples, ~X/Y tokens; raise --budget for more)` — silent truncation is forbidden
+- [ ] **Eval metric — output token count**: extend `scripts/eval_memory.py` to report both hit/miss and output token estimate per gold question; acceptance criterion is hit rate ≥ 80% *within* the default 2000-token budget
+
+### M4 — Supersession Semantics (Schema Migration)
+
+- [ ] `relations` table gains nullable `superseded_by` column (FK → `relations.id`, self-referencing)
+- [ ] When a newer version of the same source document yields a relation with the same subject + predicate but a different object, the old relation is marked `superseded_by = <new_relation_id>`
+- [ ] Retrieval excludes superseded relations by default
+- [ ] `--include-superseded` flag on `membox query` exposes them for auditing
+- [ ] Old evidence is never deleted
+- [ ] Migration delivered via existing `PRAGMA user_version` mechanism (no registry, no schema reset)
+
+### M5 — Close the Loop
+
+- [ ] `membox ingest-file docs/HANDOFF.md` works end-to-end against local Ollama
+- [ ] This becomes the substrate for Phase 9's skill file (query at session start, ingest at session end)
+
+**Validation**:
+
+- Gold-standard hit rate ≥ 80% overall; temporal-category questions 100%
+- Memory evaluation (`scripts/eval_memory.py`) reports both hit rate and output token estimate; acceptance requires hit rate ≥ 80% within the default 2000-token budget (recall achieved without dumping everything)
+- Re-ingesting an updated handoff changes the answers to "current state" questions
+- `uv run pytest` + ruff + mypy green; coverage ≥ 80%
+
+---
+
 ## Phase 8 — Codebase Structural Analysis (tree-sitter)
+
+> **Note**: Phase 8 is deliberately sequenced after Phase 7.5. The supersession semantics and hybrid retrieval introduced in 7.5 are load-bearing for the temporal recall patterns that codebase analysis will exercise.
 
 **Goal**: Extract structural codebase knowledge using AST parsing.
 
@@ -199,10 +255,12 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
     │
     └→ Phase 7 OpenAI Integration
          │
-         ├→ Phase 8 tree-sitter (Can be done in parallel)
-         ├→ Phase 9 Skill Files (Can be done in parallel)
+         └→ Phase 7.5 Memory Quality Validation
               │
-              └→ Phase 10 Release
+              ├→ Phase 8 tree-sitter (Can be done in parallel)
+              ├→ Phase 9 Skill Files (Can be done in parallel)
+                   │
+                   └→ Phase 10 Release
 ```
 
 **Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.
