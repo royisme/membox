@@ -6,7 +6,7 @@ import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from membox.core.chunking import chunk_markdown
+from membox.core.chunking import _DEFAULT_MAX_TOKENS, chunk_markdown
 from membox.core.normalize import normalize_name, normalize_predicate
 from membox.core.store import KnowledgeStore
 from membox.model.schema import (
@@ -119,7 +119,8 @@ class MemoryAgent:
         self,
         file_path: Path,
         metadata: IngestMetadata | None = None,
-    ) -> list[dict[str, int]]:
+        chunk_max_tokens: int = _DEFAULT_MAX_TOKENS,
+    ) -> list[dict[str, int | str]]:
         """Ingest a file, chunking markdown documents by ``##`` section headings.
 
         Each markdown section is extracted separately so entity/relation context
@@ -127,6 +128,15 @@ class MemoryAgent:
         single document.  The ``source_path`` drives idempotent re-ingest
         versioning: re-ingesting the same file creates new document rows at the
         next version number; old rows are never deleted.
+
+        Sections whose estimated token count exceeds *chunk_max_tokens* are
+        further split on paragraph boundaries before extraction (see
+        :func:`~membox.core.chunking.chunk_markdown`).
+
+        Extraction failures for individual chunks are caught and recorded in
+        the result list rather than propagating.  The caller inspects the
+        returned list for entries that contain an ``"error"`` key.
+        ``KeyboardInterrupt`` is never caught and always propagates immediately.
 
         Judgment call (spec does not specify default for ``project``):
         ``project`` defaults to the name of the nearest git repository root
@@ -143,9 +153,15 @@ class MemoryAgent:
                 doc_date).  If ``source_path`` is omitted, the resolved absolute
                 path of ``file_path`` is used.  If ``doc_date`` is omitted, the
                 file's mtime date (ISO-8601) is used.
+            chunk_max_tokens: Maximum estimated tokens per chunk before
+                paragraph-level sub-chunking is applied.  Passed directly to
+                :func:`~membox.core.chunking.chunk_markdown`.
 
         Returns:
-            List of per-chunk ingest result dicts (doc_id, entities, relations).
+            List of per-chunk result dicts.  Successful chunks have keys
+            ``doc_id``, ``entities``, and ``relations``.  Failed chunks have
+            keys ``section`` (section title, may be ``None``) and ``error``
+            (string representation of the exception).
 
         Raises:
             FileNotFoundError: If ``file_path`` does not exist.
@@ -166,25 +182,37 @@ class MemoryAgent:
         suffix = resolved.suffix.lower()
 
         if suffix in {".md", ".markdown"}:
-            raw_chunks = chunk_markdown(content)
+            raw_chunks = chunk_markdown(content, max_tokens=chunk_max_tokens)
         else:
             raw_chunks = [(None, content)]
 
-        results: list[dict[str, int]] = []
+        results: list[dict[str, int | str]] = []
         for section_title, chunk_content in raw_chunks:
             if not chunk_content.strip():
                 continue
             chunk = DocumentChunk(section=section_title, content=chunk_content)
-            graph = self._extractor.extract(chunk.content)
-            result = self.ingest_extracted(
-                chunk.content,
-                graph,
-                source=effective_source_path,
-                project=effective_project,
-                source_path=effective_source_path,
-                section=chunk.section,
-                doc_date=effective_doc_date,
-            )
+            try:
+                graph = self._extractor.extract(chunk.content)
+                _ok = self.ingest_extracted(
+                    chunk.content,
+                    graph,
+                    source=effective_source_path,
+                    project=effective_project,
+                    source_path=effective_source_path,
+                    section=chunk.section,
+                    doc_date=effective_doc_date,
+                )
+                result: dict[str, int | str] = dict(_ok)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # broad catch is intentional at orchestration layer
+                results.append(
+                    {
+                        "section": section_title or "",
+                        "error": str(exc),
+                    }
+                )
+                continue
             results.append(result)
 
         return results
