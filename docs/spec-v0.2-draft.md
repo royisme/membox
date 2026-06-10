@@ -193,19 +193,22 @@ Code map nodes can be merged into `recall` results (labeled as `source: codemap`
 
 ```
 src/membox/
-├── schema.py        # Added Memory, Observation, GateDecision, RecallResult models
-├── store.py         # Added memories/inbox CRUD, retract, reinforce, decay, migrations
-├── extract.py       # Unchanged (Protocol + Dummy + OpenAI)
-├── embed.py         # Unchanged
-├── normalize.py     # Unchanged
-├── gate.py          # New: Ingestion Gate (SalienceGate Protocol + LLM/Heuristic)
-├── distill.py       # New: Project-to-Global memory distillation
-├── lifecycle.py     # New: Consolidate orchestration (digesting, decaying, archiving)
-├── scopes.py        # New: Scope resolution (global path, project detection, db handles)
-├── agent.py         # MemoryAgent extension: observe/recall/consolidate/distill entry points
-├── cli.py           # Typer command registration (presentation-only)
-├── ast_parser.py    # Tree-sitter parser (from Phase 8)
-└── codemap.py       # New: codemap build/update orchestration (via git diff)
+├── model/
+│   └── schema.py    # Added Memory, Observation, GateDecision, RecallResult models
+├── core/
+│   ├── store/       # Added memories/inbox CRUD, retract, reinforce, decay (new migrations in store/migrations.py)
+│   ├── normalize.py # Unchanged
+│   ├── lifecycle.py # New: Consolidate orchestration (digesting, decaying, archiving)
+│   ├── scopes.py    # New: Scope resolution (global path, project detection, db handles)
+│   ├── codemap.py   # New: codemap build/update orchestration (via git diff)
+│   └── agent.py     # MemoryAgent extension: observe/recall/consolidate/distill entry points
+├── services/
+│   ├── extraction.py # Unchanged (Protocol + Dummy + OpenAI)
+│   ├── embedding.py  # Unchanged
+│   ├── gate.py      # New: Ingestion Gate (SalienceGate Protocol + LLM/Heuristic)
+│   ├── distill.py   # New: Project-to-Global memory distillation
+│   └── ast_parser.py # Tree-sitter parser (from Phase 8)
+└── cli/             # Typer command registration (presentation-only)
 ```
 
 Design principles remain unchanged: storage, LLM calls, orchestration, and CLI are strictly decoupled. `gate` and `distill` use dependency-injected protocols.

@@ -41,8 +41,8 @@ def test_all_public_imports() -> None:
 
 
 def test_dummy_extractor_returns_empty_graph() -> None:
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedGraph
+    from membox.model.schema import ExtractedGraph
+    from membox.services.extraction import DummyExtractor
 
     ext = DummyExtractor()
     result = ext.extract("some text about Alice and Bob")
@@ -52,7 +52,7 @@ def test_dummy_extractor_returns_empty_graph() -> None:
 
 
 def test_dummy_extractor_query_entities_returns_empty_list() -> None:
-    from membox.extract import DummyExtractor
+    from membox.services.extraction import DummyExtractor
 
     ext = DummyExtractor()
     assert ext.extract_query_entities("what is Python?") == []
@@ -64,7 +64,7 @@ def test_dummy_extractor_query_entities_returns_empty_list() -> None:
 
 
 def test_dummy_embedder_returns_zero_vector() -> None:
-    from membox.embed import DummyEmbedder
+    from membox.services.embedding import DummyEmbedder
 
     emb = DummyEmbedder()
     v = emb.embed("hello world")
@@ -74,7 +74,7 @@ def test_dummy_embedder_returns_zero_vector() -> None:
 
 
 def test_dummy_embedder_dim_attribute() -> None:
-    from membox.embed import DummyEmbedder
+    from membox.services.embedding import DummyEmbedder
 
     emb = DummyEmbedder()
     assert isinstance(emb.dim, int)
@@ -87,7 +87,7 @@ def test_dummy_embedder_dim_attribute() -> None:
 
 
 def test_normalize_name_lowercases_and_collapses_whitespace() -> None:
-    from membox.normalize import normalize_name
+    from membox.core.normalize import normalize_name
 
     assert normalize_name("  Hello   World  ") == "hello world"
     assert normalize_name("Python") == "python"
@@ -95,7 +95,7 @@ def test_normalize_name_lowercases_and_collapses_whitespace() -> None:
 
 
 def test_normalize_predicate_lowercases() -> None:
-    from membox.normalize import normalize_predicate
+    from membox.core.normalize import normalize_predicate
 
     assert normalize_predicate("USES") == "uses"
     assert normalize_predicate("  Develops  ") == "develops"
@@ -108,14 +108,14 @@ def test_normalize_predicate_lowercases() -> None:
 
 
 def test_knowledge_store_instantiates(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "test.db"))
     assert store.db_path == str(tmp_path / "test.db")
 
 
 def test_knowledge_store_conn_returns_sqlite_connection(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "test.db"))
     conn = store._conn()
@@ -123,7 +123,7 @@ def test_knowledge_store_conn_returns_sqlite_connection(tmp_path: Path) -> None:
 
 
 def test_knowledge_store_conn_is_per_thread_cached(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "test.db"))
     conn1 = store._conn()
@@ -137,17 +137,17 @@ def test_knowledge_store_conn_is_per_thread_cached(tmp_path: Path) -> None:
 
 
 def test_memory_agent_instantiates(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), embedder=None, db_path=str(tmp_path / "a.db"))
     assert agent.store.db_path == str(tmp_path / "a.db")
 
 
 def test_memory_agent_store_attribute_is_knowledge_store(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.store import KnowledgeStore
+    from membox.core.agent import MemoryAgent
+    from membox.core.store import KnowledgeStore
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     assert isinstance(agent.store, KnowledgeStore)
@@ -160,8 +160,8 @@ def test_memory_agent_store_attribute_is_knowledge_store(tmp_path: Path) -> None
 
 def test_query_with_dummy_extractor_returns_placeholder(tmp_path: Path) -> None:
     """DummyExtractor returns [] seeds → retrieve returns empty HopResult → placeholder."""
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "q.db"))
     result = agent.query("any question about anything")
@@ -169,9 +169,9 @@ def test_query_with_dummy_extractor_returns_placeholder(tmp_path: Path) -> None:
 
 
 def test_to_prompt_context_empty_returns_placeholder(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import HopResult
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import HopResult
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "c.db"))
     ctx = agent.to_prompt_context(HopResult())
@@ -179,9 +179,9 @@ def test_to_prompt_context_empty_returns_placeholder(tmp_path: Path) -> None:
 
 
 def test_to_prompt_context_with_data(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import HopResult
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import HopResult
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "c2.db"))
     hop = HopResult(
@@ -241,7 +241,7 @@ def test_cli_ingest_file_not_found(tmp_path: Path) -> None:
 
 
 def test_store_tx_context_manager_commits(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     db = str(tmp_path / "tx.db")
     store = KnowledgeStore(db)
@@ -257,7 +257,7 @@ def test_store_tx_context_manager_commits(tmp_path: Path) -> None:
 
 
 def test_store_tx_context_manager_rollbacks_on_error(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "tx.db"))
     msg = "forced rollback"

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from membox.normalize import normalize_name, normalize_predicate
-from membox.schema import Entity, ExtractedGraph, HopResult, Relation
-from membox.store import KnowledgeStore
+from membox.core.normalize import normalize_name, normalize_predicate
+from membox.core.store import KnowledgeStore
+from membox.model.schema import Entity, ExtractedGraph, HopResult, Relation
 
 if TYPE_CHECKING:
-    from membox.embed import Embedder
-    from membox.extract import LLMExtractor
+    from membox.services.embedding import Embedder
+    from membox.services.extraction import LLMExtractor
 
 
 class MemoryAgent:

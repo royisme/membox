@@ -29,8 +29,8 @@ def main() -> None:
         sys.exit(1)
 
     from membox import MemoryAgent
-    from membox.embed import OpenAIEmbedder
-    from membox.extract import OpenAIExtractor
+    from membox.services.embedding import OpenAIEmbedder
+    from membox.services.extraction import OpenAIExtractor
 
     client = OpenAI(api_key=api_key)
     agent = MemoryAgent(

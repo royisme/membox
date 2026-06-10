@@ -50,7 +50,7 @@ def _embedder(extra: dict[str, list[float]] | None = None) -> _ControlledEmbedde
 
 
 def test_exact_alias_dedup_same_name(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "desc", None)
@@ -60,7 +60,7 @@ def test_exact_alias_dedup_same_name(tmp_path: Path) -> None:
 
 def test_case_normalization_dedup(tmp_path: Path) -> None:
     """'ALICE' and 'alice' must resolve to the same entity."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "", None)
@@ -70,7 +70,7 @@ def test_case_normalization_dedup(tmp_path: Path) -> None:
 
 def test_whitespace_normalization_dedup(tmp_path: Path) -> None:
     """'  Alice  ' must resolve to the same entity as 'Alice'."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid1 = store.find_or_create_entity("Alice Smith", "Person", "", None)
@@ -79,7 +79,7 @@ def test_whitespace_normalization_dedup(tmp_path: Path) -> None:
 
 
 def test_different_names_create_different_entities(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "", None)
@@ -89,7 +89,7 @@ def test_different_names_create_different_entities(tmp_path: Path) -> None:
 
 def test_same_name_different_types_with_no_embedder(tmp_path: Path) -> None:
     """Without embedder, alias match is purely string; type is ignored."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid1 = store.find_or_create_entity("Python", "Language", "", None)
@@ -105,7 +105,7 @@ def test_same_name_different_types_with_no_embedder(tmp_path: Path) -> None:
 
 def test_embedding_synonym_dedup_above_threshold(tmp_path: Path) -> None:
     """'Alicia' should resolve to Alice's entity when cosine ≥ 0.85."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     emb = _embedder()
@@ -116,7 +116,7 @@ def test_embedding_synonym_dedup_above_threshold(tmp_path: Path) -> None:
 
 def test_embedding_no_merge_below_threshold(tmp_path: Path) -> None:
     """Bob (orthogonal to Alice) must NOT be merged with Alice."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     emb = _embedder()
@@ -127,7 +127,7 @@ def test_embedding_no_merge_below_threshold(tmp_path: Path) -> None:
 
 def test_embedding_no_merge_different_types(tmp_path: Path) -> None:
     """Even if cos ≥ 0.85, entities of different types should NOT merge."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     # Give "Alicia" the same high-similarity vector but use a different type.
     # find_similar_entity restricts scan to type_, so type mismatch prevents merge.
@@ -140,7 +140,7 @@ def test_embedding_no_merge_different_types(tmp_path: Path) -> None:
 
 def test_embedding_alias_registered_after_merge(tmp_path: Path) -> None:
     """After a cosine merge, the new alias must be queryable."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     emb = _embedder()
@@ -152,7 +152,7 @@ def test_embedding_alias_registered_after_merge(tmp_path: Path) -> None:
 
 def test_fallback_to_create_when_no_embedder(tmp_path: Path) -> None:
     """With no embedder, unknown names always create new entities."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "", None)
@@ -167,7 +167,7 @@ def test_fallback_to_create_when_no_embedder(tmp_path: Path) -> None:
 
 
 def test_description_keeps_longer(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid = store.find_or_create_entity("Alice", "Person", "eng", None)
@@ -178,7 +178,7 @@ def test_description_keeps_longer(tmp_path: Path) -> None:
 
 
 def test_description_does_not_overwrite_with_shorter(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     eid = store.find_or_create_entity("Alice", "Person", "senior software engineer", None)
@@ -195,7 +195,7 @@ def test_description_does_not_overwrite_with_shorter(tmp_path: Path) -> None:
 
 def test_concurrent_8_threads_create_exactly_one_entity(tmp_path: Path) -> None:
     """8 threads racing to find_or_create_entity('Alice') must all get the same eid."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "mt.db"))
     results: list[int] = []
@@ -224,7 +224,7 @@ def test_concurrent_8_threads_create_exactly_one_entity(tmp_path: Path) -> None:
 
 def test_concurrent_distinct_names_each_get_own_entity(tmp_path: Path) -> None:
     """8 threads each creating a distinct entity should produce 8 rows."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "mt2.db"))
     results: dict[str, int] = {}

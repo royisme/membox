@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 from typer.testing import CliRunner
 
 from membox.cli import app
-from membox.embed import OpenAIEmbedder
-from membox.extract import DummyExtractor, OpenAIExtractor, create_default_extractor
+from membox.services.embedding import OpenAIEmbedder
+from membox.services.extraction import DummyExtractor, OpenAIExtractor, create_default_extractor
 
 if TYPE_CHECKING:
     from pathlib import Path

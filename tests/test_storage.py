@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def test_tables_created_on_init(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "ddl.db"))
     conn = store._conn()
@@ -36,7 +36,7 @@ def test_tables_created_on_init(tmp_path: Path) -> None:
 
 
 def test_wal_mode_enabled(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "wal.db"))
     mode = store._conn().execute("PRAGMA journal_mode;").fetchone()[0]
@@ -44,7 +44,7 @@ def test_wal_mode_enabled(tmp_path: Path) -> None:
 
 
 def test_foreign_keys_enabled(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "fk.db"))
     fk = store._conn().execute("PRAGMA foreign_keys;").fetchone()[0]
@@ -57,7 +57,7 @@ def test_foreign_keys_enabled(tmp_path: Path) -> None:
 
 
 def test_insert_document_returns_id(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     doc_id = store.insert_document("hello world", source="test")
@@ -66,7 +66,7 @@ def test_insert_document_returns_id(tmp_path: Path) -> None:
 
 
 def test_insert_document_persists_content(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     store.insert_document("Alice works at Acme.", source="memo.txt")
@@ -76,7 +76,7 @@ def test_insert_document_persists_content(tmp_path: Path) -> None:
 
 
 def test_insert_multiple_documents_unique_ids(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "d.db"))
     id1 = store.insert_document("doc one")
@@ -90,7 +90,7 @@ def test_insert_multiple_documents_unique_ids(tmp_path: Path) -> None:
 
 
 def test_create_entity_returns_id(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     eid = store.create_entity("Alice", "Person", "Software engineer", None)
@@ -99,7 +99,7 @@ def test_create_entity_returns_id(tmp_path: Path) -> None:
 
 
 def test_create_entity_also_registers_canonical_alias(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     eid = store.create_entity("Alice Smith", "Person", "", None)
@@ -108,14 +108,14 @@ def test_create_entity_also_registers_canonical_alias(tmp_path: Path) -> None:
 
 
 def test_find_entity_by_alias_returns_none_for_unknown(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     assert store.find_entity_by_alias("nobody") is None
 
 
 def test_get_entity_returns_tuple(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     eid = store.create_entity("Bob", "Person", "Backend dev", None)
@@ -127,7 +127,7 @@ def test_get_entity_returns_tuple(tmp_path: Path) -> None:
 
 
 def test_get_entity_returns_none_for_missing(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "e.db"))
     assert store.get_entity(9999) is None
@@ -139,7 +139,7 @@ def test_get_entity_returns_none_for_missing(tmp_path: Path) -> None:
 
 
 def test_add_alias_registers_additional_alias(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "a.db"))
     eid = store.create_entity("Alice", "Person", "", None)
@@ -149,7 +149,7 @@ def test_add_alias_registers_additional_alias(tmp_path: Path) -> None:
 
 def test_add_alias_idempotent(tmp_path: Path) -> None:
     """Duplicate alias insert should not raise."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "a.db"))
     eid = store.create_entity("Alice", "Person", "", None)
@@ -158,7 +158,7 @@ def test_add_alias_idempotent(tmp_path: Path) -> None:
 
 
 def test_alias_fk_constraint_on_missing_entity(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "a.db"))
     with pytest.raises(sqlite3.IntegrityError):
@@ -173,7 +173,7 @@ def test_alias_fk_constraint_on_missing_entity(tmp_path: Path) -> None:
 
 
 def test_upsert_relation_returns_id(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "r.db"))
     doc_id = store.insert_document("text")
@@ -186,7 +186,7 @@ def test_upsert_relation_returns_id(tmp_path: Path) -> None:
 
 def test_upsert_relation_dedup_same_triple(tmp_path: Path) -> None:
     """Same (source, target, predicate) triple should reuse the existing row."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "r.db"))
     doc1 = store.insert_document("doc1")
@@ -199,7 +199,7 @@ def test_upsert_relation_dedup_same_triple(tmp_path: Path) -> None:
 
 
 def test_upsert_relation_different_predicate_creates_new_row(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "r.db"))
     doc = store.insert_document("doc")
@@ -211,7 +211,7 @@ def test_upsert_relation_different_predicate_creates_new_row(tmp_path: Path) -> 
 
 
 def test_upsert_relation_fk_on_missing_entity(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "r.db"))
     doc = store.insert_document("doc")
@@ -225,7 +225,7 @@ def test_upsert_relation_fk_on_missing_entity(tmp_path: Path) -> None:
 
 
 def test_evidence_links_relation_to_document(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "ev.db"))
     doc_id = store.insert_document("Alice works at Acme.")
@@ -239,7 +239,7 @@ def test_evidence_links_relation_to_document(tmp_path: Path) -> None:
 
 
 def test_evidence_accumulates_multiple_docs(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "ev.db"))
     d1 = store.insert_document("doc one")
@@ -253,7 +253,7 @@ def test_evidence_accumulates_multiple_docs(tmp_path: Path) -> None:
 
 
 def test_get_evidence_empty_for_unknown_relation(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "ev.db"))
     assert store.get_evidence_docs([9999]) == []
@@ -265,14 +265,14 @@ def test_get_evidence_empty_for_unknown_relation(tmp_path: Path) -> None:
 
 
 def test_list_entities_empty_initially(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "l.db"))
     assert store.list_entities() == []
 
 
 def test_list_entities_returns_created_entities(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "l.db"))
     store.create_entity("Alice", "Person", "", None)
@@ -284,14 +284,14 @@ def test_list_entities_returns_created_entities(tmp_path: Path) -> None:
 
 
 def test_list_relations_empty_initially(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "l.db"))
     assert store.list_relations() == []
 
 
 def test_list_relations_resolves_names(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "l.db"))
     doc = store.insert_document("text")
@@ -311,7 +311,7 @@ def test_list_relations_resolves_names(tmp_path: Path) -> None:
 
 
 def test_find_or_create_entity_creates_new(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "foc.db"))
     eid = store.find_or_create_entity("Alice", "Person", "desc", None)
@@ -320,7 +320,7 @@ def test_find_or_create_entity_creates_new(tmp_path: Path) -> None:
 
 
 def test_find_or_create_entity_idempotent_by_alias(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "foc.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "desc", None)
@@ -330,7 +330,7 @@ def test_find_or_create_entity_idempotent_by_alias(tmp_path: Path) -> None:
 
 def test_find_or_create_entity_normalizes_name(tmp_path: Path) -> None:
     """'  ALICE  ' and 'alice' should resolve to the same entity."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "foc.db"))
     eid1 = store.find_or_create_entity("Alice", "Person", "", None)
@@ -339,7 +339,7 @@ def test_find_or_create_entity_normalizes_name(tmp_path: Path) -> None:
 
 
 def test_find_or_create_entity_updates_description_keep_longer(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "foc.db"))
     eid = store.find_or_create_entity("Alice", "Person", "short", None)
@@ -355,7 +355,7 @@ def test_find_or_create_entity_updates_description_keep_longer(tmp_path: Path) -
 
 
 def test_get_neighbors_returns_incident_edges(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "n.db"))
     doc = store.insert_document("text")
@@ -371,7 +371,7 @@ def test_get_neighbors_returns_incident_edges(tmp_path: Path) -> None:
 
 
 def test_get_neighbors_empty_for_isolated_entity(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "n.db"))
     eid = store.create_entity("Lone", "Thing", "", None)
@@ -379,7 +379,7 @@ def test_get_neighbors_empty_for_isolated_entity(tmp_path: Path) -> None:
 
 
 def test_get_neighbors_empty_input(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "n.db"))
     assert store.get_neighbors([]) == []
@@ -391,9 +391,9 @@ def test_get_neighbors_empty_input(tmp_path: Path) -> None:
 
 
 def test_agent_ingest_extracted_empty_graph(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedGraph
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedGraph
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     result = agent.ingest_extracted("some text", ExtractedGraph(entities=[], relations=[]))
@@ -403,9 +403,9 @@ def test_agent_ingest_extracted_empty_graph(tmp_path: Path) -> None:
 
 
 def test_agent_ingest_extracted_with_entities(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     graph = ExtractedGraph(
@@ -423,9 +423,9 @@ def test_agent_ingest_extracted_with_entities(tmp_path: Path) -> None:
 
 
 def test_agent_ingest_extracted_persists_to_db(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     graph = ExtractedGraph(
@@ -439,8 +439,8 @@ def test_agent_ingest_extracted_persists_to_db(tmp_path: Path) -> None:
 
 
 def test_agent_list_entities_returns_list(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     result = agent.list_entities()
@@ -448,8 +448,8 @@ def test_agent_list_entities_returns_list(tmp_path: Path) -> None:
 
 
 def test_agent_list_relations_returns_list(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     result = agent.list_relations()
@@ -505,7 +505,7 @@ def test_cli_ingest_file_works(tmp_path: Path) -> None:
 
 def test_concurrent_find_or_create_no_duplicate(tmp_path: Path) -> None:
     """Two threads racing to find_or_create_entity("Alice") should yield the same eid."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "mt.db"))
     results: list[int] = []
@@ -536,7 +536,7 @@ def test_concurrent_find_or_create_no_duplicate(tmp_path: Path) -> None:
 
 def test_close_then_reuse_reopens_connection(tmp_path: Path) -> None:
     """close() releases the thread's connection; the next operation reopens transparently."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "close.db"))
     old_conn = store._conn()
@@ -554,7 +554,7 @@ def test_close_then_reuse_reopens_connection(tmp_path: Path) -> None:
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "close.db"))
     store.close()
@@ -563,7 +563,7 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
 
 def test_context_manager_closes_without_resource_warning(tmp_path: Path) -> None:
     """Using the store as a context manager closes the connection cleanly."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     gc.collect()  # flush garbage from earlier tests so it is not attributed here
     with warnings.catch_warnings():
@@ -571,7 +571,7 @@ def test_context_manager_closes_without_resource_warning(tmp_path: Path) -> None
         with KnowledgeStore(str(tmp_path / "cm.db")) as store:
             store.insert_document("inside context")
         # Connection released on exit
-        assert getattr(store._local, "conn", None) is None
+        assert getattr(store._cm._local, "conn", None) is None
         del store
         gc.collect()  # would surface a ResourceWarning if a connection leaked
 
@@ -582,7 +582,7 @@ def test_context_manager_closes_without_resource_warning(tmp_path: Path) -> None
 
 
 def test_cosine_raises_on_dimension_mismatch() -> None:
-    from membox.store import _cosine
+    from membox.core.store import _cosine
 
     with pytest.raises(ValueError, match="dimension mismatch"):
         _cosine([1.0, 0.0], [1.0, 0.0, 0.0])
@@ -590,7 +590,7 @@ def test_cosine_raises_on_dimension_mismatch() -> None:
 
 def test_find_similar_entity_skips_mismatched_dimension(tmp_path: Path) -> None:
     """Stored embeddings from an older embedder (different dim) are skipped, not matched."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "dim.db"))
     store.create_entity("OldDim", "Thing", "", [1.0, 1.0, 1.0, 1.0])  # 4-dim row
@@ -600,7 +600,7 @@ def test_find_similar_entity_skips_mismatched_dimension(tmp_path: Path) -> None:
 
 def test_find_similar_entity_still_matches_same_dimension(tmp_path: Path) -> None:
     """A same-dimension row alongside a mismatched one is still found."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "dim.db"))
     store.create_entity("OldDim", "Thing", "", [1.0, 1.0, 1.0, 1.0])  # stale 4-dim row

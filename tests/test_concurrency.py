@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     import sqlite3
     from pathlib import Path
 
-    from membox.schema import Entity
+    from membox.model.schema import Entity
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def test_per_thread_connections_are_distinct(tmp_path: Path) -> None:
     """Each thread must get its own SQLite connection object."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "pt.db"))
     conns: list[sqlite3.Connection] = []
@@ -45,7 +45,7 @@ def test_per_thread_connections_are_distinct(tmp_path: Path) -> None:
 
 
 def test_same_thread_reuses_connection(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "pt.db"))
     c1 = store._conn()
@@ -60,7 +60,7 @@ def test_same_thread_reuses_connection(tmp_path: Path) -> None:
 
 def test_wal_allows_read_during_write(tmp_path: Path) -> None:
     """WAL mode: a reader can list_entities while a writer holds a transaction open."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "wal.db"))
     store.create_entity("Seed", "Thing", "", None)
@@ -115,9 +115,9 @@ def test_wal_allows_read_during_write(tmp_path: Path) -> None:
 
 def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
     """5 threads each ingest 10 distinct documents → 50 documents, no errors."""
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph
+    from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "ingest.db")
     errors: list[Exception] = []
@@ -144,7 +144,7 @@ def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
 
     assert not errors, f"Thread errors: {errors}"
     # Verify exact document count
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(db)
     doc_count = store._conn().execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -157,9 +157,9 @@ def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
 
 def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
     """5 threads each ingesting the SAME entity name 10 times → exactly 1 entity row."""
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph
+    from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "dedup.db")
     errors: list[Exception] = []
@@ -185,7 +185,7 @@ def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
         t.join()
 
     assert not errors, f"Thread errors: {errors}"
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(db)
     entity_count = store._conn().execute("SELECT COUNT(*) FROM entities").fetchone()[0]
@@ -199,7 +199,7 @@ def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
 
 def test_rlock_prevents_duplicate_entity_heavy_contention(tmp_path: Path) -> None:
     """20 threads racing find_or_create_entity on the same name → exactly 1 entity row."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "rlock.db"))
     results: list[int] = []
@@ -234,7 +234,7 @@ def test_rlock_prevents_duplicate_entity_heavy_contention(tmp_path: Path) -> Non
 
 def test_concurrent_relation_inserts_dedup_correctly(tmp_path: Path) -> None:
     """10 threads each trying to insert the same relation → exactly 1 relation row."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "rel.db"))
     doc_id = store.insert_document("shared doc")
@@ -277,7 +277,7 @@ _MP_PROC_COUNT = 4
 _MP_WORKER_SCRIPT = """
 import json, sys, time
 from pathlib import Path
-from membox.store import KnowledgeStore
+from membox.core.store import KnowledgeStore
 
 db, go_file, name_count = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
 store = KnowledgeStore(db)
@@ -301,7 +301,7 @@ def test_multiprocess_find_or_create_same_names_no_duplicates(tmp_path: Path) ->
     The in-process RLock cannot serialize separate processes; this exercises
     the IntegrityError re-resolution path in find_or_create_entity.
     """
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     db = str(tmp_path / "mp.db")
     KnowledgeStore(db).close()  # initialize schema before workers start

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from membox.agent import MemoryAgent
-from membox.embed import DummyEmbedder, Embedder, OpenAIEmbedder
-from membox.extract import DummyExtractor, LLMExtractor, OpenAIExtractor
-from membox.schema import (
+from membox.core.agent import MemoryAgent
+from membox.core.store import KnowledgeStore
+from membox.model.schema import (
     Document,
     Entity,
     ExtractedEntity,
@@ -15,7 +14,8 @@ from membox.schema import (
     Relation,
     Triple,
 )
-from membox.store import KnowledgeStore
+from membox.services.embedding import DummyEmbedder, Embedder, OpenAIEmbedder
+from membox.services.extraction import DummyExtractor, LLMExtractor, OpenAIExtractor
 
 __version__ = "0.1.0"
 

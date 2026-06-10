@@ -132,14 +132,32 @@ CREATE TABLE relation_evidence (
 ```
 src/membox/
 ├── __init__.py          # Package entry point, exposes public APIs
-├── schema.py            # Pydantic model definitions
-├── store.py             # SQLite storage layer (schema, CRUD, BFS retrieval)
-├── extract.py           # LLM knowledge extraction (Protocol + OpenAI implementation)
-├── embed.py             # Embedding computation (Protocol + OpenAI implementation)
-├── normalize.py         # Predicate normalization and synonym dictionary
-├── agent.py             # MemoryAgent — Orchestration layer
-├── cli.py               # Typer CLI entry point (ingest / query / list commands)
-├── ast_parser.py        # Tree-sitter code analysis (optional module)
+├── config.py            # MemboxConfig — provider/base_url/API-key/model selection per capability
+├── model/
+│   └── schema.py        # Pydantic model definitions
+├── core/
+│   ├── store/           # SQLite storage layer, split by concern
+│   │   ├── __init__.py  # KnowledgeStore facade (stable public method surface)
+│   │   ├── connection.py  # Per-thread connections, WAL/PRAGMAs, transactions, RLock
+│   │   ├── migrations.py  # PRAGMA user_version schema migration machinery
+│   │   ├── entities.py    # Entity CRUD + find-or-create dedup + aliases
+│   │   ├── relations.py   # Relation CRUD + evidence links
+│   │   ├── documents.py   # Document persistence
+│   │   └── retrieval.py   # BFS multi-hop retrieval
+│   ├── normalize.py     # Predicate normalization and synonym dictionary
+│   └── agent.py         # MemoryAgent — Orchestration layer
+├── services/            # Domain capability layer (never speaks HTTP directly)
+│   ├── extraction.py    # LLMExtractor Protocol + Dummy/OpenAI implementations
+│   ├── embedding.py     # Embedder Protocol + Dummy/OpenAI implementations
+│   ├── ast_parser.py    # Tree-sitter code analysis (optional module)
+│   └── prompts/
+│       └── extraction.py  # Extraction prompt templates (module-level constants)
+├── providers/           # Protocol adapter layer (auth, request shape, error normalization only)
+│   ├── base.py          # ChatClient / EmbedClient low-level Protocols
+│   └── openai_compat.py # OpenAI-compatible adapter (OpenAI/Ollama/vLLM/DeepSeek via base_url)
+├── cli/                 # Typer CLI (presentation only)
+│   ├── __init__.py      # App assembly; exposes the `app` entry point
+│   └── commands/        # One module per command group (ingest / query / listing / version)
 └── py.typed             # PEP 561 marker
 ```
 
@@ -155,6 +173,8 @@ src/membox/
 | Agent Integration Path | Skill file (CLI instruction doc) | Agent reads the skill and runs shell commands; no MCP / HTTP daemon required. |
 | CLI Framework | typer + rich | Type annotations act as interface definitions; agents learn by inspecting `--help`. |
 | Codebase Analysis | tree-sitter (optional) | Multi-language AST parsing to extract structural knowledge like module dependencies and call graphs. |
+| Service/Adapter Layering | `services/` (domain capabilities) over `providers/` (protocol adapters) | Services own prompts, parsing, and fallback policy and never speak HTTP; providers own auth, request shape, and error normalization only — adding a new backend (e.g. Gemini) touches `providers/` plus config, not domain logic. |
+| Schema Migrations | `PRAGMA user_version` + ordered `MIGRATIONS` list | Each open applies pending migrations transactionally and bumps `user_version`; migration 0001 is the full idempotent DDL (`CREATE TABLE IF NOT EXISTS`) so pre-migration databases pass through unchanged. |
 
 ## 5. Interface Design
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ def _populate(store: KnowledgeStore, edges: list[tuple[str, str, str]]) -> None:
 
 
 def test_bfs_query_empty_graph(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     eid = store.find_or_create_entity("Lone", "Thing", "", None)
@@ -42,7 +42,7 @@ def test_bfs_query_empty_graph(tmp_path: Path) -> None:
 
 def test_bfs_query_hop0_returns_seeds_only(tmp_path: Path) -> None:
     """max_hops=0 means no expansion — only seed entities visited, no edges traversed."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("A", "links", "B")])
@@ -55,7 +55,7 @@ def test_bfs_query_hop0_returns_seeds_only(tmp_path: Path) -> None:
 
 
 def test_bfs_query_hop1_direct_neighbors(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("Alice", "works_at", "Acme")])
@@ -70,7 +70,7 @@ def test_bfs_query_hop1_direct_neighbors(tmp_path: Path) -> None:
 
 def test_bfs_query_hop2_transitive(tmp_path: Path) -> None:
     """A → B → C: seeding A with max_hops=2 should reach C."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("A", "links", "B"), ("B", "links", "C")])
@@ -86,7 +86,7 @@ def test_bfs_query_hop2_transitive(tmp_path: Path) -> None:
 
 def test_bfs_query_hop1_does_not_reach_hop2(tmp_path: Path) -> None:
     """A → B → C: seeding A with max_hops=1 must NOT reach C."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("A", "links", "B"), ("B", "links", "C")])
@@ -98,7 +98,7 @@ def test_bfs_query_hop1_does_not_reach_hop2(tmp_path: Path) -> None:
 
 def test_bfs_query_cycle_no_infinite_loop(tmp_path: Path) -> None:
     """A → B → A cycle must terminate without revisiting A."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("A", "links", "B"), ("B", "links", "A")])
@@ -113,7 +113,7 @@ def test_bfs_query_cycle_no_infinite_loop(tmp_path: Path) -> None:
 
 
 def test_bfs_query_multiple_seeds(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     _populate(store, [("Alice", "leads", "Team"), ("Bob", "member_of", "Team")])
@@ -128,7 +128,7 @@ def test_bfs_query_multiple_seeds(tmp_path: Path) -> None:
 
 
 def test_bfs_query_evidence_docs_included(tmp_path: Path) -> None:
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     doc_id = store.insert_document("Alice works at Acme.")
@@ -141,7 +141,7 @@ def test_bfs_query_evidence_docs_included(tmp_path: Path) -> None:
 
 def test_bfs_query_evidence_docs_deduped(tmp_path: Path) -> None:
     """Two relations citing the same doc should produce only one document entry."""
-    from membox.store import KnowledgeStore
+    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(str(tmp_path / "b.db"))
     doc_id = store.insert_document("shared evidence")
@@ -160,9 +160,9 @@ def test_bfs_query_evidence_docs_deduped(tmp_path: Path) -> None:
 
 
 def test_agent_retrieve_resolves_seeds_and_bfs(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "a.db")
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)
@@ -181,8 +181,8 @@ def test_agent_retrieve_resolves_seeds_and_bfs(tmp_path: Path) -> None:
 
 
 def test_agent_retrieve_unresolved_seeds_returns_empty(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     result = agent.retrieve(["UnknownPerson"], max_hops=2)
@@ -193,8 +193,8 @@ def test_agent_retrieve_unresolved_seeds_returns_empty(tmp_path: Path) -> None:
 
 def test_agent_query_returns_formatted_context(tmp_path: Path) -> None:
     """query() with DummyExtractor (no seeds) returns placeholder."""
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
+    from membox.core.agent import MemoryAgent
+    from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     ctx = agent.query("What does Alice do?")
@@ -207,9 +207,9 @@ def test_agent_query_returns_formatted_context(tmp_path: Path) -> None:
 
 
 def test_to_prompt_context_formats_triplets_and_docs(tmp_path: Path) -> None:
-    from membox.agent import MemoryAgent
-    from membox.extract import DummyExtractor
-    from membox.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.core.agent import MemoryAgent
+    from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+    from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "ctx.db")
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)

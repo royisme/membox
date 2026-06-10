@@ -50,16 +50,20 @@ Target module layout under `src/membox/`:
 
 | Module | Responsibility |
 |---|---|
-| `schema.py` | Pydantic models and public data shapes |
-| `store.py` | SQLite CRUD, deduplication, evidence links, BFS retrieval |
-| `extract.py` | LLM extraction via injectable `Protocol` |
-| `embed.py` | Embedding via injectable, optional `Protocol` |
-| `normalize.py` | Predicate normalization and synonym dictionaries |
-| `agent.py` | `MemoryAgent` orchestration layer |
-| `cli.py` | Typer entry point — presentation only, no business logic |
-| `ast_parser.py` | Optional tree-sitter source analysis |
+| `model/schema.py` | Pydantic models and public data shapes |
+| `config.py` | `MemboxConfig` — provider/model/base_url/API-key per capability |
+| `core/store/` | SQLite storage package: `KnowledgeStore` facade over `connection.py`, `migrations.py` (`PRAGMA user_version`), `entities.py`, `relations.py`, `documents.py`, `retrieval.py` |
+| `core/normalize.py` | Predicate normalization and synonym dictionaries |
+| `core/agent.py` | `MemoryAgent` orchestration layer |
+| `services/extraction.py` | LLM extraction via injectable `LLMExtractor` `Protocol` (domain layer, no HTTP) |
+| `services/embedding.py` | Embedding via injectable, optional `Embedder` `Protocol` |
+| `services/prompts/` | Prompt templates as module-level constants/builders |
+| `services/ast_parser.py` | Optional tree-sitter source analysis |
+| `providers/base.py` | Low-level `ChatClient` / `EmbedClient` `Protocol`s (auth/request/error only) |
+| `providers/openai_compat.py` | OpenAI-compatible adapter (OpenAI/Ollama/vLLM/DeepSeek via `base_url`) |
+| `cli/` | Typer package — `cli/__init__.py` exposes `app`; `cli/commands/` one module per command group; presentation only, no business logic |
 
-Keep storage, LLM calls, CLI presentation, and orchestration in separate layers.
+Keep storage, LLM calls, CLI presentation, and orchestration in separate layers. Services never speak HTTP directly; providers contain no business logic.
 
 ## Key Rules
 
@@ -71,3 +75,24 @@ Keep storage, LLM calls, CLI presentation, and orchestration in separate layers.
 - **Every Python file** under `src/`, `scripts/`, and `tests/` must start with a module docstring or leading `#` comment.
 - **`docs/repository-map.md` is generated** — never edit manually; run the update script after structural changes.
 - Pre-commit hooks run ruff, mypy, and branch protection. If a hook fails, fix and re-commit — never `--no-verify`.
+
+## Working Style
+
+**Orchestrator model: the main model presides, subagents execute.** The main (strong) model acts as the resident advisor and dispatcher — it holds the design context, makes judgment calls, decomposes work, and reviews results. It should NOT burn its own context window on bulk reading, repetitive comprehension, or mechanical edits: delegate those to subagents (Agent tool) and consume only their conclusions. This keeps the main context lean (raw file dumps and grep output stay in the subagent's context, not the orchestrator's) and cuts cost (bulk tokens are processed at cheaper-model prices).
+
+**Dispatch rules:**
+
+- Delegate any well-scoped, multi-step work: mechanical refactors, broad searches, repetitive file comprehension ("read these N files and summarize X"), doc syncs, test-fix loops.
+- Run subagents in the background when design discussion should continue in parallel.
+- Every dispatch must include: precise scope, what is already done (do not redo), hard constraints (project rules above), and a verification gate (pytest + ruff + mypy must be green).
+- Subagents return distilled conclusions, not raw content — instruct them to report findings/diffs/verdicts, never to paste whole files back.
+
+**Match model to task difficulty** via the Agent tool's `model` parameter:
+
+| Model | Use for |
+|---|---|
+| `haiku` | Bulk + mechanical: renames, import-path updates, grep sweeps, file moves, reading many files to extract/summarize specific facts, regenerating `repository-map.md`, formatting fixes |
+| `sonnet` | Routine implementation: well-specified refactors, writing tests from a clear spec, doc updates, fixing lint/type errors |
+| (default/inherit — orchestrator only) | Design decisions, architecture changes, ambiguous debugging, spec judgment, reviewing subagent output. Reserve the strong model for thinking, not for reading. |
+
+Escalation path (advisor pattern, inverted): when a cheap-model subagent reports it hit a judgment call beyond its brief — ambiguous spec, conflicting constraints, surprising findings — it must stop and return the question instead of guessing; the orchestrator decides and re-dispatches. When in doubt about difficulty upfront, prefer the stronger model; a failed cheap run costs more than it saves.

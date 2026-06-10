@@ -19,7 +19,7 @@ import pytest
     ],
 )
 def test_normalize_name(raw: str, expected: str) -> None:
-    from membox.normalize import normalize_name
+    from membox.core.normalize import normalize_name
 
     assert normalize_name(raw) == expected
 
@@ -95,7 +95,7 @@ def test_normalize_name(raw: str, expected: str) -> None:
     ],
 )
 def test_normalize_predicate_canonical(raw: str, canonical: str) -> None:
-    from membox.normalize import normalize_predicate
+    from membox.core.normalize import normalize_predicate
 
     assert normalize_predicate(raw) == canonical
 
@@ -116,14 +116,14 @@ def test_normalize_predicate_canonical(raw: str, canonical: str) -> None:
     ],
 )
 def test_normalize_predicate_passthrough_and_whitespace(raw: str, expected: str) -> None:
-    from membox.normalize import normalize_predicate
+    from membox.core.normalize import normalize_predicate
 
     assert normalize_predicate(raw) == expected
 
 
 def test_normalize_predicate_idempotent_on_canonical_forms() -> None:
     """Canonical forms should map to themselves (or at least be stable on re-normalization)."""
-    from membox.normalize import normalize_predicate
+    from membox.core.normalize import normalize_predicate
 
     canonical_forms = [
         "develops",

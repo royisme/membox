@@ -8,6 +8,12 @@ Functional Python files include their module header so tools can reuse the file 
 
 ## Directory Outline
 
+- `.claude/`
+  - `.claude/scheduled_tasks.lock`
+- `.crew/`
+  - `.crew/state/`
+    - `.crew/state/metrics/`
+      - `.crew/state/metrics/2026-06-10.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
@@ -36,15 +42,44 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
 - `src/`
   - `src/membox/`
+    - `src/membox/cli/`
+      - `src/membox/cli/commands/`
+        - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
+        - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
+        - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
+        - `src/membox/cli/commands/query.py` — `membox query` command.
+        - `src/membox/cli/commands/version.py` — `membox version` command.
+      - `src/membox/cli/__init__.py` — membox CLI — Typer app assembly.
+      - `src/membox/cli/_common.py` — Shared helpers for membox CLI commands: console, agent factory, notices.
+    - `src/membox/core/`
+      - `src/membox/core/store/`
+        - `src/membox/core/store/__init__.py` — membox store — SQLite-backed knowledge graph store.
+        - `src/membox/core/store/connection.py` — SQLite connection management: per-thread connections, PRAGMAs, transactions, locking.
+        - `src/membox/core/store/documents.py` — Document persistence for evidence lineage.
+        - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
+        - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
+        - `src/membox/core/store/relations.py` — Relation persistence: relation CRUD and evidence links.
+        - `src/membox/core/store/retrieval.py` — BFS multi-hop graph retrieval.
+      - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
+      - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
+      - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
+    - `src/membox/model/`
+      - `src/membox/model/__init__.py` — Data model layer: Pydantic models and public data shapes.
+      - `src/membox/model/schema.py` — membox schema — Pydantic data models for the knowledge graph.
+    - `src/membox/providers/`
+      - `src/membox/providers/__init__.py` — Provider adapter layer: protocol-level LLM clients (auth, request shape, error normalization).
+      - `src/membox/providers/base.py` — Low-level provider client Protocols: ChatClient and EmbedClient.
+      - `src/membox/providers/openai_compat.py` — OpenAI-compatible protocol adapter.
+    - `src/membox/services/`
+      - `src/membox/services/prompts/`
+        - `src/membox/services/prompts/__init__.py` — Prompt templates for the membox service layer.
+        - `src/membox/services/prompts/extraction.py` — Prompt templates for LLM knowledge extraction.
+      - `src/membox/services/__init__.py` — Service layer: domain-level LLM extraction and embedding capabilities.
+      - `src/membox/services/embedding.py` — membox embedding service — domain-level Embedder Protocol and implementations.
+      - `src/membox/services/extraction.py` — membox extraction service — domain-level LLMExtractor Protocol and implementations.
     - `src/membox/__init__.py` — membox — Local knowledge graph + RAG memory layer for coding agents.
-    - `src/membox/agent.py` — membox agent — MemoryAgent orchestration layer.
-    - `src/membox/cli.py` — membox CLI — command-line interface for coding agents.
-    - `src/membox/embed.py` — membox embed — embedding Protocol and implementations.
-    - `src/membox/extract.py` — membox extract — LLM extraction Protocol and implementations.
-    - `src/membox/normalize.py` — membox normalize — predicate and name normalization utilities.
+    - `src/membox/config.py` — membox config — runtime configuration for LLM provider selection.
     - `src/membox/py.typed`
-    - `src/membox/schema.py` — membox schema — Pydantic data models for the knowledge graph.
-    - `src/membox/store.py` — membox store — SQLite-backed knowledge graph store.
 - `tests/`
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
