@@ -77,7 +77,70 @@ When graph-only traversal is insufficient (e.g., long natural-language sentences
 
 Results from both signals are merged before being assembled into the context prompt. The `--project` filter scopes retrieval to a single project; omitting it queries the global database.
 
-### 3.7 Supersession Semantics
+### 3.7 Context-Budgeted Retrieval (scoring, truncation, compaction)
+
+**Design principle**: the SQLite store holds the full graph and raw evidence; `query` returns the most relevant slice within a caller-declared token budget, not everything reachable. No LLM is involved in the read path — pruning is pure ranking plus budgeting.
+
+#### Scoring
+
+Every candidate triple *t* reached by BFS receives a composite score:
+
+```
+score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
+```
+
+- **`hops(t)`** — BFS distance from the nearest seed entity (0 for seed-adjacent). The BFS lineage must be preserved into the result rather than discarded.
+- **`decay`** — per-hop attenuation, default `0.7`, config field `retrieval.hop_decay`.
+- **`sim(t)`** — cosine similarity between the query embedding and the embedding of the triple rendered as plain text (`"subject predicate object"`), normalised from \[−1, 1\] to \[0, 1\] via `(1 + cos) / 2`. Computed with the configured embedder (`embeddinggemma` locally). If no embedder is configured, `sim(t)` is omitted and its weight redistributes to `bm25` (i.e. α effectively becomes 0).
+- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current candidate set. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
+- **`α`** — vector-vs-lexical mix, default `0.6`, config field `retrieval.alpha`.
+- **Temporal**: superseded relations (M4) are excluded before scoring. No additional recency term in v1; using `doc_date` for confidence decay is listed as a future refinement.
+- All defaults live on `MemboxConfig` in a new `RetrievalConfig` group (`hop_decay`, `alpha`, `budget`, `top_evidence_k`) and are calibration targets for the M3 gold-standard evaluation.
+
+#### Token-budget truncation
+
+- CLI and API: `membox query --budget <tokens>` (default `2000`, config `retrieval.budget`). Callers (e.g. the Phase 9 agent skill) declare how much context they are willing to spend.
+- **Deterministic token estimator** (no tokeniser dependency):
+
+  ```
+  est_tokens(s) = (# CJK chars in s) + ceil((# non-CJK chars) / 4)
+  ```
+
+  Documented as an approximation; consistency matters more than accuracy.
+
+- **Greedy fill**: sort items by score descending; add each item if its estimated cost fits the remaining budget, else skip it and continue down the list (best-effort knapsack, not first-fit-stop). Stop when the list is exhausted or the remaining budget falls below a minimum item size.
+- Items have two granularities with separate costs:
+  - The **triple line** itself (cheap).
+  - Its **attached evidence snippet** (expensive). Evidence is only ever attached for the top-*K* scored triples (*K* default `3`, config `retrieval.top_evidence_k`). Each evidence snippet is the markdown section chunk it came from (M2 chunking), never the whole document.
+
+#### Compact output format
+
+- Triples are grouped by subject to avoid repeating entity names:
+
+  ```
+  membox: uses SQLite | has_phase 7.5 | next_step merge-branches
+  ```
+
+- Within each subject group, predicates are ordered by score descending.
+- An evidence block (top-*K* triples only) is printed after the triple groups, each entry tagged with `project / source_path / section / doc_date` provenance, e.g.:
+
+  ```
+  [membox docs/HANDOFF.md ## Current state 2026-06-09]
+  ```
+
+- A trailing one-line footer reports coverage honestly:
+
+  ```
+  (returned 18/42 triples, ~1,950/2,000 tokens; raise --budget for more)
+  ```
+
+  Silent truncation is forbidden; the caller must be able to see that more results exist.
+
+#### Evaluation tie-in (M3)
+
+`scripts/eval_memory.py` reports, per gold question: **hit/miss** AND **output token estimate**. Acceptance is judged on both dimensions: hit rate ≥ 80% within the default 2000-token budget (i.e. recall must be achieved while staying cheap, not by dumping everything).
+
+### 3.8 Supersession Semantics
 
 When the same source document is re-ingested with updated content, old relations derived from that source may become stale. Membox tracks this via a self-referencing `superseded_by` foreign key on the `relations` table:
 

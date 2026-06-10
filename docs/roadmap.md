@@ -175,6 +175,10 @@ cli.py                         ← Typer commands, each calling the agent
 - [ ] Full evaluation: manual run against local Ollama, results recorded in `eval/results/`
 - [ ] Measure graph-only recall baseline first
 - [ ] Implement SQLite FTS5 BM25 over `documents.content`, fused with graph retrieval (promotes hybrid retrieval from spec's future-options list into committed scope)
+- [ ] **Scored rerank**: implement composite scoring formula `score(t) = decay^hops(t) × (α·sim(t) + (1−α)·bm25(t))` with BFS lineage preservation; add `RetrievalConfig` group to `MemboxConfig` (`hop_decay=0.7`, `alpha=0.6`, `budget=2000`, `top_evidence_k=3`)
+- [ ] **Token-budget truncation**: implement deterministic token estimator (`est_tokens(s) = CJK_count + ceil(non_CJK_count / 4)`); greedy best-effort knapsack fill sorted by score descending; expose `membox query --budget <tokens>` CLI flag
+- [ ] **Compact subject-grouped output format**: group triples by subject with predicates ordered by score descending; print top-K evidence snippets with `project/source_path/section/doc_date` provenance tags; append honest coverage footer `(returned N/M triples, ~X/Y tokens; raise --budget for more)` — silent truncation is forbidden
+- [ ] **Eval metric — output token count**: extend `scripts/eval_memory.py` to report both hit/miss and output token estimate per gold question; acceptance criterion is hit rate ≥ 80% *within* the default 2000-token budget
 
 ### M4 — Supersession Semantics (Schema Migration)
 
@@ -193,6 +197,7 @@ cli.py                         ← Typer commands, each calling the agent
 **Validation**:
 
 - Gold-standard hit rate ≥ 80% overall; temporal-category questions 100%
+- Memory evaluation (`scripts/eval_memory.py`) reports both hit rate and output token estimate; acceptance requires hit rate ≥ 80% within the default 2000-token budget (recall achieved without dumping everything)
 - Re-ingesting an updated handoff changes the answers to "current state" questions
 - `uv run pytest` + ruff + mypy green; coverage ≥ 80%
 
