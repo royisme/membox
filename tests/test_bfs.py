@@ -192,13 +192,14 @@ def test_agent_retrieve_unresolved_seeds_returns_empty(tmp_path: Path) -> None:
 
 
 def test_agent_query_returns_formatted_context(tmp_path: Path) -> None:
-    """query() with DummyExtractor (no seeds) returns placeholder."""
+    """query() with DummyExtractor (no seeds) returns compact coverage footer."""
     from membox.core.agent import MemoryAgent
     from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
     ctx = agent.query("What does Alice do?")
-    assert "没有找到" in ctx
+    assert "returned" in ctx
+    assert "triples" in ctx
 
 
 # ---------------------------------------------------------------------------

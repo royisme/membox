@@ -159,13 +159,14 @@ def test_memory_agent_store_attribute_is_knowledge_store(tmp_path: Path) -> None
 
 
 def test_query_with_dummy_extractor_returns_placeholder(tmp_path: Path) -> None:
-    """DummyExtractor returns [] seeds → retrieve returns empty HopResult → placeholder."""
+    """DummyExtractor returns [] seeds → compact_query returns coverage footer."""
     from membox.core.agent import MemoryAgent
     from membox.services.extraction import DummyExtractor
 
     agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "q.db"))
     result = agent.query("any question about anything")
-    assert "没有找到" in result
+    assert "returned" in result
+    assert "triples" in result
 
 
 def test_to_prompt_context_empty_returns_placeholder(tmp_path: Path) -> None:
@@ -223,13 +224,14 @@ def test_cli_version_command() -> None:
 
 
 def test_cli_query_with_empty_seeds_returns_placeholder(tmp_path: Path) -> None:
-    """query with DummyExtractor never touches the store → works even in Phase 1."""
+    """query with DummyExtractor → compact coverage footer (0/0 triples)."""
     from membox.cli import app
 
     runner = CliRunner()
     result = runner.invoke(app, ["query", "any question", "--db", str(tmp_path / "q.db")])
     assert result.exit_code == 0
-    assert "没有找到" in result.output
+    assert "returned" in result.output
+    assert "triples" in result.output
 
 
 def test_cli_ingest_file_not_found(tmp_path: Path) -> None:

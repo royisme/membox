@@ -16,8 +16,8 @@ def query(
         None,
         "--budget",
         help=(
-            "Token budget for compact output (spec §3.7 scoring + knapsack truncation). "
-            "Omit to use the legacy prompt-context format."
+            "Token budget override for compact output (spec §3.7 scoring + knapsack "
+            "truncation). Defaults to config retrieval.budget (2000) when omitted."
         ),
     ),
     project: str | None = typer.Option(
@@ -26,11 +26,11 @@ def query(
         help="Filter evidence to this project name only.",
     ),
 ) -> None:
-    """Query the knowledge graph and print a structured context.
+    """Query the knowledge graph and print a compact context.
 
-    When --budget is supplied the output uses the compact subject-grouped
-    format with token-budget truncation and a coverage footer.  Without
-    --budget the legacy knowledge-topology format is used.
+    Output always uses the compact subject-grouped format with token-budget
+    truncation and a coverage footer (spec §3.7).  Use --budget to override
+    the default token budget (config retrieval.budget, 2000).
     """
     agent = make_agent(db, no_llm=no_llm, warn=True)
     result = agent.query(question, max_hops=max_hops, budget=budget, project_filter=project)

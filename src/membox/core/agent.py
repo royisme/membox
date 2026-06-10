@@ -196,32 +196,28 @@ class MemoryAgent:
         budget: int | None = None,
         project_filter: str | None = None,
     ) -> str:
-        """Query the knowledge graph and return a structured context string.
+        """Query the knowledge graph and return a compact context string.
 
-        When ``budget`` is supplied the result uses the compact subject-grouped
-        output format with token-budget truncation (spec §3.7).  Without a
-        budget the legacy ``to_prompt_context`` format is used for backward
-        compatibility.
+        Always uses the compact subject-grouped output format with token-budget
+        truncation (spec §3.7).  The budget defaults to
+        ``config.retrieval.budget`` (2000) when not explicitly supplied.
 
         Args:
             question: Natural language question.
             max_hops: Maximum BFS hops from seed entities.
-            budget: Token budget for compact output.  None = legacy format.
+            budget: Token budget override.  ``None`` uses the config default
+                (``retrieval.budget``, 2000).
             project_filter: Restrict evidence to this project name.
 
         Returns:
-            Formatted context string suitable for inclusion in an LLM prompt.
+            Compact context string with coverage footer.
         """
-        if budget is not None:
-            return self.compact_query(
-                question,
-                max_hops=max_hops,
-                budget=budget,
-                project_filter=project_filter,
-            )
-        seeds = self._extractor.extract_query_entities(question)
-        result = self.retrieve(seeds, max_hops)
-        return self.to_prompt_context(result)
+        return self.compact_query(
+            question,
+            max_hops=max_hops,
+            budget=budget,
+            project_filter=project_filter,
+        )
 
     def compact_query(
         self,
