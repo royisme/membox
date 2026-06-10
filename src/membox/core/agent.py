@@ -37,7 +37,8 @@ class MemoryAgent:
         embedder: Embedder | None = None,
         db_path: str = "memory.db",
     ) -> None:
-        self.store = KnowledgeStore(db_path)
+        # Pass embedder to KnowledgeStore so the meta guard can run on open.
+        self.store = KnowledgeStore(db_path, embedder=embedder)
         self._extractor = extractor
         self._embedder = embedder
 
@@ -99,7 +100,18 @@ class MemoryAgent:
             tid = name_to_id.get(rel.target)
             if tid is None:
                 tid = self.store.find_or_create_entity(rel.target, "Unknown", "", self._embedder)
-            self.store.upsert_relation(sid, tid, normalize_predicate(rel.predicate), doc_id)
+            norm_pred = normalize_predicate(rel.predicate)
+            # Compute triple embedding once at ingest time (spec §3.7).
+            # Rendered as "subject predicate object" plain text.
+            rel_embedding: list[float] | None = None
+            if self._embedder is not None:
+                src_row = self.store.get_entity(sid)
+                tgt_row = self.store.get_entity(tid)
+                src_str = src_row[1] if src_row else rel.source
+                tgt_str = tgt_row[1] if tgt_row else rel.target
+                triple_text = f"{src_str} {norm_pred} {tgt_str}"
+                rel_embedding = self._embedder.embed(triple_text)
+            self.store.upsert_relation(sid, tid, norm_pred, doc_id, embedding=rel_embedding)
             rel_count += 1
         return {"doc_id": doc_id, "entities": len(graph.entities), "relations": rel_count}
 
@@ -177,19 +189,111 @@ class MemoryAgent:
 
         return results
 
-    def query(self, question: str, max_hops: int = 2) -> str:
-        """Query the knowledge graph and return a structured prompt context string.
+    def query(
+        self,
+        question: str,
+        max_hops: int = 2,
+        budget: int | None = None,
+        project_filter: str | None = None,
+    ) -> str:
+        """Query the knowledge graph and return a structured context string.
+
+        When ``budget`` is supplied the result uses the compact subject-grouped
+        output format with token-budget truncation (spec §3.7).  Without a
+        budget the legacy ``to_prompt_context`` format is used for backward
+        compatibility.
 
         Args:
             question: Natural language question.
             max_hops: Maximum BFS hops from seed entities.
+            budget: Token budget for compact output.  None = legacy format.
+            project_filter: Restrict evidence to this project name.
 
         Returns:
             Formatted context string suitable for inclusion in an LLM prompt.
         """
+        if budget is not None:
+            return self.compact_query(
+                question,
+                max_hops=max_hops,
+                budget=budget,
+                project_filter=project_filter,
+            )
         seeds = self._extractor.extract_query_entities(question)
         result = self.retrieve(seeds, max_hops)
         return self.to_prompt_context(result)
+
+    def compact_query(
+        self,
+        question: str,
+        max_hops: int = 2,
+        budget: int | None = None,
+        project_filter: str | None = None,
+        config: object | None = None,
+    ) -> str:
+        """Hybrid BFS + scored rerank + compact output with token-budget truncation.
+
+        Implements the full spec §3.7 pipeline:
+        1. Resolve seed entities (alias → embedding similarity).
+        2. BFS with depth tracking.
+        3. FTS5 BM25 scoring + cosine sim scoring via stored relation embeddings.
+        4. Composite score: ``decay^hops * (a*sim + (1-a)*bm25)``.
+        5. Greedy best-effort knapsack within ``budget`` tokens.
+        6. Compact subject-grouped output with provenance tags and coverage footer.
+
+        Args:
+            question: Natural language question.
+            max_hops: Maximum BFS hops.
+            budget: Token budget; defaults to ``config.retrieval.budget`` (2000).
+            project_filter: Restrict evidence to this project name.
+            config: :class:`~membox.config.MemboxConfig` or
+                :class:`~membox.config.RetrievalConfig`; uses defaults if None.
+
+        Returns:
+            Compact context string with coverage footer.
+        """
+        from membox.config import MemboxConfig, RetrievalConfig
+
+        if isinstance(config, MemboxConfig):
+            ret_cfg = config.retrieval
+        elif isinstance(config, RetrievalConfig):
+            ret_cfg = config
+        else:
+            ret_cfg = RetrievalConfig()
+
+        effective_budget = budget if budget is not None else ret_cfg.budget
+
+        seeds = self._extractor.extract_query_entities(question)
+        seed_ids: list[int] = []
+        for name in seeds:
+            eid = self.store.find_entity_by_alias(normalize_name(name))
+            if eid is None and self._embedder is not None:
+                emb = self._embedder.embed(name)
+                eid = self.store.find_similar_entity(emb, None)
+            if eid is not None:
+                seed_ids.append(eid)
+
+        if not seed_ids:
+            return "(returned 0/0 triples, ~0/0 tokens)"
+
+        query_emb: list[float] | None = None
+        if self._embedder is not None:
+            query_emb = self._embedder.embed(question)
+
+        scored = self.store.scored_query(
+            seed_ids=seed_ids,
+            max_hops=max_hops,
+            query=question,
+            query_embedding=query_emb,
+            config=ret_cfg,
+            project_filter=project_filter,
+        )
+
+        return self.store.compact_output(
+            scored=scored,
+            budget=effective_budget,
+            top_evidence_k=ret_cfg.top_evidence_k,
+        )
 
     def retrieve(self, seed_names: list[str], max_hops: int = 2) -> HopResult:
         """Resolve seed names to entity IDs and BFS-expand the graph.

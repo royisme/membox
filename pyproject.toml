@@ -92,6 +92,8 @@ ignore = [
 "src/membox/core/agent.py" = ["TC003"]
 # demo script: print is intentional; Chinese text uses fullwidth punctuation by convention
 "examples/**/*" = ["T20", "RUF001"]
+# eval harness: print is the reporting mechanism (CLI tool, not library code)
+"scripts/eval_memory.py" = ["T20"]
 
 [tool.ruff.format]
 quote-style = "double"

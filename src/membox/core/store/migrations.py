@@ -16,6 +16,24 @@ table for embedding-model guard data.  Old databases at user_version=1 are
 upgraded transparently; brand-new databases pass through both migrations in
 sequence (migration 0001 creates the base tables, migration 0002 adds the new
 columns on the same schema run).
+
+Migration 0003 (M3 — Hybrid Retrieval) adds two structures:
+
+1. **Relation embedding column** — ``relations.embedding BLOB`` stores the
+   triple text (``"subject predicate object"``) embedding as packed IEEE-754
+   float32 bytes (same encoding as ``entities.embedding``: ``struct.pack("Nf",
+   ...)`` / ``struct.unpack``).  The embedding is computed once at ingest time
+   and used for ``sim(t)`` in the composite scoring formula.  Storing directly
+   on the relations table (rather than a sidecar table) avoids an extra JOIN
+   and keeps the relation row self-contained.
+
+2. **FTS5 virtual table (external-content)** — ``documents_fts`` is an
+   external-content FTS5 table pointing at ``documents(content)``.  The
+   external-content design was chosen over contentless because it avoids
+   keeping a second copy of all text while still allowing snippet/highlight
+   functions when needed.  Three ``AFTER INSERT / UPDATE / DELETE`` triggers on
+   ``documents`` keep ``documents_fts`` in sync automatically.  A backfill
+   ``INSERT INTO documents_fts`` seeds existing rows during the migration.
 """
 
 from __future__ import annotations
@@ -118,9 +136,83 @@ def _migrate_0002(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_source_path ON documents(source_path);")
 
 
+def _migrate_0003(conn: sqlite3.Connection) -> None:
+    """Apply M3 hybrid-retrieval schema changes.
+
+    Adds:
+    - ``relations.embedding BLOB``: packed float32 bytes for the triple embedding,
+      computed at ingest time (one embedder call per relation write).  NULL until
+      the relation is first written with an active embedder.
+    - ``documents_fts``: external-content FTS5 virtual table over
+      ``documents(content)`` with three sync triggers to stay up-to-date.
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    # 1. Add embedding column to relations (idempotent: skip if already present).
+    rel_cols: set[str] = {
+        row[1] for row in conn.execute("PRAGMA table_info(relations);").fetchall()
+    }
+    if "embedding" not in rel_cols:
+        conn.execute("ALTER TABLE relations ADD COLUMN embedding BLOB;")
+
+    # 2. Create FTS5 external-content virtual table.
+    # content='documents' + content_rowid='id' tells FTS5 to read from
+    # documents when it needs to re-rank / highlight; we manage index writes
+    # ourselves via triggers below.
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts
+        USING fts5(
+            content,
+            content='documents',
+            content_rowid='id'
+        );
+        """
+    )
+
+    # 3. Sync triggers: keep documents_fts in lockstep with documents.
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_ai
+        AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_au
+        AFTER UPDATE OF content ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, content)
+                VALUES ('delete', old.id, old.content);
+            INSERT INTO documents_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_ad
+        AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, content)
+                VALUES ('delete', old.id, old.content);
+        END;
+        """
+    )
+
+    # 4. Backfill existing rows into the FTS index.
+    conn.execute(
+        """
+        INSERT INTO documents_fts(rowid, content)
+        SELECT id, content FROM documents;
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
+    (3, _migrate_0003),
 ]
 
 
