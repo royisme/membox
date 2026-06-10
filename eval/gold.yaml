@@ -1,0 +1,193 @@
+# Membox Phase 7.5 M1 — Gold-standard QA pairs
+# Snapshot date: 2026-06-09
+# Schema: id, category, question, expected_keywords, source, notes
+#
+# Categories:
+#   single_hop  — fact stated in one document
+#   multi_hop   — connecting facts across documents or projects
+#   temporal    — current state/phase whose answer must come from the latest version
+#
+# expected_keywords: ALL must appear (case-insensitive substring match) in
+# retrieval output to count as a hit.
+
+- id: q01
+  category: single_hop
+  question: "What storage backend does membox use and what WAL-mode pragma does it enable?"
+  expected_keywords: ["sqlite", "wal", "foreign_keys"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Locked architectural decision section"
+
+- id: q02
+  category: single_hop
+  question: "How many tests were passing on the feature/phase-7-openai branch, and what was the coverage percentage?"
+  expected_keywords: ["165", "97.82"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Session 2 stats table: 165 tests, 97.82% coverage"
+
+- id: q03
+  category: single_hop
+  question: "What is the three-layer cascade used in find_or_create_entity?"
+  expected_keywords: ["alias", "cosine", "0.85"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Locked decisions: alias → cosine embedding ≥ 0.85 → create"
+
+- id: q04
+  category: single_hop
+  question: "What branch naming convention must all membox contributors follow?"
+  expected_keywords: ["feature", "fix", "main"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Locked decisions: always feature/* or fix/*, never commit to main or develop"
+
+- id: q05
+  category: single_hop
+  question: "What is the recommended next step for the m5go project?"
+  expected_keywords: ["stt", "agent"]
+  source: ["m5go--handoff-2026-03-16.md"]
+  notes: "Recommended Next Step section: Real STT + agent loop"
+
+- id: q06
+  category: single_hop
+  question: "What is the known audio playback issue on the m5go device?"
+  expected_keywords: ["buzzing", "static"]
+  source: ["m5go--handoff-2026-03-16.md"]
+  notes: "Known Issue: Playback buzzing / static"
+
+- id: q07
+  category: single_hop
+  question: "What problem did the moziBot NO_REPLY leak fix address regarding subagent notifications?"
+  expected_keywords: ["subagent", "notification"]
+  source: ["moziBot--HANDOFF.md"]
+  notes: "NO_REPLY leak fix + heartbeat triage section"
+
+- id: q08
+  category: single_hop
+  question: "In pika, what does the Answer button do after the semantic refactor in the latest session?"
+  expected_keywords: ["transcript", "handleWhatToSay"]
+  source: ["pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md"]
+  notes: "handleAnswerNow = () => chat.handleWhatToSay() — transcript-based answer"
+
+- id: q09
+  category: single_hop
+  question: "What are the three STT coherent profiles available in the pika settings overlay?"
+  expected_keywords: ["sentence_bias", "low_latency", "coherent"]
+  source: ["pika--HANDOFF_STT_COHERENT_PROFILE.md"]
+  notes: "SettingsOverlay Radio/Select control: three profile options"
+
+- id: q10
+  category: single_hop
+  question: "Which slices of the playfun Kishima game are currently marked as In Progress?"
+  expected_keywords: ["Slice 4", "Slice 5"]
+  source: ["playfun--HANDOFF.md"]
+  notes: "Implementation Status table: Touch UI/Phaser Board and Assets/Closed Test"
+
+- id: q11
+  category: single_hop
+  question: "What is the easymem project's open question about PR #1?"
+  expected_keywords: ["merge", "review"]
+  source: ["easymem--HANDOFF.md"]
+  notes: "Open questions: PR #1 review + merge pending"
+
+- id: q12
+  category: single_hop
+  question: "玲珑命理项目中苏轼八字案例的命格名是什么？"
+  expected_keywords: ["苏轼", "癸水", "七杀"]
+  source: ["china-zhouyi-app--HANDOFF.md"]
+  notes: "Current state: 丙子辛丑癸亥乙卯·癸水七杀格"
+
+- id: q13
+  category: single_hop
+  question: "What is the approval status of the pika STT Coherent Profile plan and who is the decision owner?"
+  expected_keywords: ["批准", "Roy"]
+  source: ["pika--HANDOFF_STT_COHERENT_PROFILE.md"]
+  notes: "Status: 计划已批准 / Decision owner: User (Roy)"
+
+- id: q14
+  category: single_hop
+  question: "What Cloudflare primitive does the playfun Kishima game use for authoritative room and game state storage?"
+  expected_keywords: ["Durable Object", "room"]
+  source: ["playfun--HANDOFF.md"]
+  notes: "Slice 1 and 2: Durable Object room/game storage"
+
+- id: q15
+  category: single_hop
+  question: "What UI bug with Gemini streaming was fixed in pika's last completed session?"
+  expected_keywords: ["stream", "token", "UI"]
+  source: ["pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md"]
+  notes: "Gemini stream tokens 不显示在 UI — fixed in previous session"
+
+- id: q16
+  category: multi_hop
+  question: "Which projects in the corpus use SQLite as their primary storage backend?"
+  expected_keywords: ["membox", "sqlite"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Cross-project: only membox uses SQLite; answer requires knowing other projects' stacks"
+
+- id: q17
+  category: multi_hop
+  question: "Which projects in the corpus are primarily implemented in TypeScript?"
+  expected_keywords: ["moziBot", "playfun"]
+  source: ["moziBot--HANDOFF.md", "playfun--HANDOFF.md", "pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md"]
+  notes: "moziBot runtime is TS, playfun is pnpm/TS workspace, pika is Electron/React/TS"
+
+- id: q18
+  category: multi_hop
+  question: "Which projects have an open question or pending task about merging a pull request?"
+  expected_keywords: ["easymem", "merge"]
+  source: ["easymem--HANDOFF.md", "china-zhouyi-app--HANDOFF.md"]
+  notes: "easymem: PR #1 review pending; china-zhouyi-app: PR #34 苏轼 待 merge"
+
+- id: q19
+  category: multi_hop
+  question: "Which projects are written in Python and what are their main storage or runtime technologies?"
+  expected_keywords: ["membox", "m5go", "sqlite"]
+  source: ["membox--HANDOFF.md", "m5go--handoff-2026-03-16.md"]
+  notes: "membox=Python+SQLite; m5go=Python server; multi-hop across two docs"
+
+- id: q20
+  category: multi_hop
+  question: "Which projects use an LLM API (embedding, extraction, or chat) as a core part of their functionality?"
+  expected_keywords: ["membox", "pika", "gemini"]
+  source: ["membox--HANDOFF.md", "pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md", "china-zhouyi-app--HANDOFF.md"]
+  notes: "membox: OpenAI extractor/embedder; pika: Gemini chat; china-zhouyi: LLM reading"
+
+- id: q21
+  category: multi_hop
+  question: "哪些项目的 handoff 文档主要使用中文书写？"
+  expected_keywords: ["china-zhouyi", "pika"]
+  source: ["china-zhouyi-app--HANDOFF.md", "pika--HANDOFF_STT_COHERENT_PROFILE.md"]
+  notes: "china-zhouyi-app is fully Chinese; pika STT/Answer handoffs are predominantly Chinese"
+
+- id: q22
+  category: multi_hop
+  question: "Which project uses both a HANDOFF.md and a separate EVENTS.md file to track session history?"
+  expected_keywords: ["playfun", "Kishima"]
+  source: ["playfun--EVENTS.md", "playfun--HANDOFF.md"]
+  notes: "Only playfun uses both; EVENTS.md logs timestamped mode=start/checkpoint entries"
+
+- id: q23
+  category: temporal
+  question: "What is the current membox state — are any feature branches merged to main yet?"
+  expected_keywords: ["unmerged", "feature"]
+  source: ["membox--HANDOFF.md"]
+  notes: "Temporal: main has zero implementation; all 7 branches exist but unmerged — answer must reflect latest HANDOFF"
+
+- id: q24
+  category: temporal
+  question: "What is the current implementation status of Kishima Slice 4 (Touch UI and Phaser Board)?"
+  expected_keywords: ["In Progress", "Slice 4"]
+  source: ["playfun--HANDOFF.md"]
+  notes: "Temporal: Slice 4 is In Progress per latest handoff; must not be answered from stale/prior sessions"
+
+- id: q25
+  category: temporal
+  question: "玲珑命理项目目前哪个 PR 仍在等待合并，内容主题是什么？"
+  expected_keywords: ["PR #34", "苏轼"]
+  source: ["china-zhouyi-app--HANDOFF.md"]
+  notes: "Temporal: PR #34 苏轼案例 待 merge/部署 — must come from current state section of latest handoff"
+
+- id: q26
+  category: temporal
+  question: "What is the current next concrete step for the easymem project?"
+  expected_keywords: ["merge", "PR #1"]
+  source: ["easymem--HANDOFF.md"]
+  notes: "Temporal: next steps include running gate + merging PR #1; superseded if PR merges"

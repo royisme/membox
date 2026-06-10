@@ -8,21 +8,11 @@ Functional Python files include their module header so tools can reuse the file 
 
 ## Directory Outline
 
-- `.claude/`
-  - `.claude/scheduled_tasks.lock`
-- `.crew/`
-  - `.crew/audit/`
-    - `.crew/audit/prune.jsonl`
-  - `.crew/state/`
-    - `.crew/state/metrics/`
-      - `.crew/state/metrics/2026-06-10.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
     - `.github/workflows/ci.yml`
   - `.github/dependabot.yml`
-- `.works/`
-  - `.works/translation_plan.md`
 - `docs/`
   - `docs/agent/`
     - `docs/agent/01-project-contract.md`
@@ -35,6 +25,19 @@ Functional Python files include their module header so tools can reuse the file 
   - `docs/spec-v0.2-draft.md`
   - `docs/spec.md`
   - `docs/workflow.md`
+- `eval/`
+  - `eval/corpus/`
+    - `eval/corpus/china-zhouyi-app--HANDOFF.md`
+    - `eval/corpus/easymem--HANDOFF.md`
+    - `eval/corpus/m5go--handoff-2026-03-16.md`
+    - `eval/corpus/membox--HANDOFF.md`
+    - `eval/corpus/moziBot--HANDOFF.md`
+    - `eval/corpus/pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md`
+    - `eval/corpus/pika--HANDOFF_STT_COHERENT_PROFILE.md`
+    - `eval/corpus/playfun--EVENTS.md`
+    - `eval/corpus/playfun--HANDOFF.md`
+  - `eval/gold.yaml`
+  - `eval/README.md`
 - `examples/`
   - `examples/demo.py` — End-to-end demo: ingest real documents and query the knowledge graph via OpenAI.
 - `scripts/`
@@ -89,6 +92,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
+  - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
