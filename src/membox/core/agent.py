@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from membox.core.chunking import chunk_markdown
 from membox.core.normalize import normalize_name, normalize_predicate
 from membox.core.store import KnowledgeStore
-from membox.model.schema import Entity, ExtractedGraph, HopResult, Relation
+from membox.model.schema import (
+    DocumentChunk,
+    Entity,
+    ExtractedGraph,
+    HopResult,
+    IngestMetadata,
+    Relation,
+)
 
 if TYPE_CHECKING:
     from membox.services.embedding import Embedder
@@ -46,6 +56,11 @@ class MemoryAgent:
         text: str,
         graph: ExtractedGraph,
         source: str = "",
+        *,
+        project: str | None = None,
+        source_path: str | None = None,
+        section: str | None = None,
+        doc_date: str | None = None,
     ) -> dict[str, int]:
         """Bypass LLM extraction and ingest a pre-built graph. Primary entry point for tests.
 
@@ -53,11 +68,23 @@ class MemoryAgent:
             text: Original document text (stored for evidence lineage).
             graph: Pre-extracted entities and relations.
             source: Optional source identifier.
+            project: Repository / directory name for ``--project`` scoping.
+            source_path: Canonical file path; drives automatic version numbering
+                on re-ingest.
+            section: Section heading if text was chunked from a larger document.
+            doc_date: ISO-8601 date string of the document snapshot.
 
         Returns:
             Dict with doc_id, entities count, and relations count.
         """
-        doc_id = self.store.insert_document(text, source)
+        doc_id = self.store.insert_document(
+            text,
+            source,
+            project=project,
+            source_path=source_path,
+            section=section,
+            doc_date=doc_date,
+        )
         name_to_id: dict[str, int] = {}
         for entity in graph.entities:
             eid = self.store.find_or_create_entity(
@@ -75,6 +102,80 @@ class MemoryAgent:
             self.store.upsert_relation(sid, tid, normalize_predicate(rel.predicate), doc_id)
             rel_count += 1
         return {"doc_id": doc_id, "entities": len(graph.entities), "relations": rel_count}
+
+    def ingest_file(
+        self,
+        file_path: Path,
+        metadata: IngestMetadata | None = None,
+    ) -> list[dict[str, int]]:
+        """Ingest a file, chunking markdown documents by ``##`` section headings.
+
+        Each markdown section is extracted separately so entity/relation context
+        is tightly scoped to the section.  Non-markdown files are ingested as a
+        single document.  The ``source_path`` drives idempotent re-ingest
+        versioning: re-ingesting the same file creates new document rows at the
+        next version number; old rows are never deleted.
+
+        Judgment call (spec does not specify default for ``project``):
+        ``project`` defaults to the name of the nearest git repository root
+        directory found by walking up from the file's location (see
+        ``_infer_project``).  This correctly handles files inside subdirectories
+        such as ``docs/HANDOFF.md`` — they map to the repo name, not ``"docs"``.
+        Falls back to the file's parent directory name when no ``.git`` entry is
+        found anywhere in the directory hierarchy.  The CLI ``--project`` option
+        always overrides this default.
+
+        Args:
+            file_path: Path to the file to ingest.  Must exist and be readable.
+            metadata: Optional metadata overrides (project, source_path,
+                doc_date).  If ``source_path`` is omitted, the resolved absolute
+                path of ``file_path`` is used.  If ``doc_date`` is omitted, the
+                file's mtime date (ISO-8601) is used.
+
+        Returns:
+            List of per-chunk ingest result dicts (doc_id, entities, relations).
+
+        Raises:
+            FileNotFoundError: If ``file_path`` does not exist.
+        """
+        resolved = file_path.resolve()
+        if not resolved.exists():
+            msg = f"File not found: {file_path}"
+            raise FileNotFoundError(msg)
+
+        if metadata is None:
+            metadata = IngestMetadata()
+
+        effective_source_path = metadata.source_path or str(resolved)
+        effective_project = metadata.project or _infer_project(resolved)
+        effective_doc_date = metadata.doc_date or _file_mtime_date(resolved)
+
+        content = resolved.read_text(encoding="utf-8")
+        suffix = resolved.suffix.lower()
+
+        if suffix in {".md", ".markdown"}:
+            raw_chunks = chunk_markdown(content)
+        else:
+            raw_chunks = [(None, content)]
+
+        results: list[dict[str, int]] = []
+        for section_title, chunk_content in raw_chunks:
+            if not chunk_content.strip():
+                continue
+            chunk = DocumentChunk(section=section_title, content=chunk_content)
+            graph = self._extractor.extract(chunk.content)
+            result = self.ingest_extracted(
+                chunk.content,
+                graph,
+                source=effective_source_path,
+                project=effective_project,
+                source_path=effective_source_path,
+                section=chunk.section,
+                doc_date=effective_doc_date,
+            )
+            results.append(result)
+
+        return results
 
     def query(self, question: str, max_hops: int = 2) -> str:
         """Query the knowledge graph and return a structured prompt context string.
@@ -156,3 +257,50 @@ class MemoryAgent:
             List of Relation objects with source_name and target_name resolved.
         """
         return self.store.list_relations()
+
+
+def _file_mtime_date(path: Path) -> str:
+    """Return the file modification date as an ISO-8601 date string (YYYY-MM-DD).
+
+    Args:
+        path: Resolved, existing file path.
+
+    Returns:
+        Date string in ``YYYY-MM-DD`` format derived from the file's mtime.
+    """
+    mtime = path.stat().st_mtime
+    return datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC).strftime("%Y-%m-%d")
+
+
+def _infer_project(path: Path) -> str:
+    """Infer the project name for a file by walking up to the nearest git root.
+
+    Walks upward from *path*'s directory looking for a ``.git`` entry (which
+    may be a directory in a normal clone or a file in a git worktree).  If a
+    git root is found its directory name is returned; otherwise the immediate
+    parent directory name is used as a fallback.
+
+    Args:
+        path: Resolved absolute path to the file being ingested.
+
+    Returns:
+        The name of the git repository root directory, or the file's immediate
+        parent directory name when no ``.git`` entry is found up to the
+        filesystem root.
+
+    Examples:
+        >>> _infer_project(Path("/home/user/myrepo/docs/HANDOFF.md"))
+        'myrepo'  # git root found at /home/user/myrepo
+        >>> _infer_project(Path("/tmp/scratch/note.txt"))
+        'scratch'  # no git root found, falls back to parent dir
+    """
+    current = path.parent
+    while True:
+        if (current / ".git").exists():
+            return current.name
+        parent = current.parent
+        if parent == current:
+            # Reached the filesystem root without finding .git.
+            break
+        current = parent
+    return path.parent.name

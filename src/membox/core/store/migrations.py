@@ -8,6 +8,14 @@ version is greater than the database's current ``user_version`` and then bumps
 Migration 0001 is the full v0.1 DDL written with ``CREATE TABLE IF NOT
 EXISTS`` so that databases created before the migration mechanism existed
 (``user_version == 0`` but tables already present) pass through idempotently.
+
+Migration 0002 (M2 — Ingestion Hardening) adds document scoping metadata
+columns (``project``, ``source_path``, ``section``, ``doc_date``, ``version``)
+to ``documents`` via ``ALTER TABLE … ADD COLUMN`` and creates the ``meta``
+table for embedding-model guard data.  Old databases at user_version=1 are
+upgraded transparently; brand-new databases pass through both migrations in
+sequence (migration 0001 creates the base tables, migration 0002 adds the new
+columns on the same schema run).
 """
 
 from __future__ import annotations
@@ -66,8 +74,53 @@ CREATE INDEX IF NOT EXISTS idx_rel_tgt  ON relations(target_id);
 CREATE INDEX IF NOT EXISTS idx_alias_eid ON entity_aliases(entity_id);
 """
 
+
+def _migrate_0002(conn: sqlite3.Connection) -> None:
+    """Apply M2 ingestion-hardening schema changes.
+
+    Adds nullable metadata columns to ``documents`` and creates the ``meta``
+    table.  Uses ``ALTER TABLE … ADD COLUMN`` so existing data is preserved;
+    new columns default to NULL.
+
+    The ``version`` column records how many times a given ``source_path`` has
+    been ingested — the first ingest is version 1, each re-ingest increments by
+    1.  Rows created before migration 0002 default to NULL (unknown version).
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    new_columns = [
+        ("project", "TEXT"),
+        ("source_path", "TEXT"),
+        ("section", "TEXT"),
+        ("doc_date", "TEXT"),
+        ("version", "INTEGER"),
+    ]
+    existing: set[str] = {
+        row[1] for row in conn.execute("PRAGMA table_info(documents);").fetchall()
+    }
+    for col_name, col_type in new_columns:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type};")
+
+    # Create meta table — stores embedding_model and embedding_dimensions once
+    # at DB creation; mismatches on open raise a clear error (M3 guard logic).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS meta (
+            key    TEXT PRIMARY KEY,
+            value  TEXT NOT NULL
+        );
+        """
+    )
+
+    # Index to speed up version lookups by source_path.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_source_path ON documents(source_path);")
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
+    (2, _migrate_0002),
 ]
 
 
