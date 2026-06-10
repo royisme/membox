@@ -59,9 +59,18 @@ class ProviderConfig(BaseModel):
 
 
 class ExtractionConfig(ProviderConfig):
-    """Provider settings for the LLM extraction capability."""
+    """Provider settings for the LLM extraction capability.
+
+    Attributes:
+        max_completion_tokens: Maximum number of tokens the model may generate
+            in a single response.  ``None`` defers to the server default.
+            Set this to a positive integer (e.g. ``2048``) when targeting
+            providers with a small context window (e.g. Ollama at 8 192
+            tokens) so the prompt + completion cannot overflow the window.
+    """
 
     model: str = "gpt-4o-mini"
+    max_completion_tokens: int | None = None
 
 
 class EmbeddingConfig(ProviderConfig):

@@ -26,10 +26,13 @@ appended and its ~20-token cost is excluded from the budget calculation.
 
 from __future__ import annotations
 
-import math
 import re
 from collections import OrderedDict
 from typing import TYPE_CHECKING
+
+# est_tokens is defined in core.tokens and re-exported here for backward
+# compatibility: callers that import it from this module continue to work.
+from membox.core.tokens import est_tokens as est_tokens
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -39,39 +42,6 @@ if TYPE_CHECKING:
 
 # BFS depth for seed entities.
 _SEED_DEPTH = 0
-
-# Regex matching CJK unified ideographs + kana + hangul + fullwidth forms.
-# These characters typically map to ~1 token each in BPE tokenizers.
-_CJK_RE = re.compile(
-    r"[一-鿿"
-    r"㐀-䶿"
-    r"\U00020000-\U0002a6df"
-    r"　-〿"
-    r"＀-￯"
-    r"ぁ-ゟ"
-    r"\u30a0-\u30ff"
-    r"가-힯"
-    r"]"
-)
-
-
-def est_tokens(s: str) -> int:
-    """Deterministically estimate the token count of a string.
-
-    Formula: ``CJK_count + ceil(non_CJK_count / 4)``.  CJK characters
-    typically occupy one token each; non-CJK (ASCII-heavy) text is roughly
-    4 characters per token on average.  Documented as an approximation;
-    consistency matters more than accuracy.
-
-    Args:
-        s: Input string.
-
-    Returns:
-        Non-negative estimated token count.
-    """
-    cjk_count = sum(1 for _ in _CJK_RE.finditer(s))
-    non_cjk_count = len(s) - cjk_count
-    return cjk_count + math.ceil(non_cjk_count / 4)
 
 
 class RetrievalOps:

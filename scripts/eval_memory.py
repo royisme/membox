@@ -96,14 +96,19 @@ class _SemanticDummyEmbedder:
 def ingest_corpus(agent: MemoryAgent, corpus_dir: Path) -> int:
     """Ingest all .md files from corpus_dir into the agent's knowledge store.
 
+    Extraction failures for individual chunks are printed as per-file warnings
+    but do not abort the corpus run.  A summary of failed chunks is printed
+    at the end.  Silent failure is forbidden: every failure is reported.
+
     Args:
         agent: Configured MemoryAgent.
         corpus_dir: Directory containing corpus HANDOFF / document files.
 
     Returns:
-        Total number of document chunks ingested.
+        Total number of successfully ingested document chunks.
     """
     total = 0
+    total_failed = 0
     for md_file in sorted(corpus_dir.glob("*.md")):
         # Derive project name from filename prefix (e.g. "membox--HANDOFF.md" → "membox").
         project = md_file.stem.split("--")[0]
@@ -111,7 +116,22 @@ def ingest_corpus(agent: MemoryAgent, corpus_dir: Path) -> int:
             md_file,
             IngestMetadata(project=project, source_path=str(md_file)),
         )
-        total += len(results)
+        failed = [r for r in results if "error" in r]
+        ok = [r for r in results if "error" not in r]
+        if failed:
+            for r in failed:
+                section = r.get("section") or "(preamble)"
+                print(
+                    f"  WARNING: extraction failed for {md_file.name}::{section} — {r['error']}",
+                    file=sys.stderr,
+                )
+            total_failed += len(failed)
+        total += len(ok)
+    if total_failed:
+        print(
+            f"Corpus ingestion complete: {total} chunks OK, {total_failed} chunks FAILED.",
+            file=sys.stderr,
+        )
     return total
 
 
@@ -233,7 +253,9 @@ def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
     embed_dim = 768  # embeddinggemma typical dimension
 
     client = OpenAI(base_url=base_url, api_key="ollama")
-    extractor = ExtractionService(OpenAIChatClient(client, extraction_model))  # type: ignore[assignment]
+    extractor = ExtractionService(
+        OpenAIChatClient(client, extraction_model, max_completion_tokens=2048)
+    )  # type: ignore[assignment]
     embedder = EmbeddingService(OpenAIEmbedClient(client, embedding_model, embed_dim), embed_dim)
     embedder.model = embedding_model  # type: ignore[attr-defined]
 

@@ -10,58 +10,49 @@ Functional Python files include their module header so tools can reuse the file 
 
 - `.claude/`
   - `.claude/worktrees/`
-    - `.claude/worktrees/agent-a07e84ec3664ca498/`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/.github/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/.github/workflows/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/.github/dependabot.yml`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/docs/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/agent/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/code-standards.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/HANDOFF.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/repository-map.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/roadmap.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/spec-v0.2-draft.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/spec.md`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/docs/workflow.md`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/eval/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/eval/corpus/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/eval/gold.yaml`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/eval/README.md`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/examples/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/examples/demo.py` — End-to-end demo: ingest real documents and query the knowledge graph via OpenAI.
-      - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/__init__.py` — Automation scripts for repository maintenance and release workflows.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/bump_version.py` — Synchronize the project version across release metadata files.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/eval_memory.py` — scripts/eval_memory.py — membox Phase 7.5 M3 evaluation harness.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
-      - `.claude/worktrees/agent-a07e84ec3664ca498/src/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/src/membox/`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/tests/`
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/__init__.py` — Test package marker for membox test modules.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/conftest.py` — Pytest configuration and shared fixtures.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_release_scripts.py` — Tests for release automation helper scripts.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
-        - `.claude/worktrees/agent-a07e84ec3664ca498/tests/test_version.py` — Tests for membox package metadata.
-      - `.claude/worktrees/agent-a07e84ec3664ca498/.editorconfig`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/.gitignore`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/.pre-commit-config.yaml`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/.python-version`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/AGENTS.md`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/CHANGELOG.md`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/CLAUDE.md`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/pyproject.toml`
-      - `.claude/worktrees/agent-a07e84ec3664ca498/README.md`
+    - `.claude/worktrees/agent-a5feb947691a2ff8d/`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/.github/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/.github/workflows/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/.github/dependabot.yml`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/agent/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/code-standards.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/HANDOFF.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/repository-map.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/roadmap.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/spec-v0.2-draft.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/spec.md`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/docs/workflow.md`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/examples/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/examples/demo.py` — End-to-end demo: ingest real documents and query the knowledge graph via OpenAI.
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/scripts/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/scripts/__init__.py` — Automation scripts for repository maintenance and release workflows.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/scripts/bump_version.py` — Synchronize the project version across release metadata files.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/src/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/src/membox/`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/`
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/__init__.py` — Test package marker for membox test modules.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/conftest.py` — Pytest configuration and shared fixtures.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_release_scripts.py` — Tests for release automation helper scripts.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
+        - `.claude/worktrees/agent-a5feb947691a2ff8d/tests/test_version.py` — Tests for membox package metadata.
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/.editorconfig`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/.gitignore`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/.pre-commit-config.yaml`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/.python-version`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/AGENTS.md`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/CHANGELOG.md`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/CLAUDE.md`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/pyproject.toml`
+      - `.claude/worktrees/agent-a5feb947691a2ff8d/README.md`
   - `.claude/scheduled_tasks.lock`
 - `.crew/`
   - `.crew/audit/`
@@ -74,6 +65,13 @@ Functional Python files include their module header so tools can reuse the file 
     - `.github/workflows/auto-merge.yml`
     - `.github/workflows/ci.yml`
   - `.github/dependabot.yml`
+- `.serena/`
+  - `.serena/cache/`
+    - `.serena/cache/python/`
+  - `.serena/memories/`
+  - `.serena/.gitignore`
+  - `.serena/project.local.yml`
+  - `.serena/project.yml`
 - `.works/`
   - `.works/translation_plan.md`
 - `docs/`
@@ -134,6 +132,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
+      - `src/membox/core/tokens.py` — membox token estimation utilities.
     - `src/membox/model/`
       - `src/membox/model/__init__.py` — Data model layer: Pydantic models and public data shapes.
       - `src/membox/model/schema.py` — membox schema — Pydantic data models for the knowledge graph.
@@ -160,6 +159,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
+  - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
