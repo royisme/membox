@@ -48,3 +48,6 @@ Thumbs.db
 .env
 .env.*
 docs/reference/
+.works/
+.claude/
+.crew/

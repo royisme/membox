@@ -6,17 +6,27 @@ Read this file before changing storage, retrieval, extraction, embedding, normal
 
 The target layout follows `docs/spec.md`:
 
-- `schema.py`: Pydantic models and public data shapes.
-- `store.py`: SQLite schema creation, CRUD, deduplication persistence, evidence links, BFS retrieval.
-- `extract.py`: LLM extraction via `Protocol`; implementations must be injectable.
-- `embed.py`: Embedding via `Protocol`; implementations must be injectable and optional.
-- `normalize.py`: Predicate normalization and synonym dictionaries.
-- `agent.py`: `MemoryAgent` orchestration layer.
-- `cli.py`: Typer CLI entry point.
-- `ast_parser.py`: Optional tree-sitter based source analysis.
+- `model/schema.py`: Pydantic models and public data shapes.
+- `config.py`: `MemboxConfig` — provider, model, base_url, and API-key selection per capability (extraction / embedding).
+- `core/store/`: SQLite storage package behind the `KnowledgeStore` facade:
+  - `connection.py`: per-thread connections, WAL/PRAGMAs, transaction context manager, `RLock`.
+  - `migrations.py`: `PRAGMA user_version` migration machinery (ordered `MIGRATIONS` list).
+  - `entities.py`: entity CRUD, find-or-create deduplication, aliases.
+  - `relations.py`: relation CRUD and evidence links.
+  - `documents.py`: document persistence.
+  - `retrieval.py`: BFS multi-hop retrieval.
+- `services/extraction.py`: LLM extraction via the domain-level `LLMExtractor` `Protocol`; implementations must be injectable and delegate HTTP to `providers/`.
+- `services/embedding.py`: Embedding via the domain-level `Embedder` `Protocol`; implementations must be injectable and optional.
+- `services/prompts/`: Prompt templates as module-level constants/builders — no inline prompts in service logic.
+- `services/ast_parser.py`: Optional tree-sitter based source analysis.
+- `providers/base.py`: Low-level `ChatClient` / `EmbedClient` `Protocol`s — auth, request shape, and error normalization only; no domain logic, no prompts.
+- `providers/openai_compat.py`: OpenAI-compatible adapter; covers OpenAI/Ollama/vLLM/DeepSeek via `base_url`.
+- `core/normalize.py`: Predicate normalization and synonym dictionaries.
+- `core/agent.py`: `MemoryAgent` orchestration layer.
+- `cli/`: Typer CLI package; `cli/__init__.py` assembles and exposes `app` (the `membox` entry point), `cli/commands/` holds one module per command group.
 - `py.typed`: Keep package typed per PEP 561.
 
-When implementing features, keep storage, LLM calls, CLI presentation, and orchestration separate.
+When implementing features, keep storage, LLM calls, CLI presentation, and orchestration separate. Services never speak HTTP directly; providers never contain business logic.
 
 ## SQLite Safety
 

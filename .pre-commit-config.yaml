@@ -46,4 +46,4 @@ repos:
       - id: mypy
         name: mypy type check
         args: [--strict]
-        additional_dependencies: [pytest]
+        additional_dependencies: [pytest, pydantic, rich, typer, openai]

@@ -1,208 +1,208 @@
-# Membox — 实现路线图
+# Membox — Implementation Roadmap
 
-> 基于 [spec.md](./spec.md)，接口先行，自顶向下：先搭完整骨架（CLI → Agent → 各子模块 Protocol），再逐个填充实现。
+> Based on [spec.md](./spec.md). Interface-first, top-down: first build the complete skeleton (CLI → Agent → Protocols of submodules), then implement each module one by one.
 
-## Phase 0 — 项目骨架 ✅
+## Phase 0 — Project Skeleton ✅
 
-已有脚手架 + 运行时依赖。
+Scaffolding and runtime dependencies are ready.
 
-- [x] `pyproject.toml` 配置（typer, rich, pydantic）
+- [x] `pyproject.toml` configuration (typer, rich, pydantic)
 - [x] pre-commit hooks
 - [x] GitHub Actions CI
-- [x] CLI 入口点注册（`membox` 命令可用）
-- [x] 最小 `cli.py`（`version` 命令）
-- [x] 可选依赖组（`openai`, `tree-sitter`）
+- [x] CLI entry point registration (`membox` command is available)
+- [x] Minimal `cli.py` (`version` command)
+- [x] Optional dependency groups (`openai`, `tree-sitter`)
 
-## Phase 1 — 完整框架骨架
+## Phase 1 — Complete Framework Skeleton
 
-**目标**：从 CLI 到最底层，所有模块、所有函数签名、所有 Protocol 全部就位。函数体可以是 stub，但 **import 链完全串通**，`membox --help` 输出所有命令。
+**Goal**: Every module, function signature, and protocol from CLI down to the lowest layer is in place. Function bodies can be stubs, but the **import chain must be fully connected**, and `membox --help` output lists all commands.
 
 ```
-cli.py                    ← typer 命令，每个命令调用 agent
-  └→ agent.py             ← MemoryAgent 类，编排各子模块
-       ├→ schema.py       ← Pydantic 模型（Entity, Relation, Document, Triple, HopResult）
-       ├→ store.py        ← KnowledgeStore 类（Protocol + stub 方法）
-       ├→ normalize.py    ← normalize_predicate()（stub）
-       ├→ extract.py      ← LLMExtractor Protocol + DummyExtractor
-       └→ embed.py        ← Embedder Protocol + DummyEmbedder
+cli.py                         ← Typer commands, each calling the agent
+  └→ core/agent.py             ← MemoryAgent class orchestrating submodules
+       ├→ model/schema.py      ← Pydantic models (Entity, Relation, Document, Triple, HopResult)
+       ├→ core/store.py        ← KnowledgeStore class (Protocol + stub methods)
+       ├→ core/normalize.py    ← normalize_predicate() (stub)
+       ├→ services/extraction.py ← LLMExtractor Protocol + DummyExtractor
+       └→ services/embedding.py  ← Embedder Protocol + DummyEmbedder
 ```
 
-### 1.1 数据模型 `schema.py`
+### 1.1 Data Models `model/schema.py`
 
-- [ ] `Entity` — 实体模型（id, name, type, embedding, created_at）
-- [ ] `EntityAlias` — 别名模型（entity_id, alias）
-- [ ] `Relation` — 关系模型（id, source_id, target_id, predicate）
-- [ ] `Document` — 文档模型（id, content, source, created_at）
-- [ ] `Evidence` — 证据模型（relation_id, document_id）
-- [ ] `Triple` — 提取结果（source, predicate, target, source_type, target_type）
-- [ ] `HopResult` — BFS 单跳结果（entity, relation, via_entities, evidences）
+- [x] `Entity` — Entity model (id, name, type, embedding, created_at)
+- [x] `EntityAlias` — Alias model (entity_id, alias)
+- [x] `Relation` — Relation model (id, source_id, target_id, predicate)
+- [x] `Document` — Document model (id, content, source, created_at)
+- [x] `Evidence` — Evidence model (relation_id, document_id)
+- [x] `Triple` — Extraction output (source, predicate, target, source_type, target_type)
+- [x] `HopResult` — BFS single-hop output (entity, relation, via_entities, evidences)
 
-### 1.2 协议定义 `protocols` 分散到各模块
+### 1.2 Protocol Definitions `protocols` (Scattered across modules)
 
-- [ ] `store.py` — `KnowledgeStore` 类，所有方法签名就位（stub 实现）
-- [ ] `extract.py` — `LLMExtractor` Protocol + `DummyExtractor` 完整实现
-- [ ] `embed.py` — `Embedder` Protocol + `DummyEmbedder` 完整实现
-- [ ] `normalize.py` — `normalize_predicate()` stub
+- [x] `core/store.py` — `KnowledgeStore` class with all method signatures (stub implementation)
+- [x] `services/extraction.py` — `LLMExtractor` Protocol + full `DummyExtractor` implementation
+- [x] `services/embedding.py` — `Embedder` Protocol + full `DummyEmbedder` implementation
+- [x] `core/normalize.py` — `normalize_predicate()` stub
 
-### 1.3 编排层 `agent.py`
+### 1.3 Orchestration Layer `core/agent.py`
 
-- [ ] `MemoryAgent.__init__(store, extractor, embedder, db_path)`
-- [ ] `ingest(text, source)` — 调用 extractor → normalize → store.find_or_create → store.add_relation
-- [ ] `query(question, max_hops)` — 调用 store.bfs_query → 组装 prompt
-- [ ] `list_entities()` / `list_relations()` — 代理到 store
+- [x] `MemoryAgent.__init__(store, extractor, embedder, db_path)`
+- [x] `ingest(text, source)` — Call extractor → normalize → store.find_or_create → store.add_relation
+- [x] `query(question, max_hops)` — Call store.bfs_query → assemble prompt
+- [x] `list_entities()` / `list_relations()` — Proxy to store
 
-### 1.4 CLI 层 `cli.py`
+### 1.4 CLI Layer `cli.py`
 
-- [ ] `membox ingest` — 读文本，调 agent.ingest
-- [ ] `membox ingest-file` — 读文件，调 agent.ingest
-- [ ] `membox query` — 传问题，调 agent.query
-- [ ] `membox list-entities` — 调 agent.list_entities，rich 表格输出
-- [ ] `membox list-relations` — 调 agent.list_relations，rich 表格输出
-- [ ] 所有命令支持 `--db` / `--help`
+- [x] `membox ingest` — Read text, call agent.ingest
+- [x] `membox ingest-file` — Read file, call agent.ingest
+- [x] `membox query` — Pass query, call agent.query
+- [x] `membox list-entities` — Call agent.list_entities, output via rich table
+- [x] `membox list-relations` — Call agent.list_relations, output via rich table
+- [x] All commands support `--db` / `--help`
 
-### 1.5 导出 `__init__.py`
+### 1.5 Exporting `__init__.py`
 
-- [ ] 导出 `MemoryAgent`, `OpenAIExtractor`, `OpenAIEmbedder` 等公开 API
+- [x] Export public APIs such as `MemoryAgent`, `OpenAIExtractor`, and `OpenAIEmbedder`
 
-**验证**：
-- `uv run membox --help` 输出完整命令列表
-- `uv run mypy src` 零错误（所有签名类型完整）
-- `uv run pytest tests/` — skeleton 测试通过（stub 不崩溃）
-- **import 链从 cli → agent → store/extract/embed 全部串通**
+**Validation**:
+- `uv run membox --help` outputs the complete command list
+- `uv run mypy src` completes with zero errors (all signatures fully typed)
+- `uv run pytest tests/` — skeleton tests pass (stubs do not crash)
+- **Import chain is fully connected from cli → agent → store/extract/embed**
 
-## Phase 2 — 存储实现
+## Phase 2 — Storage Implementation
 
-**目标**：填充 `KnowledgeStore` 中所有 stub 方法的真实实现。
+**Goal**: Populate all stub methods in `KnowledgeStore` with real implementations.
 
-- [ ] 建表 DDL（entities, entity_aliases, relations, documents, relation_evidence）
-- [ ] `PRAGMA foreign_keys=ON` + WAL 模式
-- [ ] 实体 CRUD：`insert_entity` / `find_entity_by_name` / `list_entities`
-- [ ] 别名 CRUD：`add_alias` / `find_entity_by_alias`
-- [ ] 关系 CRUD：`insert_relation`（UNIQUE 去重）/ `list_relations`
-- [ ] 文档 CRUD：`insert_document` / `get_document`
-- [ ] 证据 CRUD：`add_evidence` / `get_evidence_for_relation`
-- [ ] 测试：建表、外键约束、三元组 UNIQUE 去重、evidence 多对多
+- [x] Table schema DDL (entities, entity_aliases, relations, documents, relation_evidence)
+- [x] Enable `PRAGMA foreign_keys=ON` + WAL mode
+- [x] Entity CRUD: `insert_entity` / `find_entity_by_name` / `list_entities`
+- [x] Alias CRUD: `add_alias` / `find_entity_by_alias`
+- [x] Relation CRUD: `insert_relation` (deduplication via UNIQUE) / `list_relations`
+- [x] Document CRUD: `insert_document` / `get_document`
+- [x] Evidence CRUD: `add_evidence` / `get_evidence_for_relation`
+- [x] Tests: table creation, foreign key constraints, triple UNIQUE deduplication, and evidence many-to-many relationship
 
-**验证**：CLI 命令 `membox ingest "test"` 能写入 SQLite，`membox list-entities` 能读出。
+**Validation**: Running the CLI command `membox ingest "test"` writes to SQLite, and `membox list-entities` reads from it.
 
-## Phase 3 — 谓词归一化实现
+## Phase 3 — Predicate Normalization
 
-**目标**：填充 `normalize_predicate()` 的真实实现。
+**Goal**: Populate `normalize_predicate()` with a real implementation.
 
-- [ ] 内置中英文同义词字典（`developed`/`develop`/`开发` → `develops` 等）
-- [ ] lowercase + 字典查找，未命中则原样返回 lowercase
-- [ ] 测试：中英文同义词 + 未知谓词 pass-through
+- [x] Built-in English/Chinese synonym dictionary (e.g., `developed`/`develop`/`开发` → `develops`)
+- [x] Lowercase normalization + dictionary lookup, falling back to original lowercased string on miss
+- [x] Tests: English/Chinese synonyms + pass-through for unknown predicates
 
-**验证**：`membox ingest "A 开发了 B"` → 关系谓词存储为 `develops`。
+**Validation**: `membox ingest "A 开发了 B"` → relation predicate is stored as `develops`.
 
-## Phase 4 — 实体消歧实现
+## Phase 4 — Entity Disambiguation
 
-**目标**：填充 `find_or_create_entity()` 的三层级联消歧。
+**Goal**: Populate `find_or_create_entity()` with the three-tier cascading disambiguation strategy.
 
-- [ ] 别名精确匹配
-- [ ] 同类型 embedding cosine ≥ 0.85 匹配
-- [ ] 新建
-- [ ] 字符串回退（无 embedder 时：精确 + 大小写归一化）
-- [ ] 测试
-  - [ ] 字符串精确去重 / 大小写去重
-  - [ ] embedding 同义词去重
-  - [ ] 反例：无关实体不合并
-  - [ ] 并发同名实体（8 线程同时 find_or_create，最终只有 1 条）
+- [x] Exact alias matching
+- [x] Cosine similarity matching (cosine ≥ 0.85) for entities of the same type
+- [x] Fallback: Create new entity
+- [x] String-only fallback (when no embedder is provided: exact match + casing normalization)
+- [x] Tests
+  - [x] String exact / casing deduplication
+  - [x] Embedding synonym deduplication
+  - [x] Negative test: unrelated entities are not merged
+  - [x] Concurrent identical entities (8 threads calling `find_or_create` concurrently, resulting in exactly 1 record)
 
-**验证**：重复 ingest 同一实体不会创建多条记录。
+**Validation**: Ingesting the same entity repeatedly does not create duplicate records.
 
-## Phase 5 — 多跳检索实现
+## Phase 5 — Multi-hop Retrieval
 
-**目标**：填充 `bfs_query()` 的真实实现。
+**Goal**: Populate `bfs_query()` with a real implementation.
 
-- [ ] BFS 从种子实体扩展，`max_hops` 可调
-- [ ] 每跳记录路径、关联实体、关系、证据原文
-- [ ] 测试
-  - [ ] 2-hop 召回 C、不召回 D
-  - [ ] 3-hop 召回 D
-  - [ ] 上下文聚合（路径完整还原）
-  - [ ] 溯源原文还原
+- [x] BFS expansion starting from seed entities, with configurable `max_hops`
+- [x] Record paths, associated entities, relations, and source evidence for each hop
+- [x] Tests
+  - [x] 2-hop recalls C, does not recall D
+  - [x] 3-hop recalls D
+  - [x] Context aggregation (complete path reconstruction)
+  - [x] Provenance trace back to original source text
 
-**验证**：`membox query "X 和 Y 是什么关系？" --max-hops 2` 返回带溯源的结果。
+**Validation**: `membox query "What is the relationship between X and Y?" --max-hops 2` returns results with source evidence.
 
-## Phase 6 — 并发安全加固
+## Phase 6 — Concurrency Hardening
 
-**目标**：多 agent 同时写入不冲突。
+**Goal**: Multiple agents can write concurrently without conflict.
 
-- [ ] per-thread SQLite connection（`threading.local()`）
-- [ ] WAL 模式已开启（Phase 2）
-- [ ] `RLock` 守护 `find_or_create_entity` 临界区
-- [ ] 测试
-  - [ ] 多线程并发写入（5 线程 × 10 写入，无错误，计数精确）
-  - [ ] 并发同名实体（Phase 4 已有，此处验证 RLock 正确性）
+- [x] Per-thread SQLite connections (`threading.local()`)
+- [x] SQLite WAL mode enabled (implemented in Phase 2)
+- [x] Use `RLock` to guard the critical section of `find_or_create_entity`
+- [x] Tests
+  - [x] Concurrent multi-threaded writes (5 threads × 10 writes, zero errors, accurate final counts)
+  - [x] Concurrent identical entities (verify the correctness of `RLock`)
 
-**验证**：并发测试无错误、无死锁。
+**Validation**: Concurrent tests run without errors or deadlocks.
 
-## Phase 7 — OpenAI 集成
+## Phase 7 — OpenAI Integration
 
-**目标**：接入真实 LLM，替换 Dummy 实现。
+**Goal**: Integrate real LLMs to replace the Dummy implementations.
 
-- [ ] `src/membox/extract.py` — `OpenAIExtractor` 实现
-- [ ] `src/membox/embed.py` — `OpenAIEmbedder` 实现
-- [ ] `examples/demo.py` — 端到端 demo 脚本
-- [ ] 手动验证：灌入真实文档 → 查询返回有意义的结果
+- [x] `src/membox/services/extraction.py` — `OpenAIExtractor` implementation
+- [x] `src/membox/services/embedding.py` — `OpenAIEmbedder` implementation
+- [x] `examples/demo.py` — End-to-end demo script
+- [x] Manual validation: ingest real documents → query returns meaningful results
 
-**验证**：`OPENAI_API_KEY=sk-... uv run python examples/demo.py` 跑通。
+**Validation**: `OPENAI_API_KEY=sk-... uv run python examples/demo.py` runs successfully.
 
-## Phase 8 — 代码结构分析（tree-sitter）
+## Phase 8 — Codebase Structural Analysis (tree-sitter)
 
-**目标**：通过 AST 解析提取代码结构化知识。
+**Goal**: Extract structural codebase knowledge using AST parsing.
 
-- [ ] `src/membox/ast_parser.py`
-  - [ ] tree-sitter 集成，按需加载语言 grammar
-  - [ ] 提取结构三元组：`module --defines--> class` / `class --has_method--> method` / `method --calls--> function`
-  - [ ] CLI 命令：`membox analyze-src <path> --language <lang>`
-- [ ] 先支持 Python grammar
-- [ ] 测试：Python 源文件解析 / 模块依赖图 / class 结构
+- [ ] `src/membox/services/ast_parser.py`
+  - [ ] Integrate tree-sitter, loading language grammar on demand
+  - [ ] Extract structural triples: `module --defines--> class` / `class --has_method--> method` / `method --calls--> function`
+  - [ ] CLI command: `membox analyze-src <path> --language <lang>`
+- [ ] Python grammar support first
+- [ ] Tests: Python source file parsing / module dependency graph / class structure
 
-**验证**：对自身代码库运行 `membox analyze-src src/`，查询能召回模块结构。
+**Validation**: Running `membox analyze-src src/` on its own codebase, query successfully recalls module structures.
 
-## Phase 9 — Skill 文件
+## Phase 9 — Skill Files
 
-**目标**：为 coding agent 编写 skill 指令文件。
+**Goal**: Write skill instruction files for coding agents.
 
-- [ ] `skills/membox-skill.md` — 通用 skill 模板
-  - [ ] 安装说明
-  - [ ] 命令参考
-  - [ ] 使用场景示例
-- [ ] 手动验证：agent 读取 skill 后能正确调用 CLI
+- [ ] `skills/membox-skill.md` — Generic skill template
+  - [ ] Installation instructions
+  - [ ] Command reference
+  - [ ] Usage examples
+- [ ] Manual validation: agent reads the skill and successfully invokes the CLI commands
 
-**验证**：skill 注入 agent 上下文，agent 能自主完成 ingest + query。
+**Validation**: Inject the skill into agent context; the agent can independently perform ingest + query.
 
-## Phase 10 — 打磨与发布
+## Phase 10 — Polish and Release
 
-- [ ] README.md 更新
-- [ ] 文档补全（docstring 覆盖所有公开 API）
-- [ ] 覆盖率达标（≥ 80%）
-- [ ] `uv run mypy src` 零错误
-- [ ] `uv run ruff check .` 零警告
-- [ ] 版本号更新
+- [x] Update README.md
+- [x] Complete documentation (docstring coverage for all public APIs)
+- [x] Achieve test coverage target (≥ 80%)
+- [x] `uv run mypy src` completes with zero errors
+- [x] `uv run ruff check .` completes with zero warnings
+- [x] Bump version numbers
 
 ---
 
-## 构建顺序
+## Build Order
 
 ```
-Phase 0 骨架 ✅
+Phase 0 Skeleton ✅
     │
-Phase 1 完整框架（接口先行，所有模块 stub 串通）
+Phase 1 Complete Framework (Interface-first, all module stubs connected)
     │
-    ├→ Phase 2 存储实现
-    ├→ Phase 3 归一化实现
-    ├→ Phase 4 消歧实现 ──→ Phase 6 并发加固
-    ├→ Phase 5 多跳检索实现
+    ├→ Phase 2 Storage Implementation
+    ├→ Phase 3 Normalization Implementation
+    ├→ Phase 4 Disambiguation Implementation ──→ Phase 6 Concurrency Hardening
+    ├→ Phase 5 Multi-hop Retrieval Implementation
     │
-    └→ Phase 7 OpenAI 集成
+    └→ Phase 7 OpenAI Integration
          │
-         ├→ Phase 8 tree-sitter（可并行）
-         ├→ Phase 9 Skill 文件（可并行）
+         ├→ Phase 8 tree-sitter (Can be done in parallel)
+         ├→ Phase 9 Skill Files (Can be done in parallel)
               │
-              └→ Phase 10 发布
+              └→ Phase 10 Release
 ```
 
-**原则**：Phase 1 之后，每个 Phase 只做一件事——**填充 Phase 1 预留的 stub**。不改签名，不改 import，不改架构。
+**Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.

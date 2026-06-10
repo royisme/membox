@@ -1,92 +1,92 @@
-# Membox — 项目规格说明书
+# Membox — Project Specification
 
-> **版本**: 0.1.0 · **状态**: Draft · **许可**: MIT
+> **Version**: 0.1.0 · **Status**: Draft · **License**: MIT
 
-## 1. 项目定位
+## 1. Project Positioning
 
-Membox 是一个**本地化的知识图谱 + RAG 记忆层**，面向 **coding agent**（如 Cursor、Copilot、Cline、Aider 等）提供统一的记忆服务。
+Membox is a **local Knowledge Graph + RAG Memory Layer** designed to provide unified memory services for **coding agents** (such as Cursor, Copilot, Cline, Aider, etc.).
 
-核心主张：
+Core Propositions:
 
-- **Hands-on 实现** — 不依赖 Neo4j / Weaviate / Pinecone 等外部服务，全部逻辑用 Python + SQLite 手写，开发者可以完全理解和掌控每一行代码
-- **CLI 优先** — 以命令行工具形式交付，coding agent 通过 **skill 文件**（指令文档）学会调用 shell 命令来使用，无需 MCP 或 HTTP 服务
-- **零外部服务** — SQLite 文件级存储，无需启动数据库进程，适合单机开发环境
-- **Agent 共享** — 多个 coding agent 通过同一个 SQLite 数据库文件共享记忆，避免各自维护碎片化的上下文
+- **Hands-on Implementation** — No reliance on external services like Neo4j, Weaviate, or Pinecone. All logic is written from scratch in Python + SQLite, allowing developers to fully understand and control every line of code.
+- **CLI-First** — Delivered as a command-line tool. Coding agents learn to interact via shell commands through a **skill file** (instruction document), eliminating the need for MCP or HTTP servers.
+- **Zero External Services** — File-level SQLite storage requiring no database server process, ideal for single-machine local development environments.
+- **Agent Sharing** — Multiple coding agents share memory through the same SQLite database file, preventing fragmented context.
 
-## 2. 目标用户与场景
+## 2. Target Users & Scenarios
 
-| 角色 | 场景 |
-|------|------|
-| Coding Agent（Cursor/Copilot/Cline/Aider…） | 写代码时查询项目架构、历史决策、API 用法 |
-| 开发者本人 | 通过 agent 灌入文档后检索，或直接用 Python API 查询 |
-| CI/CD Pipeline | 自动提取 commit message / PR description 中的知识并入库 |
+| Role | Scenario |
+|------|----------|
+| Coding Agent (Cursor/Copilot/Cline/Aider…) | Queries project architecture, historical decisions, and API usage during coding sessions. |
+| Developer | Searches memory after ingesting documents via the agent, or queries directly using the Python API. |
+| CI/CD Pipeline | Automatically extracts knowledge from commit messages and PR descriptions to ingest into the database. |
 
-## 3. 核心功能
+## 3. Core Features
 
-### 3.1 知识图谱存储
+### 3.1 Knowledge Graph Storage
 
-以**实体-关系-实体**三元组为核心数据模型：
+Centered around the **Entity-Relation-Entity** triple data model:
 
 ```
 (Entity) --[predicate]--> (Entity)
 ```
 
-- **实体**：项目、技术、模块、概念、人名等，支持别名
-- **关系**：带谓词的有向边，如 `uses`、`develops`、`depends_on`
-- **证据溯源**：每条关系可挂载多个文档片段作为证据来源
+- **Entity**: Projects, technologies, modules, concepts, names, etc., supporting aliases.
+- **Relation**: Directed edges with predicates, such as `uses`, `develops`, `depends_on`.
+- **Evidence Provenance**: Each relation can point to multiple document snippets as source evidence.
 
-### 3.2 文档摄入与知识提取
+### 3.2 Document Ingestion & Knowledge Extraction
 
-接收自然语言文档，通过 LLM 自动提取实体和关系三元组：
+Ingests natural language documents and uses an LLM to automatically extract entity and relation triples:
 
 ```
-文档 → LLM 提取 → 三元组 → 入库（去重 + 消歧）
+Document → LLM Extraction → Triples → Ingestion (Deduplication + Disambiguation)
 ```
 
-### 3.3 多跳检索
+### 3.3 Multi-hop Retrieval
 
-从种子实体出发，沿关系边做 BFS 扩展，`max_hops` 可调：
+Expands outwards from seed entities using BFS along relation edges, with a configurable `max_hops`:
 
 ```
 seed → 1-hop neighbors → 2-hop neighbors → ... → max_hops
 ```
 
-检索结果包含完整路径和溯源原文，组装成结构化 prompt 返回。
+Retrieval results contain the complete paths and original source text (evidence), assembled into a structured prompt.
 
-### 3.4 实体消歧
+### 3.4 Entity Disambiguation
 
-三层级联策略，避免同一概念被重复建为不同实体：
+A three-tier cascading strategy to prevent the same concept from being created as duplicate entities:
 
-1. **别名表精确匹配** — 别名表命中直接合并
-2. **Embedding 相似度** — 同类型实体间 cosine ≥ 0.85 视为同一
-3. **新建** — 前两层均未命中则创建新实体
+1. **Exact Alias Matching** — Merges directly if an alias matches in the alias table.
+2. **Embedding Similarity** — Considers entities of the same type as identical if cosine similarity is ≥ 0.85.
+3. **Creation** — Creates a new entity if the first two checks miss.
 
-### 3.5 谓词归一化
+### 3.5 Predicate Normalization
 
-将语义相同的谓词归一化为标准形式：
+Normalizes semantically equivalent predicates into standard forms:
 
 - `developed` / `develop` / `开发` → `develops`
-- lowercase + 中英文同义词字典
+- Lowercase normalization + English/Chinese synonym dictionary.
 
-## 4. 架构设计
+## 4. Architectural Design
 
-### 4.1 技术栈
+### 4.1 Tech Stack
 
-| 维度 | 选型 | 理由 |
+| Dimension | Selection | Rationale |
 |------|------|------|
-| 语言 | Python 3.13 | coding agent 生态通用语言 |
-| 存储 | SQLite（WAL 模式） | 零运维，文件级存储，跨进程共享 |
-| CLI | **typer** + rich | 类型注解即命令定义，自动 help / shell completion；rich 格式化输出提升可读性 |
-| 类型校验 | Pydantic | 数据模型校验与序列化 |
-| LLM 接口 | Protocol（Protocol Class） | 可注入任意 LLM 实现，测试不依赖 API |
-| Embedding | Protocol（Protocol Class） | 可注入任意 Embedding 实现，无 embedding 时回退字符串去重 |
-| 代码分析（可选） | **tree-sitter** | 多语言 AST 解析，提取结构化代码知识（函数签名、class 结构、import 依赖） |
-| Agent 接入 | **skill 文件** | 非 MCP / 非 HTTP；agent 读取 skill 指令后自行调用 `membox` CLI 命令 |
+| Language | Python 3.13 | The standard language in the coding agent ecosystem. |
+| Storage | SQLite (WAL Mode) | Zero operations overhead, file-based storage, cross-process safe. |
+| CLI | **typer** + rich | Type annotations define CLI commands automatically with built-in help and shell completion; rich formatting improves readability. |
+| Validation | Pydantic | Data model validation and serialization. |
+| LLM Interface | Protocol Class | Allows injection of any LLM implementation; testing does not depend on live APIs. |
+| Embedding | Protocol Class | Allows injection of any embedding implementation; falls back to string deduplication when unavailable. |
+| Code Analysis (Optional) | **tree-sitter** | Multi-language AST parsing to extract structural code knowledge (signatures, class structure, import dependencies). |
+| Agent Integration | **Skill File** | Non-MCP / Non-HTTP; agents read the skill instructions and invoke the `membox` CLI directly. |
 
-### 4.2 数据模型
+### 4.2 Data Model
 
 ```sql
--- 实体
+-- Entities
 CREATE TABLE entities (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
@@ -95,31 +95,31 @@ CREATE TABLE entities (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- 实体别名
+-- Entity Aliases
 CREATE TABLE entity_aliases (
     entity_id   INTEGER NOT NULL REFERENCES entities(id),
     alias       TEXT    NOT NULL,
     PRIMARY KEY (entity_id, alias)
 );
 
--- 关系（三元组）
+-- Relations (Triples)
 CREATE TABLE relations (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id   INTEGER NOT NULL REFERENCES entities(id),
     target_id   INTEGER NOT NULL REFERENCES entities(id),
     predicate   TEXT    NOT NULL,
-    UNIQUE(source_id, target_id, predicate)  -- 三元组去重
+    UNIQUE(source_id, target_id, predicate)  -- Triple deduplication
 );
 
--- 文档（原始文本）
+-- Documents (Raw Text)
 CREATE TABLE documents (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     content     TEXT    NOT NULL,
-    source      TEXT,                        -- 来源标识（文件路径、URL 等）
+    source      TEXT,                        -- Source identifier (file path, URL, etc.)
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- 关系-文档证据（多对多）
+-- Relation-Document Evidence (Many-to-Many)
 CREATE TABLE relation_evidence (
     relation_id  INTEGER NOT NULL REFERENCES relations(id),
     document_id  INTEGER NOT NULL REFERENCES documents(id),
@@ -127,155 +127,175 @@ CREATE TABLE relation_evidence (
 );
 ```
 
-### 4.3 核心模块
+### 4.3 Core Modules
 
 ```
 src/membox/
-├── __init__.py          # 包入口，暴露公开 API
-├── schema.py            # Pydantic 模型定义
-├── store.py             # SQLite 存储层（建表、CRUD、BFS 检索）
-├── extract.py           # LLM 知识提取（Protocol + OpenAI 实现）
-├── embed.py             # Embedding 计算（Protocol + OpenAI 实现）
-├── normalize.py         # 谓词归一化、同义词字典
-├── agent.py             # MemoryAgent — 内部编排层
-├── cli.py               # typer CLI 入口（ingest / query / list 命令）
-├── ast_parser.py        # tree-sitter 代码分析（可选模块）
-└── py.typed             # PEP 561 标记
+├── __init__.py          # Package entry point, exposes public APIs
+├── config.py            # MemboxConfig — provider/base_url/API-key/model selection per capability
+├── model/
+│   └── schema.py        # Pydantic model definitions
+├── core/
+│   ├── store/           # SQLite storage layer, split by concern
+│   │   ├── __init__.py  # KnowledgeStore facade (stable public method surface)
+│   │   ├── connection.py  # Per-thread connections, WAL/PRAGMAs, transactions, RLock
+│   │   ├── migrations.py  # PRAGMA user_version schema migration machinery
+│   │   ├── entities.py    # Entity CRUD + find-or-create dedup + aliases
+│   │   ├── relations.py   # Relation CRUD + evidence links
+│   │   ├── documents.py   # Document persistence
+│   │   └── retrieval.py   # BFS multi-hop retrieval
+│   ├── normalize.py     # Predicate normalization and synonym dictionary
+│   └── agent.py         # MemoryAgent — Orchestration layer
+├── services/            # Domain capability layer (never speaks HTTP directly)
+│   ├── extraction.py    # LLMExtractor Protocol + Dummy/OpenAI implementations
+│   ├── embedding.py     # Embedder Protocol + Dummy/OpenAI implementations
+│   ├── ast_parser.py    # Tree-sitter code analysis (optional module)
+│   └── prompts/
+│       └── extraction.py  # Extraction prompt templates (module-level constants)
+├── providers/           # Protocol adapter layer (auth, request shape, error normalization only)
+│   ├── base.py          # ChatClient / EmbedClient low-level Protocols
+│   └── openai_compat.py # OpenAI-compatible adapter (OpenAI/Ollama/vLLM/DeepSeek via base_url)
+├── cli/                 # Typer CLI (presentation only)
+│   ├── __init__.py      # App assembly; exposes the `app` entry point
+│   └── commands/        # One module per command group (ingest / query / listing / version)
+└── py.typed             # PEP 561 marker
 ```
 
-### 4.4 关键设计决策
+### 4.4 Key Design Decisions
 
-| 决策 | 选择 | 理由 |
+| Decision | Selection | Rationale |
 |------|------|------|
-| 并发安全 | per-thread connection + WAL + `RLock` | SQLite WAL 允许读写并发；`RLock` 保护 find-or-create 临界区 |
-| 外键约束 | `PRAGMA foreign_keys=ON` | SQLite 默认不开启，需显式启用 |
-| 三元组唯一性 | `UNIQUE(source_id, target_id, predicate)` | 同一对实体间同一谓词只允许一条边 |
-| LLM/Embedding 解耦 | Protocol | 可注入假实现，测试完全不依赖外部 API |
-| 无 embedding 时 | 回退到字符串精确 + 大小写归一化去重 | 保证无 OpenAI key 时核心功能可用 |
-| Agent 接入方式 | skill 文件（CLI 指令文档） | agent 读取 skill 后自行调 shell 命令，无需 MCP / HTTP |
-| CLI 框架 | typer + rich | 类型注解即接口定义，agent 看 `--help` 即可学会使用 |
-| 代码结构分析 | tree-sitter（可选） | 多语言 AST 解析，提取模块依赖 / 调用图等结构化知识 |
+| Concurrency Safety | Per-thread connection + WAL + `RLock` | SQLite WAL allows concurrent reads/writes; `RLock` protects the find-or-create critical section. |
+| Foreign Keys | `PRAGMA foreign_keys=ON` | Disabled by default in SQLite; must be explicitly enabled. |
+| Triple Uniqueness | `UNIQUE(source_id, target_id, predicate)` | Only allows a single edge for the same predicate between the same two entities. |
+| LLM/Embedding Decoupling | Protocol | Mock implementations can be injected so tests run independently of external APIs. |
+| No-Embedding Fallback | Exact match + casing normalization string deduplication | Ensures core features work when an OpenAI key is absent. |
+| Agent Integration Path | Skill file (CLI instruction doc) | Agent reads the skill and runs shell commands; no MCP / HTTP daemon required. |
+| CLI Framework | typer + rich | Type annotations act as interface definitions; agents learn by inspecting `--help`. |
+| Codebase Analysis | tree-sitter (optional) | Multi-language AST parsing to extract structural knowledge like module dependencies and call graphs. |
+| Service/Adapter Layering | `services/` (domain capabilities) over `providers/` (protocol adapters) | Services own prompts, parsing, and fallback policy and never speak HTTP; providers own auth, request shape, and error normalization only — adding a new backend (e.g. Gemini) touches `providers/` plus config, not domain logic. |
+| Schema Migrations | `PRAGMA user_version` + ordered `MIGRATIONS` list | Each open applies pending migrations transactionally and bumps `user_version`; migration 0001 is the full idempotent DDL (`CREATE TABLE IF NOT EXISTS`) so pre-migration databases pass through unchanged. |
 
-## 5. 接口设计
+## 5. Interface Design
 
-### 5.1 CLI 命令（主要接口，面向 coding agent）
+### 5.1 CLI Commands (Primary interface for coding agents)
 
-Agent 通过 skill 文件学会以下命令，无需理解 Python API：
+Agents learn to use the following commands via the skill file without needing to understand the Python API:
 
 ```bash
-# 摄入文本
-membox ingest "codebase-rag 用 Python 实现" --source "README.md"
+# Ingest text
+membox ingest "codebase-rag is implemented in Python" --source "README.md"
 
-# 摄入文件
+# Ingest file
 membox ingest-file docs/architecture.md --db memory.db
 
-# 查询记忆
-membox query "项目用了哪些技术？" --max-hops 2
+# Query memory
+membox query "What technologies are used in the project?" --max-hops 2
 
-# 列出实体
+# List entities
 membox list-entities --db memory.db
 
-# 列出关系
+# List relations
 membox list-relations --db memory.db
 
-# 分析源码结构（tree-sitter，可选）
+# Analyze source structure (tree-sitter, optional)
 membox analyze-src src/ --language python --db memory.db
 ```
 
-所有命令支持 `--help`，agent 可自行发现用法。
+All commands support `--help`, which allows agents to discover usage details automatically.
 
-### 5.2 Python API（高级用法）
+### 5.2 Python API (Advanced Usage)
 
 ```python
 from membox import MemoryAgent, OpenAIExtractor, OpenAIEmbedder
 
 agent = MemoryAgent(
-    extractor=OpenAIExtractor(client),   # 必需
-    embedder=OpenAIEmbedder(client),     # 可选；不传则回退字符串去重
-    db_path="memory.db",                 # SQLite 文件路径
+    extractor=OpenAIExtractor(client),   # Required
+    embedder=OpenAIEmbedder(client),     # Optional; falls back to string-based deduplication if omitted
+    db_path="memory.db",                 # SQLite file path
 )
 ```
 
-### 5.3 核心方法
+### 5.3 Core Methods
 
 ```python
-# 摄入文档 → 自动提取三元组并入库
+# Ingest document → automatically extracts triples and writes to database
 agent.ingest(text: str, source: str | None = None) -> None
 
-# 查询 → 从种子实体 BFS 扩展，返回结构化 prompt
+# Query → performs BFS starting from seed entities, returning structured prompt context
 agent.query(question: str, max_hops: int = 2) -> str
 
-# 查看图谱中所有实体
+# List all entities in the graph
 agent.list_entities() -> list[Entity]
 
-# 查看图谱中所有关系
+# List all relations in the graph
 agent.list_relations() -> list[Relation]
 ```
 
-## 6. 质量要求
+## 6. Quality Requirements
 
-### 6.1 测试覆盖
+### 6.1 Test Coverage
 
-测试不依赖任何外部 API（LLM / Embedding 均使用假实现），覆盖以下场景：
+Tests do not depend on external APIs (LLMs and Embeddings are mocked) and cover the following scenarios:
 
-- **实体消歧** — 字符串精确去重 / 大小写去重 / embedding 同义词去重 / 反例（无关实体不合并）
-- **关系去重** — `UNIQUE` 约束 + evidence 多对多
-- **谓词归一化** — developed / develop / 开发 → develops
-- **多跳检索** — 2-hop 召回验证 / 3-hop 召回验证 / 不相关实体不召回
-- **上下文聚合** — 多跳路径的完整上下文还原
-- **溯源** — 从关系反查原文
-- **并发安全** — 多线程写入无错误、计数精确、同名实体最终唯一
-- **外键约束** — 实际生效验证
+- **Entity Disambiguation** — Exact string deduplication / casing deduplication / embedding synonym deduplication / negative scenarios (unrelated entities are not merged).
+- **Relation Deduplication** — `UNIQUE` constraint + many-to-many evidence association.
+- **Predicate Normalization** — developed / develop / 开发 → develops.
+- **Multi-hop Retrieval** — 2-hop recall validation / 3-hop recall validation / unrelated entities are not recalled.
+- **Context Aggregation** — Complete path reconstruction for multi-hop paths.
+- **Provenance** — Trace relations back to source texts.
+- **Concurrency Safety** — Multi-threaded writes run without errors, count accurately, and ensure identical concurrent entities resolve to a single record.
+- **Foreign Key Constraints** — Verify schema enforcement is active.
 
-### 6.2 代码质量
+### 6.2 Code Quality
 
-| 工具 | 用途 | 配置 |
+| Tool | Purpose | Configuration |
 |------|------|------|
 | Ruff | lint + format | target py313, line-length 100 |
-| mypy | 类型检查 | strict mode |
-| pytest | 测试 | importlib mode, strict markers |
+| mypy | Type Checking | strict mode |
+| pytest | Testing | importlib mode, strict markers |
 | pre-commit | Git hooks | ruff, trailing whitespace, large files, merge conflicts |
-| CI (GitHub Actions) | 持续集成 | 自动 lint + type check + test |
+| CI (GitHub Actions) | Continuous Integration | Automatic linting + type checking + testing |
 
-### 6.3 覆盖率
+### 6.3 Coverage Target
 
-最低 80%（`fail_under = 80`），`show_missing = true`。
+Minimum 80% (`fail_under = 80`), with `show_missing = true`.
 
-## 7. 依赖
+## 7. Dependencies
 
-### 运行时
+### Runtime
 
-- `pydantic` — 数据模型校验
-- `typer` — CLI 框架（类型注解即命令定义）
-- `rich` — 终端格式化输出
+- `pydantic` — Data model validation
+- `typer` — CLI framework (type annotations map to command definitions)
+- `rich` — Terminal output formatting
 
-### 可选
+### Optional
 
-- `openai` — OpenAI API 客户端（仅 live demo / 真实 LLM 提取时需要）
-- `tree-sitter` — 多语言 AST 解析（仅代码结构分析时需要）
+- `openai` — OpenAI API client (needed for live demo and real LLM extraction)
+- `tree-sitter` — Multi-language AST parsing (needed for codebase structure analysis)
 
-### 开发
+### Development
 
-- `pytest >= 8` / `pytest-cov >= 6` — 测试
+- `pytest >= 8` / `pytest-cov >= 6` — Testing
 - `ruff >= 0.11` — lint + format
-- `mypy >= 1.15` — 类型检查
+- `mypy >= 1.15` — Type Checking
 - `pre-commit >= 4` — Git hooks
 
-## 8. 扩展方向
+## 8. Extension Roadmap
 
-### 已规划（见 roadmap.md）
+### Planned (see roadmap.md)
 
-| 方向 | 说明 | 阶段 |
+| Target | Description | Phase |
 |------|------|------|
-| Skill 文件 | 为各 coding agent 编写 skill 指令文件，教会 agent 使用 CLI | Phase 9 |
-| 代码结构分析 | tree-sitter 多语言 AST 解析，提取模块依赖 / 调用图 / class 结构 | Phase 10 |
+| Skill File | Skill instruction documents to teach agents how to use the CLI. | Phase 9 |
+| Codebase Analysis | Multi-language AST parsing using tree-sitter to extract module dependencies, call graphs, and class structures. | Phase 10 |
 
-### 远期可选
+### Future Options
 
-| 方向 | 说明 | 触发条件 |
+| Direction | Description | Trigger Condition |
 |------|------|----------|
-| 向量索引升级 | `find_similar_entity` 换用 sqlite-vss / FAISS / Lance | 实体量 > ~10 万 |
-| 谓词自动聚类 | embedding 聚类自动发现同义谓词 | 谓词种类爆炸时 |
-| 置信度与审计 | entities 加 `confidence` / `merged_from` 字段 | 需要人工审核时 |
-| Hybrid Retrieval | BM25 over `documents.content` + 向量检索 | 纯图谱召回不足时 |
-| 时间衰减 | `relation_evidence` 加 `confidence` / `extracted_at` | 需要知识时效性时 |
+| Vector Index Upgrade | Replace `find_similar_entity` with sqlite-vss, FAISS, or Lance. | Entity count > ~100k |
+| Automatic Predicate Clustering | Automatic synonym predicate discovery via embedding clustering. | Predicate type explosion |
+| Confidence & Auditing | Add `confidence` / `merged_from` fields to entities. | When human-in-the-loop review is required |
+| Hybrid Retrieval | BM25 over `documents.content` + Vector search. | Pure graph recall becomes insufficient |
+| Temporal Decay | Add `confidence` / `extracted_at` to `relation_evidence`. | Time-sensitive knowledge requirements |
