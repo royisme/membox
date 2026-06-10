@@ -75,13 +75,42 @@ class EmbeddingConfig(ProviderConfig):
     dimensions: int = 1536
 
 
+class RetrievalConfig(BaseModel):
+    """Settings that govern hybrid retrieval scoring and token-budget truncation.
+
+    Attributes:
+        hop_decay: Per-hop attenuation factor applied to the composite score
+            (``decay^hops``).  Default ``0.7`` per spec §3.7.
+        alpha: Weight of the embedding similarity component in the scoring
+            formula.  ``(1 - alpha)`` is the weight for BM25.  Default ``0.6``.
+        budget: Token budget for the compact retrieval output (triple lines +
+            evidence snippets, excluding the fixed coverage footer).  Default
+            ``2000``.
+        top_evidence_k: Number of highest-scored triples eligible to have an
+            evidence snippet attached.  Default ``3``.
+        disambiguation_threshold: Minimum cosine similarity for entity
+            disambiguation (embedding-based fuzzy match in
+            ``find_or_create_entity``).  Default ``0.85``, which is appropriate
+            for OpenAI embeddings.  Set to ``0.70`` when using ``embeddinggemma``
+            via Ollama.
+    """
+
+    hop_decay: float = 0.7
+    alpha: float = 0.6
+    budget: int = 2000
+    top_evidence_k: int = 3
+    disambiguation_threshold: float = 0.85
+
+
 class MemboxConfig(BaseModel):
     """Top-level membox runtime configuration.
 
     Attributes:
         extraction: Provider settings for LLM triple extraction.
         embedding: Provider settings for text embedding.
+        retrieval: Hybrid retrieval scoring and token-budget settings.
     """
 
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

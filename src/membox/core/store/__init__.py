@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from membox.core.store.connection import ConnectionManager
 from membox.core.store.documents import DocumentOps
 from membox.core.store.entities import EntityOps, _blob_to_vec, _cosine, _vec_to_blob
+from membox.core.store.meta_guard import check_embedder_guard, record_embedder_meta
 from membox.core.store.migrations import apply_migrations
 from membox.core.store.relations import RelationOps
 from membox.core.store.retrieval import RetrievalOps
@@ -21,6 +22,8 @@ from membox.core.store.retrieval import RetrievalOps
 if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Generator
+
+    from membox.services.embedding import Embedder
 
 __all__ = [
     "KnowledgeStore",
@@ -43,10 +46,23 @@ class KnowledgeStore(DocumentOps, EntityOps, RelationOps, RetrievalOps):
     migrations (tracked via ``PRAGMA user_version``).
     """
 
-    def __init__(self, db_path: str = "memory.db") -> None:
+    def __init__(
+        self,
+        db_path: str = "memory.db",
+        embedder: Embedder | None = None,
+    ) -> None:
         self.db_path = db_path
         self._cm = ConnectionManager(db_path)
         apply_migrations(self._cm.connection())
+        # M3 meta guard: record on first embed-enabled open; raise on mismatch.
+        if embedder is not None:
+            conn = self._cm.connection()
+            check_embedder_guard(
+                conn, embedder.model if hasattr(embedder, "model") else "", embedder.dim
+            )
+            record_embedder_meta(
+                conn, embedder.model if hasattr(embedder, "model") else "", embedder.dim
+            )
 
     # ---- connection management (compatibility shims over ConnectionManager) ----
 

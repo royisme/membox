@@ -12,8 +12,26 @@ def query(
     db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
     max_hops: int = typer.Option(2, "--max-hops", help="Maximum BFS hops from seed entities"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
+    budget: int | None = typer.Option(
+        None,
+        "--budget",
+        help=(
+            "Token budget override for compact output (spec §3.7 scoring + knapsack "
+            "truncation). Defaults to config retrieval.budget (2000) when omitted."
+        ),
+    ),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help="Filter evidence to this project name only.",
+    ),
 ) -> None:
-    """Query the knowledge graph and print a structured context."""
+    """Query the knowledge graph and print a compact context.
+
+    Output always uses the compact subject-grouped format with token-budget
+    truncation and a coverage footer (spec §3.7).  Use --budget to override
+    the default token budget (config retrieval.budget, 2000).
+    """
     agent = make_agent(db, no_llm=no_llm, warn=True)
-    result = agent.query(question, max_hops)
+    result = agent.query(question, max_hops=max_hops, budget=budget, project_filter=project)
     typer.echo(result)

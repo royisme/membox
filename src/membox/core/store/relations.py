@@ -22,21 +22,32 @@ class RelationOps:
         target_id: int,
         predicate: str,
         doc_id: int,
+        embedding: list[float] | None = None,
     ) -> int:
         """Insert the relation if absent and link doc as evidence. Returns relation_id.
 
         The (source_id, target_id, predicate) triple is unique; duplicate calls
-        append evidence without creating duplicate relation rows.
+        append evidence without creating duplicate relation rows.  When
+        ``embedding`` is supplied and the relation row is newly created (or the
+        stored embedding is NULL), the value is written to
+        ``relations.embedding`` as packed float32 bytes.
 
         Args:
             source_id: Source entity id.
             target_id: Target entity id.
             predicate: Normalized predicate string.
             doc_id: Document providing evidence for this relation.
+            embedding: Optional precomputed triple embedding (float32 vector).
+                Stored as ``struct.pack("Nf", ...)`` bytes (same encoding as
+                ``entities.embedding``).  Computed by the agent layer from the
+                triple rendered as ``"subject predicate object"`` plain text.
 
         Returns:
             relation_id (existing or newly created).
         """
+        from membox.core.store.entities import _vec_to_blob
+
+        blob = _vec_to_blob(embedding) if embedding else None
         with self._cm.transaction() as c:
             c.execute(
                 "INSERT OR IGNORE INTO relations(source_id, target_id, predicate) VALUES (?, ?, ?)",
@@ -47,6 +58,12 @@ class RelationOps:
                 (source_id, target_id, predicate),
             ).fetchone()
             rid = int(row[0])
+            # Store embedding if provided and not yet set on this relation.
+            if blob is not None:
+                c.execute(
+                    "UPDATE relations SET embedding=? WHERE id=? AND embedding IS NULL;",
+                    (blob, rid),
+                )
             c.execute(
                 "INSERT OR IGNORE INTO relation_evidence(relation_id, doc_id) VALUES (?, ?)",
                 (rid, doc_id),
@@ -107,6 +124,68 @@ class RelationOps:
             .fetchall()
         )
         return [(int(r[0]), int(r[1]), str(r[2])) for r in rows]
+
+    def get_evidence_docs_with_meta(
+        self,
+        relation_ids: Iterable[int],
+    ) -> list[tuple[int, int, str, str | None, str | None, str | None, str | None]]:
+        """Return evidence docs with full metadata for scoring and provenance tags.
+
+        Args:
+            relation_ids: Relation ids to fetch evidence for.
+
+        Returns:
+            List of ``(relation_id, doc_id, content, project, source_path,
+            section, doc_date)`` tuples.  Metadata fields may be None when the
+            document was ingested without scoping metadata.
+        """
+        ids = list(relation_ids)
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = (
+            self._cm.connection()
+            .execute(
+                f"SELECT re.relation_id, d.id, d.content, "  # noqa: S608
+                f"       d.project, d.source_path, d.section, d.doc_date "
+                f"FROM relation_evidence re JOIN documents d ON d.id = re.doc_id "
+                f"WHERE re.relation_id IN ({placeholders})",
+                ids,
+            )
+            .fetchall()
+        )
+        return [
+            (
+                int(r[0]),
+                int(r[1]),
+                str(r[2]),
+                str(r[3]) if r[3] is not None else None,
+                str(r[4]) if r[4] is not None else None,
+                str(r[5]) if r[5] is not None else None,
+                str(r[6]) if r[6] is not None else None,
+            )
+            for r in rows
+        ]
+
+    def get_relation_embedding(self, relation_id: int) -> list[float] | None:
+        """Return the stored float32 embedding for a relation, or None.
+
+        Args:
+            relation_id: Relation to look up.
+
+        Returns:
+            Float vector, or None if no embedding has been stored.
+        """
+        from membox.core.store.entities import _blob_to_vec
+
+        row = (
+            self._cm.connection()
+            .execute("SELECT embedding FROM relations WHERE id=?;", (relation_id,))
+            .fetchone()
+        )
+        if row is None or row[0] is None:
+            return None
+        return _blob_to_vec(bytes(row[0]))
 
     def list_relations(self) -> list[Relation]:
         """Return all relations with source and target names resolved.
