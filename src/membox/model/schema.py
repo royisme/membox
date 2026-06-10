@@ -56,6 +56,45 @@ class Document(BaseModel):
     content: str
     source: str = ""
     created_at: str = ""
+    project: str | None = None
+    source_path: str | None = None
+    section: str | None = None
+    doc_date: str | None = None
+    version: int | None = None
+
+
+class DocumentChunk(BaseModel):
+    """A single markdown section chunk ready for ingestion.
+
+    Produced by :func:`~membox.core.chunking.chunk_markdown` and consumed by
+    :meth:`~membox.core.agent.MemoryAgent.ingest_file`.
+    """
+
+    section: str | None = Field(
+        default=None,
+        description="Section heading text (without ## prefix), or None for preamble.",
+    )
+    content: str = Field(description="Body text of this section.")
+
+
+class IngestMetadata(BaseModel):
+    """Metadata attached to a file-level ingest operation.
+
+    Passed from the CLI layer to :meth:`~membox.core.agent.MemoryAgent.ingest_file`.
+    """
+
+    project: str | None = Field(
+        default=None,
+        description="Repository / directory name for --project scoping.",
+    )
+    source_path: str | None = Field(
+        default=None,
+        description="Canonical file path of the originating document.",
+    )
+    doc_date: str | None = Field(
+        default=None,
+        description="ISO-8601 date of the document snapshot (e.g. 2026-06-09).",
+    )
 
 
 class Triple(BaseModel):

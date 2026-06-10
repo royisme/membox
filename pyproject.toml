@@ -83,10 +83,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["S101", "T20", "D"]
+"tests/**/*" = ["S101", "T20", "D", "TC003"]
 # typer requires runtime-available Path and uses Argument/Option in default values
 "src/membox/cli.py" = ["B008", "TC003"]
 "src/membox/cli/**/*.py" = ["B008", "TC003"]
+# agent.py uses Path in runtime function signatures and direct code
+"src/membox/core/agent.py" = ["TC003"]
 # demo script: print is intentional; Chinese text uses fullwidth punctuation by convention
 "examples/**/*" = ["T20", "RUF001"]
 

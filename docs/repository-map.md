@@ -8,19 +8,11 @@ Functional Python files include their module header so tools can reuse the file 
 
 ## Directory Outline
 
-- `.claude/`
-  - `.claude/scheduled_tasks.lock`
-- `.crew/`
-  - `.crew/state/`
-    - `.crew/state/metrics/`
-      - `.crew/state/metrics/2026-06-10.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
     - `.github/workflows/ci.yml`
   - `.github/dependabot.yml`
-- `.works/`
-  - `.works/translation_plan.md`
 - `docs/`
   - `docs/agent/`
     - `docs/agent/01-project-contract.md`
@@ -62,6 +54,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/retrieval.py` — BFS multi-hop graph retrieval.
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
+      - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
     - `src/membox/model/`
       - `src/membox/model/__init__.py` — Data model layer: Pydantic models and public data shapes.
@@ -84,9 +77,11 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
+  - `tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
+  - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
