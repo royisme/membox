@@ -117,8 +117,13 @@ class MemoryAgent:
         next version number; old rows are never deleted.
 
         Judgment call (spec does not specify default for ``project``):
-        ``project`` defaults to the name of the file's parent directory when not
-        provided by the caller.  The CLI ``--project`` option overrides this.
+        ``project`` defaults to the name of the nearest git repository root
+        directory found by walking up from the file's location (see
+        ``_infer_project``).  This correctly handles files inside subdirectories
+        such as ``docs/HANDOFF.md`` — they map to the repo name, not ``"docs"``.
+        Falls back to the file's parent directory name when no ``.git`` entry is
+        found anywhere in the directory hierarchy.  The CLI ``--project`` option
+        always overrides this default.
 
         Args:
             file_path: Path to the file to ingest.  Must exist and be readable.
@@ -142,7 +147,7 @@ class MemoryAgent:
             metadata = IngestMetadata()
 
         effective_source_path = metadata.source_path or str(resolved)
-        effective_project = metadata.project or resolved.parent.name
+        effective_project = metadata.project or _infer_project(resolved)
         effective_doc_date = metadata.doc_date or _file_mtime_date(resolved)
 
         content = resolved.read_text(encoding="utf-8")
@@ -265,3 +270,37 @@ def _file_mtime_date(path: Path) -> str:
     """
     mtime = path.stat().st_mtime
     return datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC).strftime("%Y-%m-%d")
+
+
+def _infer_project(path: Path) -> str:
+    """Infer the project name for a file by walking up to the nearest git root.
+
+    Walks upward from *path*'s directory looking for a ``.git`` entry (which
+    may be a directory in a normal clone or a file in a git worktree).  If a
+    git root is found its directory name is returned; otherwise the immediate
+    parent directory name is used as a fallback.
+
+    Args:
+        path: Resolved absolute path to the file being ingested.
+
+    Returns:
+        The name of the git repository root directory, or the file's immediate
+        parent directory name when no ``.git`` entry is found up to the
+        filesystem root.
+
+    Examples:
+        >>> _infer_project(Path("/home/user/myrepo/docs/HANDOFF.md"))
+        'myrepo'  # git root found at /home/user/myrepo
+        >>> _infer_project(Path("/tmp/scratch/note.txt"))
+        'scratch'  # no git root found, falls back to parent dir
+    """
+    current = path.parent
+    while True:
+        if (current / ".git").exists():
+            return current.name
+        parent = current.parent
+        if parent == current:
+            # Reached the filesystem root without finding .git.
+            break
+        current = parent
+    return path.parent.name

@@ -17,7 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from membox.cli import app
-from membox.core.agent import MemoryAgent
+from membox.core.agent import MemoryAgent, _infer_project
 from membox.core.store import KnowledgeStore
 from membox.core.store.migrations import (
     MIGRATIONS,
@@ -287,7 +287,21 @@ class TestIngestFile:
         row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
         assert row[0] == "myproject"
 
-    def test_project_defaults_to_parent_dir_name(self, tmp_path: Path) -> None:
+    def test_project_defaults_to_git_root_name(self, tmp_path: Path) -> None:
+        """File inside docs/ subdir → project = git repo root name, not 'docs'."""
+        repo = tmp_path / "myrepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        (repo / ".git").mkdir()  # simulate a git repo root
+        md = docs / "HANDOFF.md"
+        md.write_text("## X\nBody.", encoding="utf-8")
+        agent = self._agent(tmp_path)
+        agent.ingest_file(md)
+        row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
+        assert row[0] == "myrepo"
+
+    def test_project_defaults_to_parent_dir_when_no_git(self, tmp_path: Path) -> None:
+        """No .git anywhere → falls back to immediate parent directory name."""
         sub = tmp_path / "reponame"
         sub.mkdir()
         md = sub / "README.md"
@@ -356,6 +370,33 @@ class TestIngestFile:
         with pytest.raises(FileNotFoundError):
             agent.ingest_file(tmp_path / "nonexistent.md")
 
+    def test_explicit_project_overrides_git_root(self, tmp_path: Path) -> None:
+        """Explicit project metadata always wins over _infer_project."""
+        repo = tmp_path / "myrepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        md = docs / "HANDOFF.md"
+        md.write_text("## X\nBody.", encoding="utf-8")
+        agent = self._agent(tmp_path)
+        agent.ingest_file(md, metadata=IngestMetadata(project="override"))
+        row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
+        assert row[0] == "override"
+
+    def test_ingest_file_git_worktree_dot_git_file(self, tmp_path: Path) -> None:
+        """.git as a FILE (worktree) → project = repo root dir name."""
+        repo = tmp_path / "worktreerepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        # In a git worktree, .git is a regular file pointing to the main worktree.
+        (repo / ".git").write_text("gitdir: /some/other/path/.git/worktrees/wt\n", encoding="utf-8")
+        md = docs / "HANDOFF.md"
+        md.write_text("## X\nBody.", encoding="utf-8")
+        agent = self._agent(tmp_path)
+        agent.ingest_file(md)
+        row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
+        assert row[0] == "worktreerepo"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 5. CLI ingest-file flags
@@ -417,3 +458,52 @@ class TestCLIIngestFileFlags:
         rows = conn.execute("SELECT version FROM documents ORDER BY id;").fetchall()
         conn.close()
         assert [r[0] for r in rows] == [1, 2]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. _infer_project helper unit tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestInferProject:
+    """Unit tests for the _infer_project() helper in core/agent.py."""
+
+    def test_git_dir_at_repo_root(self, tmp_path: Path) -> None:
+        """File inside <repo>/docs/ with a .git directory → project = repo dir name."""
+        repo = tmp_path / "myrepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        result = _infer_project((docs / "HANDOFF.md").resolve())
+        assert result == "myrepo"
+
+    def test_git_file_worktree(self, tmp_path: Path) -> None:
+        """.git as a plain FILE (worktree) is also accepted → project = repo dir name."""
+        repo = tmp_path / "worktreerepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: /some/other/path/.git/worktrees/wt\n", encoding="utf-8")
+        result = _infer_project((docs / "HANDOFF.md").resolve())
+        assert result == "worktreerepo"
+
+    def test_no_git_root_falls_back_to_parent_dir(self, tmp_path: Path) -> None:
+        """No .git anywhere up to filesystem root → fall back to parent dir name."""
+        sub = tmp_path / "scratch"
+        sub.mkdir()
+        md = sub / "note.txt"
+        md.write_text("hello", encoding="utf-8")
+        result = _infer_project(md.resolve())
+        assert result == "scratch"
+
+    def test_explicit_project_overrides_inferred(self, tmp_path: Path) -> None:
+        """Explicit metadata.project always wins; _infer_project is never called."""
+        repo = tmp_path / "myrepo"
+        docs = repo / "docs"
+        docs.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        md = docs / "HANDOFF.md"
+        md.write_text("## X\nBody.", encoding="utf-8")
+        agent = MemoryAgent(extractor=DummyExtractor(), db_path=str(tmp_path / "a.db"))
+        agent.ingest_file(md, metadata=IngestMetadata(project="explicit-override"))
+        row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
+        assert row[0] == "explicit-override"

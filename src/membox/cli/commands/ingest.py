@@ -30,8 +30,11 @@ def ingest_file(
         None,
         "--project",
         help=(
-            "Repository / project name for scoping.  Defaults to the file's "
-            "parent directory name when omitted."
+            "Repository / project name for scoping.  When omitted, the name is "
+            "inferred from the nearest git repository root (walking up from the "
+            "file's directory), so 'docs/HANDOFF.md' maps to the repo name, not "
+            "'docs'.  Falls back to the file's parent directory name if no git "
+            "root is found."
         ),
     ),
     doc_date: str | None = typer.Option(
