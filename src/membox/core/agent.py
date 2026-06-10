@@ -36,11 +36,14 @@ class MemoryAgent:
         extractor: LLMExtractor,
         embedder: Embedder | None = None,
         db_path: str = "memory.db",
+        *,
+        disambiguation_threshold: float = 0.85,
     ) -> None:
         # Pass embedder to KnowledgeStore so the meta guard can run on open.
         self.store = KnowledgeStore(db_path, embedder=embedder)
         self._extractor = extractor
         self._embedder = embedder
+        self._disambiguation_threshold = disambiguation_threshold
 
     def ingest(self, text: str, source: str = "") -> None:
         """Extract entities and relations from text via LLM and store them.
@@ -86,20 +89,25 @@ class MemoryAgent:
             section=section,
             doc_date=doc_date,
         )
+        threshold = self._disambiguation_threshold
         name_to_id: dict[str, int] = {}
         for entity in graph.entities:
             eid = self.store.find_or_create_entity(
-                entity.name, entity.type, entity.description, self._embedder
+                entity.name, entity.type, entity.description, self._embedder, threshold=threshold
             )
             name_to_id[entity.name] = eid
         rel_count = 0
         for rel in graph.relations:
             sid = name_to_id.get(rel.source)
             if sid is None:
-                sid = self.store.find_or_create_entity(rel.source, "Unknown", "", self._embedder)
+                sid = self.store.find_or_create_entity(
+                    rel.source, "Unknown", "", self._embedder, threshold=threshold
+                )
             tid = name_to_id.get(rel.target)
             if tid is None:
-                tid = self.store.find_or_create_entity(rel.target, "Unknown", "", self._embedder)
+                tid = self.store.find_or_create_entity(
+                    rel.target, "Unknown", "", self._embedder, threshold=threshold
+                )
             norm_pred = normalize_predicate(rel.predicate)
             # Compute triple embedding once at ingest time (spec §3.7).
             # Rendered as "subject predicate object" plain text.

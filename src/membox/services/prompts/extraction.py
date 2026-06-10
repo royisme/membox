@@ -7,7 +7,13 @@ EXTRACTION_SYSTEM_PROMPT = (
     "atomic named entities (with type and short description) and "
     "binary relations as (source, predicate, target) triplets. "
     "Entity names must be canonical surface forms (no pronouns). "
-    "Predicates should be short verb phrases."
+    "Predicates should be short verb phrases. "
+    "The source is the actor or topic the sentence is about; the target is "
+    "what is said about it. Keep the original sentence direction — never "
+    "swap source and target. "
+    'Example: "Alice uses PostgreSQL. The project started in 2024." -> '
+    '(source="Alice", predicate="uses", target="PostgreSQL"), '
+    '(source="the project", predicate="started_in", target="2024").'
 )
 """System prompt for full entity/relation graph extraction."""
 

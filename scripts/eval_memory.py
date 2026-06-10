@@ -9,8 +9,8 @@ Two modes
     hit rate is **not** checked; the test verifies structural correctness only.
 
 Default mode (Ollama)
-    Extracts via ``huihui_ai/qwen3.5-abliterated:4b-Claude`` and embeds via
-    ``embeddinggemma``, both served at ``http://localhost:11434/v1``.  Runs the
+    Extracts via ``gemma-4-E2B`` and embeds via ``qwen3-embedding`` (overridable
+    through ``MEMBOX_EVAL_*`` env vars), served at ``http://localhost:11434/v1``.  Runs the
     full ingest + scored-query pipeline against the real corpus and reports per-
     question hit/miss and output token estimate.  Exit-nonzero gate is only
     enabled with ``--check-gates`` (hit rate ≥ 0.80 required).
@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
+import os
 import struct
 import sys
 import tempfile
@@ -248,9 +249,12 @@ def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
     from membox.services.extraction import ExtractionService
 
     base_url = "http://localhost:11434/v1"
-    extraction_model = "huihui_ai/qwen3.5-abliterated:4b-Claude"
-    embedding_model = "embeddinggemma"
-    embed_dim = 768  # embeddinggemma typical dimension
+    extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemma-4-E2B:latest")
+    embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "qwen3-embedding:latest")
+    embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1024"))
+    # Calibrated for qwen3-embedding on entity-name pairs (2026-06-10):
+    # same-entity cosine >= 0.763, different-entity <= 0.680 -> midpoint 0.72.
+    disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.72"))
 
     client = OpenAI(base_url=base_url, api_key="ollama")
     extractor = ExtractionService(
@@ -263,6 +267,7 @@ def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
         extractor=extractor,
         embedder=embedder,
         db_path=db_path,
+        disambiguation_threshold=disambiguation_threshold,
     )
 
 

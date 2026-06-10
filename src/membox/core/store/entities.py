@@ -177,12 +177,14 @@ class EntityOps:
         type_: str,
         description: str,
         embedder: Embedder | None,
+        *,
+        threshold: float = 0.85,
     ) -> int:
         """Resolve name to an entity_id via alias → embedding → create.
 
         Resolution order:
           1. Exact alias match (cheap, deterministic).
-          2. Embedding cosine ≥ 0.85 within same type (requires embedder).
+          2. Embedding cosine ≥ ``threshold`` within same type (requires embedder).
           3. Create new entity.
 
         Safe for concurrent callers in the same process (RLock serializes the
@@ -196,6 +198,8 @@ class EntityOps:
             type_: Entity type string.
             description: Short description for the entity.
             embedder: Optional embedder for fuzzy matching; None falls back to string-only.
+            threshold: Minimum cosine similarity for the embedding match layer
+                (``MemboxConfig.retrieval.disambiguation_threshold``).
 
         Returns:
             entity_id (existing or newly created).
@@ -221,7 +225,7 @@ class EntityOps:
             embedding: list[float] | None = None
             if embedder is not None:
                 embedding = embedder.embed(name)
-                eid = self.find_similar_entity(embedding, type_)
+                eid = self.find_similar_entity(embedding, type_, threshold=threshold)
                 if eid is not None:
                     self.add_alias(alias, eid)
                     # add_alias is INSERT OR IGNORE: a concurrent process may
