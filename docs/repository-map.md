@@ -42,6 +42,10 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/design/cjk-trigram-fts.md`
     - `docs/design/graph-fts-fusion.md`
     - `docs/design/retrieval-architecture.md`
+  - `docs/plans/`
+    - `docs/plans/plan_01_phase_c_triage_memory_units.md`
+    - `docs/plans/plan_02_eval_corpus_resnapshot.md`
+    - `docs/plans/plan_03_ingest_performance.md`
   - `docs/spec/`
     - `docs/spec/spec_01_core.md`
     - `docs/spec/spec_02_memory_lifecycle.md`
