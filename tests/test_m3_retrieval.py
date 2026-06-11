@@ -730,7 +730,7 @@ class TestEvalOffline:
 
         db_path = str(tmp_path / "eval_smoke.db")
         agent = mod.make_eval_agent(offline=True, db_path=db_path)
-        chunks = mod.ingest_corpus(agent, corpus_dir)
+        chunks, _ingested = mod.ingest_corpus(agent, corpus_dir)
         assert chunks > 0
 
         # Should not raise; hit rate not checked in offline mode.

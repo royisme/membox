@@ -387,3 +387,82 @@ class TestProviderTokenCap:
 
         client = OpenAIChatClient(MagicMock(), "model")
         assert client.max_completion_tokens is None
+
+
+# ===========================================================================
+# 4. Provider reasoning_effort
+# ===========================================================================
+
+
+class TestProviderReasoningEffort:
+    """OpenAIChatClient forwards reasoning_effort when set."""
+
+    def _make_client(self, reasoning_effort: str | None = None) -> tuple[Any, OpenAIChatClient]:
+        """Return (fake_openai_client, OpenAIChatClient) pair."""
+        fake_openai = MagicMock()
+        parsed_mock = MagicMock()
+        parsed_mock.model_dump_json.return_value = '{"entities":[],"relations":[]}'
+        fake_openai.beta.chat.completions.parse.return_value.choices[0].message.parsed = parsed_mock
+        fake_openai.chat.completions.create.return_value.choices[
+            0
+        ].message.content = "plain response"
+
+        chat_client = OpenAIChatClient(
+            fake_openai,
+            "test-model",
+            reasoning_effort=reasoning_effort,
+        )
+        return fake_openai, chat_client
+
+    def test_reasoning_effort_passed_in_json_schema_call(self) -> None:
+        """reasoning_effort is forwarded when calling with json_schema."""
+        from pydantic import BaseModel
+
+        class _Schema(BaseModel):
+            entities: list[str] = []
+            relations: list[str] = []
+
+        fake_openai, chat_client = self._make_client(reasoning_effort="low")
+        chat_client.complete("sys", "user", json_schema=_Schema)
+
+        call_kwargs = fake_openai.beta.chat.completions.parse.call_args
+        kwargs = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
+        assert kwargs.get("reasoning_effort") == "low"
+
+    def test_reasoning_effort_absent_in_json_schema_call_when_none(self) -> None:
+        """reasoning_effort key absent from json_schema call when not set."""
+        from pydantic import BaseModel
+
+        class _Schema(BaseModel):
+            entities: list[str] = []
+            relations: list[str] = []
+
+        fake_openai, chat_client = self._make_client(reasoning_effort=None)
+        chat_client.complete("sys", "user", json_schema=_Schema)
+
+        call_kwargs = fake_openai.beta.chat.completions.parse.call_args
+        kwargs = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
+        assert "reasoning_effort" not in kwargs
+
+    def test_reasoning_effort_passed_in_plain_call(self) -> None:
+        """reasoning_effort is forwarded on plain (no json_schema) completions."""
+        fake_openai, chat_client = self._make_client(reasoning_effort="low")
+        chat_client.complete("sys", "user")
+
+        call_kwargs = fake_openai.chat.completions.create.call_args
+        kwargs = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
+        assert kwargs.get("reasoning_effort") == "low"
+
+    def test_reasoning_effort_absent_in_plain_call_when_none(self) -> None:
+        """reasoning_effort key absent from plain call when not set."""
+        fake_openai, chat_client = self._make_client(reasoning_effort=None)
+        chat_client.complete("sys", "user")
+
+        call_kwargs = fake_openai.chat.completions.create.call_args
+        kwargs = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
+        assert "reasoning_effort" not in kwargs
+
+    def test_default_reasoning_effort_is_none(self) -> None:
+        """OpenAIChatClient default leaves reasoning_effort=None."""
+        client = OpenAIChatClient(MagicMock(), "model")
+        assert client.reasoning_effort is None

@@ -32,6 +32,10 @@ class OpenAIChatClient:
             when targeting providers with small context windows (e.g. Ollama
             at 8 192 tokens) where leaving the cap at the server default can
             cause the JSON output to be truncated mid-generation.
+        reasoning_effort: When set, passed as ``reasoning_effort`` to the
+            completions API.  Use ``"low"`` for Gemini thinking models
+            (e.g. ``gemini-3-flash-preview``) to skip expensive reasoning
+            tokens for simple structured-extraction tasks.
     """
 
     def __init__(
@@ -39,10 +43,12 @@ class OpenAIChatClient:
         client: OpenAI,
         model: str,
         max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.client = client
         self.model = model
         self.max_completion_tokens = max_completion_tokens
+        self.reasoning_effort = reasoning_effort
 
     def complete(
         self,
@@ -78,6 +84,8 @@ class OpenAIChatClient:
                 # is only recognised by recent OpenAI API versions and is
                 # rejected by most local-server implementations.
                 kwargs["max_tokens"] = self.max_completion_tokens
+            if self.reasoning_effort is not None:
+                kwargs["reasoning_effort"] = self.reasoning_effort
             rsp = self.client.beta.chat.completions.parse(
                 **kwargs,  # type: ignore[arg-type]
             )
@@ -91,6 +99,8 @@ class OpenAIChatClient:
         }
         if self.max_completion_tokens is not None:
             plain_kwargs["max_tokens"] = self.max_completion_tokens
+        if self.reasoning_effort is not None:
+            plain_kwargs["reasoning_effort"] = self.reasoning_effort
         plain = self.client.chat.completions.create(  # type: ignore[call-overload]
             **plain_kwargs,
         )

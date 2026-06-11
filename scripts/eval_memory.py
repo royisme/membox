@@ -20,7 +20,14 @@ Default mode (Ollama)
     extraction ``gemini-3-flash-preview``, embedding ``gemini-embedding-001``
     (1536-dim), much faster than local Ollama.  Requires ``GEMINI_API_KEY``
     or ``GOOGLE_API_KEY``.  Model/dim/threshold overridable via the same
-    ``MEMBOX_EVAL_*`` env vars.
+    ``MEMBOX_EVAL_*`` env vars.  The completion-token cap defaults to 16384
+    for Gemini (vs. 2048 for Ollama) because thinking models like
+    ``gemini-3-flash-preview`` consume thinking tokens from the same
+    ``max_completion_tokens`` budget, so a low cap silently truncates the
+    JSON output; override with ``MEMBOX_EVAL_MAX_COMPLETION_TOKENS``.
+    ``reasoning_effort`` defaults to ``"low"`` for Gemini (suppresses
+    unnecessary thinking tokens on structured extraction) and can be
+    overridden or disabled via ``MEMBOX_EVAL_REASONING_EFFORT``.
 
 Usage
 -----
@@ -129,8 +136,12 @@ class _SemanticDummyEmbedder:
 # ---------------------------------------------------------------------------
 
 
-def ingest_corpus(agent: MemoryAgent, corpus_dir: Path) -> int:
-    """Ingest all .md files from corpus_dir into the agent's knowledge store.
+def ingest_corpus(
+    agent: MemoryAgent,
+    corpus_dir: Path,
+    max_files: int | None = None,
+) -> tuple[int, set[str]]:
+    """Ingest .md files from corpus_dir into the agent's knowledge store.
 
     Extraction failures for individual chunks are printed as per-file warnings
     but do not abort the corpus run.  A summary of failed chunks is printed
@@ -139,13 +150,21 @@ def ingest_corpus(agent: MemoryAgent, corpus_dir: Path) -> int:
     Args:
         agent: Configured MemoryAgent.
         corpus_dir: Directory containing corpus HANDOFF / document files.
+        max_files: When set, ingest only the first N files (alphabetical order).
+            Useful for cheap smoke runs against paid APIs.
 
     Returns:
-        Total number of successfully ingested document chunks.
+        A tuple of (total_chunks_ok, ingested_filenames) where
+        ``total_chunks_ok`` is the number of successfully ingested document
+        chunks and ``ingested_filenames`` is the set of ingested filenames
+        (e.g. ``{"membox--HANDOFF.md"}``).
     """
     total = 0
     total_failed = 0
-    for md_file in sorted(corpus_dir.glob("*.md")):
+    ingested_filenames: set[str] = set()
+    all_files = sorted(corpus_dir.glob("*.md"))
+    selected_files = all_files[:max_files] if max_files is not None else all_files
+    for md_file in selected_files:
         # Derive project name from filename prefix (e.g. "membox--HANDOFF.md" → "membox").
         project = md_file.stem.split("--")[0]
         results = agent.ingest_file(
@@ -163,12 +182,13 @@ def ingest_corpus(agent: MemoryAgent, corpus_dir: Path) -> int:
                 )
             total_failed += len(failed)
         total += len(ok)
+        ingested_filenames.add(md_file.name)
     if total_failed:
         print(
             f"Corpus ingestion complete: {total} chunks OK, {total_failed} chunks FAILED.",
             file=sys.stderr,
         )
-    return total
+    return total, ingested_filenames
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +320,10 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
         embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1536"))
         # Strong online embeddings separate well; OpenAI-grade default.
         disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.85"))
+        # Gemini thinking models consume thinking tokens from max_completion_tokens;
+        # 2048 silently truncates the JSON output — use a much larger default.
+        max_completion_tokens = int(os.environ.get("MEMBOX_EVAL_MAX_COMPLETION_TOKENS", "16384"))
+        _raw_effort = os.environ.get("MEMBOX_EVAL_REASONING_EFFORT", "low")
     else:
         api_key = "ollama"
         base_url = "http://localhost:11434/v1"
@@ -309,10 +333,22 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
         # Calibrated for qwen3-embedding on entity-name pairs (2026-06-10):
         # same-entity cosine >= 0.763, different-entity <= 0.680 -> midpoint 0.72.
         disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.72"))
+        max_completion_tokens = int(os.environ.get("MEMBOX_EVAL_MAX_COMPLETION_TOKENS", "2048"))
+        _raw_effort = os.environ.get("MEMBOX_EVAL_REASONING_EFFORT", "")
+
+    # Normalize: empty string or the literal "none" disables reasoning_effort.
+    reasoning_effort: str | None = (
+        _raw_effort if _raw_effort and _raw_effort.lower() != "none" else None
+    )
 
     client = OpenAI(base_url=base_url, api_key=api_key)
     extractor = ExtractionService(
-        OpenAIChatClient(client, extraction_model, max_completion_tokens=2048)
+        OpenAIChatClient(
+            client,
+            extraction_model,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+        )
     )  # type: ignore[assignment]
     embedder = EmbeddingService(OpenAIEmbedClient(client, embedding_model, embed_dim), embed_dim)
     embedder.model = embedding_model  # type: ignore[attr-defined]
@@ -323,6 +359,38 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
         db_path=db_path,
         disambiguation_threshold=disambiguation_threshold,
     )
+
+
+# ---------------------------------------------------------------------------
+# Gold filtering
+# ---------------------------------------------------------------------------
+
+
+def _filter_gold(
+    gold: list[dict[str, Any]],
+    ingested_files: set[str],
+    max_files: int | None,
+) -> list[dict[str, Any]]:
+    """Return the subset of gold questions answerable from the ingested files.
+
+    When ``max_files`` is None every question is returned unchanged (no-op).
+    When ``max_files`` is set, only questions whose every ``source`` filename
+    is present in ``ingested_files`` are kept; the rest are silently dropped.
+    A summary line is printed so the user can see the subset size.
+
+    Args:
+        gold: Parsed gold.yaml question list.
+        ingested_files: Set of ingested corpus filenames (e.g. ``"membox--HANDOFF.md"``).
+        max_files: Value of the ``--max-files`` argument (None means no filtering).
+
+    Returns:
+        Filtered (or original) gold question list.
+    """
+    if max_files is None:
+        return gold
+    kept = [item for item in gold if all(src in ingested_files for src in item.get("source", []))]
+    print(f"Smoke subset: {len(kept)}/{len(gold)} gold questions (--max-files {max_files})")
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +450,16 @@ def main() -> int:
         default=None,
         help="SQLite database path (default: a temporary file per run).",
     )
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Ingest only the first N corpus files (alphabetical) and evaluate "
+            "only gold questions answerable from them — cheap smoke runs against paid APIs."
+        ),
+    )
     args = parser.parse_args()
 
     gold_path: Path = args.gold
@@ -402,26 +480,30 @@ def main() -> int:
         db_path = args.db
         agent = make_eval_agent(offline=args.offline, db_path=db_path, provider=args.provider)
         print(f"Ingesting corpus from {corpus_dir} …")
-        total_chunks = ingest_corpus(agent, corpus_dir)
+        total_chunks, ingested_files = ingest_corpus(agent, corpus_dir, max_files=args.max_files)
         print(f"Ingested {total_chunks} chunks.\n")
     else:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "eval.db")
             agent = make_eval_agent(offline=args.offline, db_path=db_path, provider=args.provider)
             print(f"Ingesting corpus from {corpus_dir} …")
-            total_chunks = ingest_corpus(agent, corpus_dir)
+            total_chunks, ingested_files = ingest_corpus(
+                agent, corpus_dir, max_files=args.max_files
+            )
             print(f"Ingested {total_chunks} chunks.\n")
+            filtered_gold = _filter_gold(gold, ingested_files, args.max_files)
             return run_evaluation(
                 agent,
-                gold,
+                filtered_gold,
                 budget=args.budget,
                 check_gates=args.check_gates,
                 offline=args.offline,
             )
 
+    filtered_gold = _filter_gold(gold, ingested_files, args.max_files)
     return run_evaluation(
         agent,
-        gold,
+        filtered_gold,
         budget=args.budget,
         check_gates=args.check_gates,
         offline=args.offline,

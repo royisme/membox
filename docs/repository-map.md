@@ -132,6 +132,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
+- `.env`
 - `.gitignore`
 - `.pre-commit-config.yaml`
 - `.python-version`
