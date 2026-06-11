@@ -478,7 +478,7 @@ CREATE TABLE history_messages (
     parent_id       TEXT,
     text            TEXT NOT NULL DEFAULT '',
     text_truncated  INTEGER NOT NULL DEFAULT 0,
-    blob_ref        TEXT,
+    payload_locator TEXT,
     created_at      TEXT,
     UNIQUE (session_id, external_id)
 );
@@ -493,7 +493,7 @@ CREATE TABLE history_events (
     file_path       TEXT,
     body            TEXT NOT NULL DEFAULT '',
     body_truncated  INTEGER NOT NULL DEFAULT 0,
-    blob_ref        TEXT,
+    payload_locator TEXT,
     is_error        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT
 );
@@ -527,8 +527,11 @@ Secret redaction policy (Phase B acceptance requirement):
 - The pattern table lives in code as a small reviewed list (common token
   prefixes, `KEY=`/`TOKEN=` assignments, PEM blocks), like the triage keyword
   table.
-- Redaction happens before FTS indexing and before blob overflow, so secrets
-  never become searchable or persisted in blob files.
+- Redaction applies to everything Membox stores (previews and FTS), so secrets
+  never become searchable. `history fetch` re-reads the user's own upstream
+  file and returns it raw — Membox neither persists nor indexes that output,
+  so the redaction boundary is "what Membox stores", not "what the user can
+  see in their own files".
 - Redaction is on by default and not silently disablable per import.
 
 ID policy:
@@ -560,15 +563,26 @@ Valid `source_kind` values for the initial trace layer:
 codex-jsonl | claude-jsonl | mimo-sqlite | membox-capture | manual
 ```
 
-Large payload policy:
+Large payload policy (owner decision, 2026-06-11): Membox does not copy large
+payloads at all. Tool outputs already live in the source session log (Codex,
+Claude, MiMo all retain them); duplicating them into Membox would bloat the
+database for content that is one re-parse away.
 
-- Inline `text` / `body` values should be capped by a configurable byte limit
-  before insertion.
-- If content exceeds the cap, store a preview in SQLite, set the truncated flag,
-  and write the full payload to a blob file under the Membox data directory.
-- The first implementation may skip blob storage and hard-truncate test
-  fixtures, but the schema keeps `blob_ref` so the migration does not need to
-  change later.
+- Inline `text` / `body` store a preview capped by `history_text_cap_bytes`;
+  the truncated flag marks rows whose preview is partial.
+- `payload_locator` records how to find the full payload in the upstream
+  source: the session's `source_ref` plus the record's `external_id` (and
+  event ordinal where applicable). It is an identity-based locator, not a byte
+  offset, so upstream file rewrites do not break it.
+- `membox history fetch <id>` re-reads the upstream file on demand and prints
+  the full payload. Fetch output is raw upstream content, read fresh from the
+  user's own file; it is never persisted or indexed by Membox.
+- Accepted risk: if the upstream log is deleted or compacted away, the preview
+  is all that remains. `history fetch` must say "source no longer available"
+  honestly instead of silently returning the preview. Trace previews plus
+  units/crystals are designed to survive upstream loss; full re-distillation
+  of old payloads is best-effort by construction.
+- There is no Membox-managed blob storage in any phase of this track.
 
 ### Triage Table
 
@@ -836,6 +850,7 @@ membox history import <path> --format membox-history-jsonl --project X
 membox history import <path> --format codex-jsonl --project X
 membox history search "..." --project X --kind tool_error
 membox history around <message-id>
+membox history fetch <message-or-event-id>   # re-read full payload from upstream log
 membox history file <path> --project X
 membox history failures --project X
 
@@ -912,7 +927,9 @@ Acceptance:
   session file that grew or was rewritten upstream (see incremental re-import
   semantics).
 - Secret redaction runs on import; a fixture containing a fake API key must not
-  be findable via `history search` or present in blob files.
+  be findable via `history search` or present in stored previews.
+- `history fetch` resolves a `payload_locator` back to the upstream file and
+  reports honestly when the source is gone.
 - Search handles punctuation and CJK safely.
 - Filters work by project, session, kind, tool, file path, and time.
 - No external LLM or embedding API is required.
@@ -1084,7 +1101,8 @@ and a lifespan of hours. It is better owned by the agent harness and handoff
 documents than by a provenance-tracked SQLite lifecycle. Trace, unit, and
 crystal map to episodic and consolidated memory; "what am I doing right now" is
 not a memory problem. If a future need appears, it should be a separate design,
-not a new `memory_units.unit_type`.
+not a new `memory_units.unit_type`. A placeholder lives in `docs/roadmap.md`
+under "Future Tracks" so the idea is not lost. (Owner-confirmed 2026-06-11.)
 
 ## Open Questions
 
@@ -1127,6 +1145,17 @@ pending owner sign-off). Remaining open items:
   concurrently.
 - Reinforcement metadata is deferred until Phase E query fusion.
 
+Owner-confirmed 2026-06-11 (v2.2 discussion):
+
+- No Membox-managed blob storage in any phase. Previews + `payload_locator` +
+  `history fetch` re-reading the upstream session log replace the v1/v2 blob
+  proposal entirely. (v1 OQ4, superseded by owner direction)
+- Markdown export is one-way only. (v1 OQ3)
+- The initial closed label set is the 11-label list below, accepted as
+  proposed. (v1 OQ2)
+- The HOT working-state tier stays out of this track but is recorded in
+  `docs/roadmap.md` under "Future Tracks" as a future standalone design.
+
 Resolved in v2 (proposed by agent review, pending owner sign-off):
 
 - `dream` is not exposed in public CLI help, not even as a documented alias.
@@ -1138,18 +1167,15 @@ Resolved in v2 (proposed by agent review, pending owner sign-off):
   `conventions`, `dependencies`, `performance`, `security`. Stored as a
   reviewed constant next to the triage keyword table; changing it is a
   reviewed code change, not a runtime write. (v1 OQ2)
-- Markdown export is one-way only. Re-importing human-edited Markdown cannot
-  carry trustworthy provenance and would create a second write path competing
-  with the lifecycle; a human who wants to correct memory uses
-  `memory supersede` / `memory retract` / manual capture. (v1 OQ3)
-- Blob overflow storage does NOT ship in Phase B. The first slice
-  hard-truncates oversized payloads, sets `text_truncated`/`body_truncated`,
-  and keeps `blob_ref` reserved in the schema. Caveat acknowledged: truncation
-  permanently loses the tail of large tool outputs, which weakens the
-  "trace stays re-distillable" guarantee for those rows. Acceptable for the
-  first slice because the truncated flag makes the loss visible and the
-  redaction-before-blob ordering is simpler to get right without blobs. (v1
-  OQ4)
+- (Rationale for the one-way Markdown decision above) Re-importing
+  human-edited Markdown cannot carry trustworthy provenance and would create a
+  second write path competing with the lifecycle; a human who wants to correct
+  memory uses `memory supersede` / `memory retract` / manual capture.
+- (Owner decision 2026-06-11, supersedes the earlier blob proposal) Membox
+  never copies large payloads. Tool outputs already live in the upstream
+  session log; Membox stores a capped preview plus a `payload_locator` and
+  re-reads the upstream file on demand via `history fetch`. No Membox-managed
+  blob storage in any phase. (v1 OQ4)
 - Cross-process write coordination uses a per-project lease row in `meta`
   (same pattern as `worker_lease`); the in-process `RLock` is not a
   cross-process mechanism and is not relied on for one.
@@ -1200,5 +1226,6 @@ For implementation review:
 |---|---|---|
 | 2026-06-11 | v0 review draft | Initial lifecycle design based on Sibyl, Obelisk, MiMo, and Trace/Unit/Crystal review. |
 | 2026-06-11 | v1 review response | Addressed first review pass: locked DB scope, specified heuristic triage, added triage table, activation rules, source enums, dedup, status log, label table, concurrency model, memory budget partition, and lifecycle eval strategy. |
+| 2026-06-11 | v2.2 owner decisions | Owner resolved the four product questions: no Membox blob storage in any phase — previews + `payload_locator` + `history fetch` re-read the upstream session log instead (supersedes the v1/v2 blob/truncation proposal); Markdown export one-way; 11-label set accepted; HOT state tier excluded but recorded in roadmap Future Tracks. Renamed `blob_ref` → `payload_locator`; added `history fetch` to the CLI surface and Phase B acceptance; clarified the redaction boundary is what Membox stores, not what the user's own files contain. |
 | 2026-06-11 | v2.1 dev cleanup | Pre-commit consistency pass: `user_intent` persisted on triage rows (activation rule reads it), newest-gate-version rule for pending row selection, CLI `--status` value matches state names, `memory restore` added to surface, importer `--format` vs `source_kind` distinction, module placement table, config keys with defaults, migration numbers deliberately not hardcoded. |
 | 2026-06-11 | v2 review response | Second review pass (engineering + theory). Blockers fixed: cross-process lease replaces the misattributed RLock claim; dedup re-anchored on source identity across gate versions; incremental re-import semantics and rewrite-safe event ordinals; secret redaction as Phase B acceptance. Decisions resolved: independent-source definition, score evolution (explains the 0.90 branch), archive/restore preserves crystal status, crystal_candidate demotion path, decay owned by consolidate, default project scoping. Theory-driven additions: memory-pool ranking is relevance x importance x recency (not static scores), recall_count/last_recalled_at reinforcement bookkeeping, HOT state tier explicitly rejected, lifecycle eval moved to start of Phase C. Refinements: role-weighted triage signals with per-session cap, weak_context_only not extracted by default, extraction-stage clustering of adjacent triage rows, polymorphic-reference dangling-source policy, timestamp fallback chain, footer omits ineligible pools. All v1 open questions resolved (pending owner sign-off). |
