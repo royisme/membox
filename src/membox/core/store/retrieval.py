@@ -212,7 +212,10 @@ class RetrievalOps:
             return {}
 
         placeholders = ",".join("?" * len(relation_ids))
-        safe_query = _fts5_escape(query)
+        safe_query = _fts5_or_query(query)
+        if safe_query == '""':
+            # All tokens stripped to nothing — no useful MATCH expression.
+            return {}
 
         try:
             rows = conn.execute(

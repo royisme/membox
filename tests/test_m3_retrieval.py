@@ -104,7 +104,7 @@ class TestEstTokens:
 
 
 class TestBM25Scoring:
-    """BM25 scoring: negation, degenerate, no-match → 0."""
+    """BM25 scoring: OR-of-tokens match, negation, degenerate, no-match → 0."""
 
     def test_bm25_score_nonnegative(self, tmp_path: Path) -> None:
         """All normalised BM25 scores are in [0, 1]."""
@@ -126,6 +126,62 @@ class TestBM25Scoring:
         scores = store._bm25_scores_for_relations([r1, r2], "Alice Python")
         for v in scores.values():
             assert 0.0 <= v <= 1.0, f"BM25 score out of range: {v}"
+
+    def test_bm25_or_tokens_yields_nonzero(self, tmp_path: Path) -> None:
+        """Regression: multi-word natural-language query yields nonzero scores.
+
+        Previously ``_fts5_escape`` produced a phrase-match expression that
+        required tokens to appear contiguously; a query like "Alice Python"
+        would almost never match prose evidence because the words are not
+        adjacent, so bm25(t) was effectively always 0 (the FTS5 MATCH returned
+        no rows).  After switching to ``_fts5_or_query`` the individual tokens
+        are OR-ed, so evidence docs containing any query token are matched.
+
+        With two relations whose evidence matches different numbers of query
+        tokens, min-max normalisation produces a nonzero score for the better
+        match.  (With only one matching relation the degenerate normalisation
+        path sets every score to 0.0, which is correct behaviour covered by
+        ``test_bm25_degenerate_returns_zero``.)
+        """
+        from membox.core.store import KnowledgeStore
+
+        store = KnowledgeStore(str(tmp_path / "orq.db"))
+        # doc1 contains multiple query tokens: "membox", "stores", "data",
+        # "SQLite" — will score higher.
+        doc1 = store.insert_document(
+            "membox stores data inside SQLite for persistence",
+            source="d1",
+            project="p",
+            source_path="d1",
+        )
+        # doc2 contains only one query token: "SQLite".
+        doc2 = store.insert_document(
+            "SQLite is a relational database engine",
+            source="d2",
+            project="p",
+            source_path="d2",
+        )
+        e1 = store.create_entity("membox", "Project", "", None)
+        e2 = store.create_entity("SQLite", "Technology", "", None)
+        e3 = store.create_entity("data", "Concept", "", None)
+        r1 = store.upsert_relation(e1, e2, "stores_in", doc1)
+        r2 = store.upsert_relation(e3, e2, "persisted_by", doc2)
+
+        # Natural-language multi-word query whose tokens appear non-contiguously
+        # in doc1.  The phrase-match form "membox stores data SQLite" would NOT
+        # match (the words are not adjacent in that exact order), so with the
+        # old _fts5_escape the returned dict would be empty; with _fts5_or_query
+        # both docs match and the better match gets score 1.0 after normalisation.
+        scores = store._bm25_scores_for_relations([r1, r2], "membox stores data SQLite")
+        # After normalisation the best-scoring relation must be 1.0.
+        assert max(scores.values(), default=0.0) == 1.0, (
+            "Expected at least one nonzero BM25 score for relations whose evidence "
+            "contains individual query tokens; OR-of-tokens match is broken"
+        )
+        # r1 has more matching tokens, so it should rank above r2.
+        assert scores.get(r1, 0.0) >= scores.get(r2, 0.0), (
+            "Expected r1 (more matching tokens) to score >= r2"
+        )
 
     def test_bm25_degenerate_returns_zero(self, tmp_path: Path) -> None:
         """When all candidates share the same BM25 score, all get 0.0."""
@@ -161,6 +217,7 @@ class TestBM25Scoring:
         assert scores.get(rid, 0.0) == 0.0
 
     def test_bm25_empty_query_returns_empty(self, tmp_path: Path) -> None:
+        """Empty or whitespace-only queries return {} without hitting FTS5."""
         from membox.core.store import KnowledgeStore
 
         store = KnowledgeStore(str(tmp_path / "eq.db"))
@@ -171,6 +228,20 @@ class TestBM25Scoring:
 
         assert store._bm25_scores_for_relations([rid], "") == {}
         assert store._bm25_scores_for_relations([rid], "   ") == {}
+
+    def test_bm25_special_chars_only_returns_empty(self, tmp_path: Path) -> None:
+        """Query consisting only of FTS5-special chars strips to nothing → {}."""
+        from membox.core.store import KnowledgeStore
+
+        store = KnowledgeStore(str(tmp_path / "sc.db"))
+        doc = store.insert_document("something", source="d", project="p", source_path="d")
+        e1 = store.create_entity("A", "T", "", None)
+        e2 = store.create_entity("B", "T", "", None)
+        rid = store.upsert_relation(e1, e2, "rel", doc)
+
+        # After stripping FTS5 specials, no tokens remain → _fts5_or_query → '""'
+        # → _bm25_scores_for_relations must return {} without querying FTS5.
+        assert store._bm25_scores_for_relations([rid], "???!!!***") == {}
 
 
 # ---------------------------------------------------------------------------
