@@ -25,13 +25,26 @@ def query(
         "--project",
         help="Filter evidence to this project name only.",
     ),
+    include_superseded: bool = typer.Option(
+        False,
+        "--include-superseded",
+        help="Include superseded (older-version) relations in the query results.",
+    ),
 ) -> None:
     """Query the knowledge graph and print a compact context.
 
     Output always uses the compact subject-grouped format with token-budget
     truncation and a coverage footer (spec §3.7).  Use --budget to override
     the default token budget (config retrieval.budget, 2000).
+    Use --include-superseded to expose relations that were superseded by a
+    newer version of the same source document.
     """
     agent = make_agent(db, no_llm=no_llm, warn=True)
-    result = agent.query(question, max_hops=max_hops, budget=budget, project_filter=project)
+    result = agent.query(
+        question,
+        max_hops=max_hops,
+        budget=budget,
+        project_filter=project,
+        include_superseded=include_superseded,
+    )
     typer.echo(result)

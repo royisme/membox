@@ -192,6 +192,7 @@ class Relation(BaseModel):
     predicate: str
     source_name: str = ""
     target_name: str = ""
+    superseded_by: int | None = None
 
 
 class Document(BaseModel):

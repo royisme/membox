@@ -344,6 +344,8 @@ class MemoryAgent:
         max_hops: int = 2,
         budget: int | None = None,
         project_filter: str | None = None,
+        *,
+        include_superseded: bool = False,
     ) -> str:
         """Query the knowledge graph and return a compact context string.
 
@@ -357,6 +359,8 @@ class MemoryAgent:
             budget: Token budget override.  ``None`` uses the config default
                 (``retrieval.budget``, 2000).
             project_filter: Restrict evidence to this project name.
+            include_superseded: When True, superseded relations are included in
+                the BFS traversal.  Defaults to False.
 
         Returns:
             Compact context string with coverage footer.
@@ -366,6 +370,7 @@ class MemoryAgent:
             max_hops=max_hops,
             budget=budget,
             project_filter=project_filter,
+            include_superseded=include_superseded,
         )
 
     def compact_query(
@@ -375,6 +380,8 @@ class MemoryAgent:
         budget: int | None = None,
         project_filter: str | None = None,
         config: object | None = None,
+        *,
+        include_superseded: bool = False,
     ) -> str:
         """Hybrid BFS + scored rerank + compact output with token-budget truncation.
 
@@ -393,6 +400,8 @@ class MemoryAgent:
             project_filter: Restrict evidence to this project name.
             config: :class:`~membox.config.MemboxConfig` or
                 :class:`~membox.config.RetrievalConfig`; uses defaults if None.
+            include_superseded: When True, superseded relations are included in
+                the BFS traversal.  Defaults to False.
 
         Returns:
             Compact context string with coverage footer.
@@ -436,6 +445,7 @@ class MemoryAgent:
                 query_embedding=query_emb_fb,
                 config=ret_cfg,
                 project_filter=project_filter,
+                include_superseded=include_superseded,
             )
 
             if not scored_fb:
@@ -465,6 +475,7 @@ class MemoryAgent:
                 query_embedding=query_emb,
                 config=ret_cfg,
                 project_filter=project_filter,
+                include_superseded=include_superseded,
             )
         else:
             scored = []

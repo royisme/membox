@@ -64,7 +64,12 @@ class RetrievalOps:
 
         def get_entity(self, entity_id: int) -> tuple[int, str, str, str] | None: ...
 
-        def get_neighbors(self, entity_ids: Iterable[int]) -> list[tuple[int, int, int, str]]: ...
+        def get_neighbors(
+            self,
+            entity_ids: Iterable[int],
+            *,
+            include_superseded: bool = False,
+        ) -> list[tuple[int, int, int, str]]: ...
 
         def get_evidence_docs(self, relation_ids: Iterable[int]) -> list[tuple[int, int, str]]: ...
 
@@ -78,12 +83,16 @@ class RetrievalOps:
         self,
         seed_ids: list[int],
         max_hops: int,
+        *,
+        include_superseded: bool = False,
     ) -> HopResult:
         """BFS from seed_ids for up to max_hops. Returns traversal result with lineage.
 
         Args:
             seed_ids: Starting entity ids.
             max_hops: Maximum number of BFS expansions.
+            include_superseded: When True, superseded relations are included in
+                the traversal.  Defaults to False (active relations only).
 
         Returns:
             HopResult with triplets, documents, and visited entities.
@@ -98,7 +107,7 @@ class RetrievalOps:
         for _ in range(max_hops):
             if not frontier:
                 break
-            edges = self.get_neighbors(frontier)
+            edges = self.get_neighbors(frontier, include_superseded=include_superseded)
             new_frontier: set[int] = set()
             for rid, src, tgt, pred in edges:
                 collected[rid] = (rid, src, tgt, pred)
@@ -139,6 +148,8 @@ class RetrievalOps:
         self,
         seed_ids: list[int],
         max_hops: int,
+        *,
+        include_superseded: bool = False,
     ) -> tuple[
         dict[int, tuple[int, int, int, str]],
         dict[int, int],
@@ -149,6 +160,8 @@ class RetrievalOps:
         Args:
             seed_ids: Starting entity ids.
             max_hops: Maximum number of BFS expansions.
+            include_superseded: When True, superseded relations are included in
+                the traversal.  Defaults to False (active relations only).
 
         Returns:
             Tuple of:
@@ -164,7 +177,7 @@ class RetrievalOps:
         for depth in range(max_hops):
             if not frontier:
                 break
-            edges = self.get_neighbors(frontier)
+            edges = self.get_neighbors(frontier, include_superseded=include_superseded)
             new_frontier: set[int] = set()
             for rid, src, tgt, pred in edges:
                 collected[rid] = (rid, src, tgt, pred)
@@ -257,6 +270,8 @@ class RetrievalOps:
         query_embedding: list[float] | None,
         config: RetrievalConfig | None = None,
         project_filter: str | None = None,
+        *,
+        include_superseded: bool = False,
     ) -> list[dict[str, object]]:
         """BFS + composite scoring per spec §3.7.  Returns sorted scored-triple dicts.
 
@@ -280,6 +295,8 @@ class RetrievalOps:
             query_embedding: Query vector for sim(t); None disables sim.
             config: :class:`~membox.config.RetrievalConfig`; uses spec defaults if None.
             project_filter: If set, restrict evidence to this project name.
+            include_superseded: When True, superseded relations are included in
+                the BFS traversal and scoring.  Defaults to False.
 
         Returns:
             List of scored dicts sorted descending by score with deterministic
@@ -293,7 +310,9 @@ class RetrievalOps:
         alpha = cfg.alpha
 
         # 1. BFS with depth tracking.
-        collected, entity_depth, name_cache = self.bfs_query_with_depths(seed_ids, max_hops)
+        collected, entity_depth, name_cache = self.bfs_query_with_depths(
+            seed_ids, max_hops, include_superseded=include_superseded
+        )
         if not collected:
             return []
 

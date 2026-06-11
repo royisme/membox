@@ -42,6 +42,16 @@ _MESSAGE_LINE = json.dumps(
     }
 )
 
+_SECRET_MESSAGE_LINE = json.dumps(
+    {
+        "type": "message",
+        "id": "cm-secret",
+        "role": "user",
+        "text": "OPENAI_API_KEY=sk-abcdefghijklmnop12345678 visible context",
+        "created_at": "2026-06-11T20:00:03Z",
+    }
+)
+
 _EVENT_LINE = json.dumps(
     {
         "type": "event",
@@ -68,11 +78,15 @@ _ERROR_EVENT_LINE = json.dumps(
 )
 
 
-def _write_fixture(path: Path, *, include_error: bool = False) -> None:
+def _write_fixture(
+    path: Path, *, include_error: bool = False, include_secret: bool = False
+) -> None:
     """Write a minimal fixture file with optional error event."""
     lines = [_SESSION_LINE, _MESSAGE_LINE, _EVENT_LINE]
     if include_error:
         lines.append(_ERROR_EVENT_LINE)
+    if include_secret:
+        lines.append(_SECRET_MESSAGE_LINE)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -200,6 +214,56 @@ def test_cli_fetch_unknown_record_id(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
+def test_cli_fetch_redacts_by_default(tmp_path: Path) -> None:
+    """history fetch redacts secret-looking payloads unless --raw is explicit."""
+    db = tmp_path / "mem.db"
+    fixture = tmp_path / "secret-session.jsonl"
+    _write_fixture(fixture, include_secret=True)
+    _invoke_import(fixture, db, project="demo")
+
+    result = runner.invoke(
+        app,
+        [
+            "history",
+            "fetch",
+            "membox-capture:cs1:msg:cm-secret",
+            "--project",
+            "demo",
+            "--db",
+            str(db),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "OPENAI_API_KEY=[REDACTED]" in result.output
+    assert "sk-abcdefghijklmnop12345678" not in result.output
+
+
+def test_cli_fetch_raw_requires_explicit_flag(tmp_path: Path) -> None:
+    """history fetch --raw returns the upstream payload unchanged."""
+    db = tmp_path / "mem.db"
+    fixture = tmp_path / "raw-session.jsonl"
+    _write_fixture(fixture, include_secret=True)
+    _invoke_import(fixture, db, project="demo")
+
+    result = runner.invoke(
+        app,
+        [
+            "history",
+            "fetch",
+            "membox-capture:cs1:msg:cm-secret",
+            "--project",
+            "demo",
+            "--raw",
+            "--db",
+            str(db),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "sk-abcdefghijklmnop12345678" in result.output
+
+
 # ---------------------------------------------------------------------------
 # 17. failures command output
 # ---------------------------------------------------------------------------
@@ -286,10 +350,33 @@ def test_cli_around_known_id(tmp_path: Path) -> None:
     center_id = "membox-capture:cs1:msg:cm1"
     result = runner.invoke(
         app,
-        ["history", "around", center_id, "--db", str(db)],
+        ["history", "around", center_id, "--project", "demo", "--db", str(db)],
     )
     assert result.exit_code == 0, result.output
     assert ">>>" in result.output
+
+
+def test_cli_around_project_scope(tmp_path: Path) -> None:
+    """around refuses a known message when the project scope does not match."""
+    fixture = tmp_path / "session.jsonl"
+    db = tmp_path / "mem.db"
+    _write_fixture(fixture)
+    _invoke_import(fixture, db, project="demo")
+
+    result = runner.invoke(
+        app,
+        [
+            "history",
+            "around",
+            "membox-capture:cs1:msg:cm1",
+            "--project",
+            "other",
+            "--db",
+            str(db),
+        ],
+    )
+
+    assert result.exit_code == 1
 
 
 # ---------------------------------------------------------------------------

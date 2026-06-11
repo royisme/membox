@@ -517,6 +517,8 @@ def test_concurrent_find_or_create_no_duplicate(tmp_path: Path) -> None:
             results.append(eid)
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:

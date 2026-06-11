@@ -32,6 +32,18 @@ class RelationOps:
         stored embedding is NULL), the value is written to
         ``relations.embedding`` as packed float32 bytes.
 
+        After inserting/linking evidence, **supersession detection** runs inside
+        the same transaction (M4).  Detection requires the evidence document to
+        have a non-NULL ``source_path`` and non-NULL ``version``; if either is
+        missing, supersession is skipped.  The rule implemented is
+        **forward-only**: the new relation supersedes older-version relations
+        that assert a *different* object for the same ``source_id + predicate``
+        and whose evidence comes from the same ``source_path`` at a strictly
+        lower ``version``.  Each old relation is marked with
+        ``superseded_by = <new_rid>``.  The UPDATE is conditioned on
+        ``superseded_by IS NULL`` so a lost race against a concurrent writer
+        (zero rows affected) is silently ignored.
+
         Args:
             source_id: Source entity id.
             target_id: Target entity id.
@@ -68,16 +80,59 @@ class RelationOps:
                 "INSERT OR IGNORE INTO relation_evidence(relation_id, doc_id) VALUES (?, ?)",
                 (rid, doc_id),
             )
+
+            # --- M4 supersession detection (forward-only) ---
+            # Fetch source_path and version for the evidence document.
+            doc_row = c.execute(
+                "SELECT source_path, version FROM documents WHERE id = ?",
+                (doc_id,),
+            ).fetchone()
+            if doc_row is not None:
+                new_source_path = doc_row[0]
+                new_version = doc_row[1]
+                if new_source_path is not None and new_version is not None:
+                    # Find active sibling relations: same source_id + predicate,
+                    # different target_id, not yet superseded, with evidence from
+                    # the same source_path at a strictly lower version.
+                    old_rows = c.execute(
+                        """
+                        SELECT DISTINCT r.id
+                        FROM relations r
+                        JOIN relation_evidence re ON re.relation_id = r.id
+                        JOIN documents d ON d.id = re.doc_id
+                        WHERE r.source_id = ?
+                          AND r.predicate = ?
+                          AND r.target_id != ?
+                          AND r.superseded_by IS NULL
+                          AND r.id != ?
+                          AND d.source_path = ?
+                          AND d.version IS NOT NULL
+                          AND d.version < ?
+                        """,
+                        (source_id, predicate, target_id, rid, new_source_path, new_version),
+                    ).fetchall()
+                    for (old_rid,) in old_rows:
+                        c.execute(
+                            "UPDATE relations SET superseded_by = ? "
+                            "WHERE id = ? AND superseded_by IS NULL",
+                            (rid, old_rid),
+                        )
+
             return rid
 
     def get_neighbors(
         self,
         entity_ids: Iterable[int],
+        *,
+        include_superseded: bool = False,
     ) -> list[tuple[int, int, int, str]]:
         """Return edges incident to entity_ids as (rid, source_id, target_id, predicate).
 
         Args:
             entity_ids: Set of entity ids to expand.
+            include_superseded: When False (default), superseded relations are
+                excluded from the result.  Pass True to include them (e.g. for
+                auditing via ``--include-superseded``).
 
         Returns:
             List of (relation_id, source_id, target_id, predicate) tuples.
@@ -86,11 +141,13 @@ class RelationOps:
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
+        superseded_clause = "" if include_superseded else " AND superseded_by IS NULL"
         rows = (
             self._cm.connection()
             .execute(
                 f"SELECT id, source_id, target_id, predicate FROM relations "  # noqa: S608
-                f"WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})",
+                f"WHERE (source_id IN ({placeholders}) OR target_id IN ({placeholders}))"
+                f"{superseded_clause}",
                 ids + ids,
             )
             .fetchall()
@@ -191,7 +248,8 @@ class RelationOps:
         """Return all relations with source and target names resolved.
 
         Returns:
-            List of Relation objects with source_name and target_name filled in.
+            List of Relation objects with source_name, target_name, and
+            superseded_by filled in.
         """
         from membox.model.schema import Relation as RelationModel
 
@@ -199,7 +257,7 @@ class RelationOps:
             self._cm.connection()
             .execute(
                 "SELECT r.id, r.source_id, r.target_id, r.predicate, "
-                "       e1.canonical_name, e2.canonical_name "
+                "       e1.canonical_name, e2.canonical_name, r.superseded_by "
                 "FROM relations r "
                 "JOIN entities e1 ON e1.id = r.source_id "
                 "JOIN entities e2 ON e2.id = r.target_id "
@@ -215,6 +273,7 @@ class RelationOps:
                 predicate=str(r[3]),
                 source_name=str(r[4]),
                 target_name=str(r[5]),
+                superseded_by=int(r[6]) if r[6] is not None else None,
             )
             for r in rows
         ]

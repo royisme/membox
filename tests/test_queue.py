@@ -21,12 +21,9 @@ import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
-
-if TYPE_CHECKING:
-    import pytest
 
 from membox.cli import app
 from membox.core.agent import MemoryAgent
@@ -462,6 +459,7 @@ class TestSpawnWorker:
         store.close()
         assert spawn_worker(db) is False
 
+    @pytest.mark.timeout(35)
     def test_spawned_worker_drains_queue_and_exits(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

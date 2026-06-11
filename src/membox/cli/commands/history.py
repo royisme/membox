@@ -22,6 +22,7 @@ from membox.config import HistoryConfig
 from membox.core.agent import _infer_project
 from membox.core.history_import import fetch_payload, import_history
 from membox.core.store import KnowledgeStore
+from membox.core.triage import redact_secrets
 from membox.services.importers import IMPORTER_FORMATS
 
 history_app = typer.Typer(
@@ -120,7 +121,9 @@ def history_search(
         None, "--kind", help="Event kind filter (tool_call, tool_result, tool_error, …)"
     ),
     tool: str | None = typer.Option(None, "--tool", help="Tool-name filter"),
-    file_path: str | None = typer.Option(None, "--file", help="File-path substring filter"),
+    file_path: str | None = typer.Option(
+        None, "--file", help="Exact file path or directory prefix filter"
+    ),
     since: str | None = typer.Option(None, "--since", help="ISO-8601 created_at lower bound"),
     limit: int = typer.Option(20, "--limit", help="Maximum hits"),
     db: str = _DB_OPTION,
@@ -154,12 +157,16 @@ def history_search(
 @history_app.command("around")
 def history_around(
     message_id: str = typer.Argument(..., help="Stable message ID at the window center"),
+    project: str | None = typer.Option(None, "--project", help=_PROJECT_HELP),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Search every project"),
     radius: int = typer.Option(3, "--radius", help="Messages on each side"),
     db: str = _DB_OPTION,
 ) -> None:
     """Show the conversation window around one message."""
     store = KnowledgeStore(db)
-    rows = store.history_around(message_id, radius=radius)
+    rows = store.history_around(
+        message_id, radius=radius, project=_resolve_project(project, all_projects)
+    )
     if not rows:
         typer.echo(f"Error: no such message: {message_id}", err=True)
         raise typer.Exit(1)
@@ -172,20 +179,28 @@ def history_around(
 @history_app.command("fetch")
 def history_fetch(
     record_id: str = typer.Argument(..., help="Stable message or event ID"),
+    project: str | None = typer.Option(None, "--project", help=_PROJECT_HELP),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Search every project"),
+    raw: bool = typer.Option(
+        False,
+        "--raw",
+        help="Print raw upstream payload without secret redaction",
+    ),
     db: str = _DB_OPTION,
 ) -> None:
     """Print the full payload re-read from the upstream log (never stored)."""
     store = KnowledgeStore(db)
-    result = fetch_payload(store, record_id)
+    result = fetch_payload(store, record_id, project=_resolve_project(project, all_projects))
     if not result["found"]:
         typer.echo(f"Error: {result['note']}", err=True)
         raise typer.Exit(1)
-    typer.echo(result["payload"])
+    payload = result["payload"] if raw else redact_secrets(result["payload"])
+    typer.echo(payload)
 
 
 @history_app.command("file")
 def history_file(
-    file_path: str = typer.Argument(..., help="File-path substring to look up"),
+    file_path: str = typer.Argument(..., help="Exact file path or directory prefix to look up"),
     project: str | None = typer.Option(None, "--project", help=_PROJECT_HELP),
     all_projects: bool = typer.Option(False, "--all-projects", help="Search every project"),
     limit: int = typer.Option(50, "--limit", help="Maximum rows"),

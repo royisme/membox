@@ -10,6 +10,66 @@ Functional Python files include their module header so tools can reuse the file 
 
 - `.claude/`
   - `.claude/worktrees/`
+    - `.claude/worktrees/agent-a8d4ad0eb47bcd649/`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.github/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.github/workflows/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.github/dependabot.yml`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.serena/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.serena/.gitignore`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.serena/project.yml`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/agent/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/design/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/spec/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/code-standards.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/HANDOFF.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/repository-map.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/roadmap.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/spec-v0.2-draft.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/spec.md`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/docs/workflow.md`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/eval/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/eval/gold.yaml`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/eval/README.md`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/examples/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/examples/demo.py` — End-to-end demo: ingest real documents and query the knowledge graph via OpenAI.
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/__init__.py` — Automation scripts for repository maintenance and release workflows.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/bump_version.py` — Synchronize the project version across release metadata files.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/eval_memory.py` — scripts/eval_memory.py — membox Phase 7.5 M3 evaluation harness.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/src/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/src/membox/`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/`
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/__init__.py` — Test package marker for membox test modules.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/conftest.py` — Pytest configuration and shared fixtures.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_fts_fallback.py` — FTS fallback: direct chunk search when seed resolution or graph recall is empty.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_fusion.py` — Fusion: three-pass knapsack, allowance boundaries, cross-pool dedup, edge cases.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_queue.py` — Phase 7.5 M6 asynchronous-ingestion-queue tests.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_release_scripts.py` — Tests for release automation helper scripts.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
+        - `.claude/worktrees/agent-a8d4ad0eb47bcd649/tests/test_version.py` — Tests for membox package metadata.
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.editorconfig`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.gitignore`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.pre-commit-config.yaml`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/.python-version`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/AGENTS.md`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/CHANGELOG.md`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/CLAUDE.md`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/pyproject.toml`
+      - `.claude/worktrees/agent-a8d4ad0eb47bcd649/README.md`
   - `.claude/scheduled_tasks.lock`
 - `.crew/`
   - `.crew/audit/`
@@ -149,6 +209,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
   - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
+  - `tests/test_supersession.py` — M4 supersession semantics tests.
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
 - `.env`

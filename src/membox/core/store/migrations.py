@@ -57,6 +57,15 @@ a rowid that stays stable across ``VACUUM`` (implicit rowids of text-PK tables
 do not).  Stored ``text``/``body`` are secret-redacted, size-capped previews
 (see ``core/triage.py`` and ``HistoryConfig.text_cap_bytes``); full payloads
 stay in the upstream log, reachable via ``payload_locator``.
+
+Migration 0007 (M4 — Supersession Semantics) adds the ``superseded_by``
+self-referencing nullable FK column to ``relations``.  When a newer version of
+the same source document asserts the same subject + predicate with a DIFFERENT
+object, the old relation is marked ``superseded_by = <new_relation_id>``.
+Evidence rows are never deleted.  A partial index ``idx_relations_active`` over
+``(source_id) WHERE superseded_by IS NULL`` keeps active-relation lookups fast.
+Retrieval excludes superseded relations by default; pass ``include_superseded``
+to expose them for auditing.
 """
 
 from __future__ import annotations
@@ -464,6 +473,7 @@ def _migrate_0006(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_hevt_project ON history_events(project, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_kind ON history_events(project, kind, is_error);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_file ON history_events(file_path);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_project_file ON history_events(project, file_path);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_message ON history_events(message_id);",
     ):
         conn.execute(ddl)
@@ -482,6 +492,31 @@ def _migrate_0006(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0007(conn: sqlite3.Connection) -> None:
+    """Apply M4 supersession-semantics schema changes.
+
+    Adds the ``superseded_by`` nullable self-referencing FK column to
+    ``relations`` and a partial index on active (non-superseded) rows.
+    Uses ``ALTER TABLE … ADD COLUMN`` so existing data is preserved; the new
+    column defaults to NULL (not superseded).
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    rel_cols: set[str] = {
+        row[1] for row in conn.execute("PRAGMA table_info(relations);").fetchall()
+    }
+    if "superseded_by" not in rel_cols:
+        conn.execute(
+            "ALTER TABLE relations ADD COLUMN superseded_by INTEGER REFERENCES relations(id);"
+        )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relations_active "
+        "ON relations(source_id) WHERE superseded_by IS NULL;"
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
@@ -489,6 +524,7 @@ MIGRATIONS: list[Migration] = [
     (4, _DDL_0004),
     (5, _migrate_0005),
     (6, _migrate_0006),
+    (7, _migrate_0007),
 ]
 
 
