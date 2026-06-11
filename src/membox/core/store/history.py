@@ -498,7 +498,7 @@ class HistoryOps:
                 ``tool_error`` is an alias for ``tool_result`` with
                 ``is_error=1``.  Any kind filter skips the message pool.
             tool: Tool-name filter (events only).
-            file_path: Substring filter on the event ``file_path``.
+            file_path: Exact-path or directory-prefix filter on event ``file_path``.
             since: ISO-8601 lower bound on ``created_at``.
             limit: Maximum hits returned across both pools.
 
@@ -568,8 +568,9 @@ class HistoryOps:
                 sql += " AND e.tool_name = ?"
                 params.append(tool)
             if file_path:
-                sql += " AND e.file_path LIKE ?"
-                params.append(f"%{file_path}%")
+                clause, values = _file_path_filter("e", file_path)
+                sql += f" AND {clause}"
+                params.extend(values)
             sql += f" ORDER BY bm25({fts}) LIMIT ?"
             params.append(limit)
             for r in conn.execute(sql, params).fetchall():
@@ -594,22 +595,28 @@ class HistoryOps:
         hits.sort(key=lambda pair: pair[0])
         return [hit for _, hit in hits[:limit]]
 
-    def history_around(self, message_id: str, *, radius: int = 3) -> list[dict[str, object]]:
+    def history_around(
+        self, message_id: str, *, radius: int = 3, project: str | None = None
+    ) -> list[dict[str, object]]:
         """Return the messages surrounding one message in its session.
 
         Args:
             message_id: Stable message ID at the center of the window.
             radius: Messages to include on each side (by ``seq`` order).
+            project: Optional project scope guard.  When set, rows from other
+                projects are treated as unknown.
 
         Returns:
             Message dicts ordered by ``seq``; empty when the ID is unknown.
         """
         conn = self._cm.connection()
         center = conn.execute(
-            "SELECT session_id, seq FROM history_messages WHERE id = ?",
+            "SELECT session_id, seq, project FROM history_messages WHERE id = ?",
             (message_id,),
         ).fetchone()
         if center is None:
+            return []
+        if project is not None and str(center[2]) != project:
             return []
         session_id, seq = str(center[0]), int(center[1])
         rows = conn.execute(
@@ -627,10 +634,10 @@ class HistoryOps:
     def history_file(
         self, file_path: str, *, project: str | None = None, limit: int = 50
     ) -> list[dict[str, object]]:
-        """Return events that touched a file, newest first.
+        """Return events that touched a file or directory prefix, newest first.
 
         Args:
-            file_path: Substring matched against ``history_events.file_path``.
+            file_path: Exact file path or directory prefix.
             project: Project filter; None means all projects.
             limit: Maximum rows.
 
@@ -639,9 +646,10 @@ class HistoryOps:
         """
         sql = (
             "SELECT id, session_id, project, kind, tool_name, file_path, "
-            "body, is_error, created_at FROM history_events WHERE file_path LIKE ?"
+            "body, is_error, created_at FROM history_events WHERE "
         )
-        params: list[object] = [f"%{file_path}%"]
+        clause, params = _file_path_filter("", file_path)
+        sql += clause
         if project is not None:
             sql += " AND project = ?"
             params.append(project)
@@ -733,3 +741,11 @@ def _append_filters(
         sql += f" AND {alias}.created_at >= ?"
         params.append(since)
     return sql, params
+
+
+def _file_path_filter(alias: str, file_path: str) -> tuple[str, list[object]]:
+    """Return an index-friendly exact-or-directory-prefix file-path predicate."""
+    column = f"{alias}.file_path" if alias else "file_path"
+    base = file_path.rstrip("/") or file_path
+    prefix = f"{base}/%"
+    return f"({column} = ? OR {column} LIKE ?)", [base, prefix]

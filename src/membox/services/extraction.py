@@ -173,10 +173,18 @@ def create_default_extractor(
         from membox.services.embedding import OpenAIEmbedder
 
         client = OpenAI(api_key=api_key, base_url=config.extraction.base_url)
+        # Embedding may target a different endpoint/provider (e.g. Ollama
+        # extraction + Ollama embeddings share one base_url; OpenAI extraction
+        # + local embeddings do not) — build a second client only when needed.
+        embed_key = config.embedding.resolved_api_key() or api_key
+        if config.embedding.base_url == config.extraction.base_url and embed_key == api_key:
+            embed_client = client
+        else:
+            embed_client = OpenAI(api_key=embed_key, base_url=config.embedding.base_url)
         return (
             OpenAIExtractor(client, model=config.extraction.model),
             OpenAIEmbedder(
-                client,
+                embed_client,
                 model=config.embedding.model,
                 dim=config.embedding.dimensions,
             ),

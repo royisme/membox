@@ -8,6 +8,8 @@ import sys
 import threading
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     import sqlite3
     from pathlib import Path
@@ -29,9 +31,12 @@ def test_per_thread_connections_are_distinct(tmp_path: Path) -> None:
     lock = threading.Lock()
 
     def grab() -> None:
-        c = store._conn()
-        with lock:
-            conns.append(c)
+        try:
+            c = store._conn()
+            with lock:
+                conns.append(c)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=grab) for _ in range(4)]
     for t in threads:
@@ -83,6 +88,8 @@ def test_wal_allows_read_during_write(tmp_path: Path) -> None:
                 reader_done.wait(timeout=5.0)
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     def reader() -> None:
         writer_started.wait(timeout=5.0)
@@ -94,6 +101,7 @@ def test_wal_allows_read_during_write(tmp_path: Path) -> None:
             errors.append(exc)
         finally:
             reader_done.set()
+            store.close()
 
     wt = threading.Thread(target=writer)
     rt = threading.Thread(target=reader)
@@ -116,25 +124,29 @@ def test_wal_allows_read_during_write(tmp_path: Path) -> None:
 def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
     """5 threads each ingest 10 distinct documents → 50 documents, no errors."""
     from membox.core.agent import MemoryAgent
+    from membox.core.store import KnowledgeStore
     from membox.model.schema import ExtractedEntity, ExtractedGraph
     from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "ingest.db")
+    KnowledgeStore(db).close()
     errors: list[Exception] = []
     barrier = threading.Barrier(5)
 
     def worker(thread_id: int) -> None:
         agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)
-        barrier.wait()  # all threads start simultaneously
-        for i in range(10):
-            try:
+        try:
+            barrier.wait(timeout=5.0)  # all threads start simultaneously
+            for i in range(10):
                 graph = ExtractedGraph(
                     entities=[ExtractedEntity(name=f"Entity-{thread_id}-{i}", type="Thing")],
                     relations=[],
                 )
                 agent.ingest_extracted(f"doc-{thread_id}-{i}", graph)
-            except Exception as exc:
-                errors.append(exc)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            agent.store.close()
 
     threads = [threading.Thread(target=worker, args=(tid,)) for tid in range(5)]
     for t in threads:
@@ -144,8 +156,6 @@ def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
 
     assert not errors, f"Thread errors: {errors}"
     # Verify exact document count
-    from membox.core.store import KnowledgeStore
-
     store = KnowledgeStore(db)
     doc_count = store._conn().execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     assert doc_count == 50
@@ -158,25 +168,29 @@ def test_concurrent_5x10_ingest_no_errors(tmp_path: Path) -> None:
 def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
     """5 threads each ingesting the SAME entity name 10 times → exactly 1 entity row."""
     from membox.core.agent import MemoryAgent
+    from membox.core.store import KnowledgeStore
     from membox.model.schema import ExtractedEntity, ExtractedGraph
     from membox.services.extraction import DummyExtractor
 
     db = str(tmp_path / "dedup.db")
+    KnowledgeStore(db).close()
     errors: list[Exception] = []
     barrier = threading.Barrier(5)
 
     def worker() -> None:
         agent = MemoryAgent(extractor=DummyExtractor(), db_path=db)
-        barrier.wait()
-        for _ in range(10):
-            try:
+        try:
+            barrier.wait(timeout=5.0)
+            for _ in range(10):
                 graph = ExtractedGraph(
                     entities=[ExtractedEntity(name="SharedEntity", type="Thing")],
                     relations=[],
                 )
                 agent.ingest_extracted("text", graph)
-            except Exception as exc:
-                errors.append(exc)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            agent.store.close()
 
     threads = [threading.Thread(target=worker) for _ in range(5)]
     for t in threads:
@@ -185,7 +199,6 @@ def test_concurrent_5x10_same_entity_dedup(tmp_path: Path) -> None:
         t.join()
 
     assert not errors, f"Thread errors: {errors}"
-    from membox.core.store import KnowledgeStore
 
     store = KnowledgeStore(db)
     entity_count = store._conn().execute("SELECT COUNT(*) FROM entities").fetchone()[0]
@@ -207,12 +220,14 @@ def test_rlock_prevents_duplicate_entity_heavy_contention(tmp_path: Path) -> Non
     barrier = threading.Barrier(20)
 
     def worker() -> None:
-        barrier.wait()
         try:
+            barrier.wait(timeout=5.0)
             eid = store.find_or_create_entity("HotEntity", "Thing", "contested", None)
             results.append(eid)
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=worker) for _ in range(20)]
     for t in threads:
@@ -245,12 +260,14 @@ def test_concurrent_relation_inserts_dedup_correctly(tmp_path: Path) -> None:
     barrier = threading.Barrier(10)
 
     def worker() -> None:
-        barrier.wait()
         try:
+            barrier.wait(timeout=5.0)
             rid = store.upsert_relation(e1, e2, "links", doc_id)
             results.append(rid)
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=worker) for _ in range(10)]
     for t in threads:
@@ -295,6 +312,7 @@ print(json.dumps(ids))
 """
 
 
+@pytest.mark.timeout(65)
 def test_multiprocess_find_or_create_same_names_no_duplicates(tmp_path: Path) -> None:
     """4 processes racing find_or_create_entity on 50 shared names → identical ids, 50 rows.
 

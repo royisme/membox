@@ -464,6 +464,7 @@ def _migrate_0006(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_hevt_project ON history_events(project, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_kind ON history_events(project, kind, is_error);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_file ON history_events(file_path);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_project_file ON history_events(project, file_path);",
         "CREATE INDEX IF NOT EXISTS idx_hevt_message ON history_events(message_id);",
     ):
         conn.execute(ddl)

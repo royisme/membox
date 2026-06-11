@@ -47,7 +47,10 @@ class ProviderConfig(BaseModel):
 
         An explicitly configured ``api_key`` wins; otherwise the key is read
         from the provider's conventional environment variable
-        (``OPENAI_API_KEY`` for unknown providers).
+        (``OPENAI_API_KEY`` for unknown providers).  Ollama does not require
+        authentication, so that provider falls back to the placeholder
+        ``"ollama"`` (the OpenAI SDK rejects a missing key even when the
+        server ignores it).
 
         Returns:
             API key string, or None if neither config nor environment has one.
@@ -55,11 +58,27 @@ class ProviderConfig(BaseModel):
         if self.api_key is not None:
             return self.api_key
         env_var = _PROVIDER_ENV_VARS.get(self.provider, _DEFAULT_ENV_VAR)
-        return os.environ.get(env_var)
+        key = os.environ.get(env_var)
+        if key is None and self.provider == "ollama":
+            return "ollama"
+        return key
+
+
+def _env(name: str, default: str) -> str:
+    """Read a ``MEMBOX_*`` environment override with a fallback default."""
+    return os.environ.get(name, default)
 
 
 class ExtractionConfig(ProviderConfig):
     """Provider settings for the LLM extraction capability.
+
+    Defaults are environment-overridable (``MEMBOX_EXTRACTION_PROVIDER``,
+    ``MEMBOX_EXTRACTION_MODEL``, ``MEMBOX_EXTRACTION_BASE_URL``) so the CLI
+    can target Ollama/vLLM/DeepSeek without code changes, e.g.::
+
+        export MEMBOX_EXTRACTION_PROVIDER=ollama
+        export MEMBOX_EXTRACTION_MODEL=gemma-4-E2B:latest
+        export MEMBOX_EXTRACTION_BASE_URL=http://localhost:11434/v1
 
     Attributes:
         max_completion_tokens: Maximum number of tokens the model may generate
@@ -69,19 +88,33 @@ class ExtractionConfig(ProviderConfig):
             tokens) so the prompt + completion cannot overflow the window.
     """
 
-    model: str = "gpt-4o-mini"
+    provider: str = Field(default_factory=lambda: _env("MEMBOX_EXTRACTION_PROVIDER", "openai"))
+    model: str = Field(default_factory=lambda: _env("MEMBOX_EXTRACTION_MODEL", "gpt-4o-mini"))
+    base_url: str | None = Field(
+        default_factory=lambda: os.environ.get("MEMBOX_EXTRACTION_BASE_URL")
+    )
     max_completion_tokens: int | None = None
 
 
 class EmbeddingConfig(ProviderConfig):
     """Provider settings for the embedding capability.
 
+    Defaults are environment-overridable (``MEMBOX_EMBEDDING_PROVIDER``,
+    ``MEMBOX_EMBEDDING_MODEL``, ``MEMBOX_EMBEDDING_BASE_URL``,
+    ``MEMBOX_EMBEDDING_DIM``), mirroring :class:`ExtractionConfig`.
+
     Attributes:
         dimensions: Embedding vector dimensionality requested from the API.
     """
 
-    model: str = "text-embedding-3-small"
-    dimensions: int = 1536
+    provider: str = Field(default_factory=lambda: _env("MEMBOX_EMBEDDING_PROVIDER", "openai"))
+    model: str = Field(
+        default_factory=lambda: _env("MEMBOX_EMBEDDING_MODEL", "text-embedding-3-small")
+    )
+    base_url: str | None = Field(
+        default_factory=lambda: os.environ.get("MEMBOX_EMBEDDING_BASE_URL")
+    )
+    dimensions: int = Field(default_factory=lambda: int(_env("MEMBOX_EMBEDDING_DIM", "1536")))
 
 
 class RetrievalConfig(BaseModel):

@@ -142,7 +142,9 @@ def import_history(
     return ImportResult(session_id=batch.session.id, messages=n_msg, events=n_evt, skipped=False)
 
 
-def fetch_payload(store: KnowledgeStore, record_id: str) -> FetchResult:
+def fetch_payload(
+    store: KnowledgeStore, record_id: str, *, project: str | None = None
+) -> FetchResult:
     """Re-read the full payload of a message or event from its upstream log.
 
     Resolves the row's ``payload_locator`` (source_ref + external_id +
@@ -153,6 +155,8 @@ def fetch_payload(store: KnowledgeStore, record_id: str) -> FetchResult:
     Args:
         store: Open knowledge store.
         record_id: Stable message or event ID.
+        project: Optional project scope guard.  When set, records from other
+            projects are treated as not found.
 
     Returns:
         ``found=True`` with the full payload, or ``found=False`` with a
@@ -162,6 +166,12 @@ def fetch_payload(store: KnowledgeStore, record_id: str) -> FetchResult:
     row = store.get_history_record(record_id)
     if row is None:
         return FetchResult(found=False, payload="", note=f"no such history record: {record_id}")
+    if project is not None and str(row["project"]) != project:
+        return FetchResult(
+            found=False,
+            payload="",
+            note=f"no such history record in project {project!r}: {record_id}",
+        )
     locator_raw = row.get("payload_locator")
     session = store.get_history_session(str(row["session_id"]))
     if not locator_raw or session is None:

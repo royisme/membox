@@ -530,9 +530,9 @@ Secret redaction policy (Phase B acceptance requirement):
   table.
 - Redaction applies to everything Membox stores (previews and FTS), so secrets
   never become searchable. `history fetch` re-reads the user's own upstream
-  file and returns it raw — Membox neither persists nor indexes that output,
-  so the redaction boundary is "what Membox stores", not "what the user can
-  see in their own files".
+  file, but the CLI redacts fetch output by default because command output can
+  enter an agent context. Raw upstream output requires an explicit `--raw` flag
+  and is never persisted or indexed by Membox.
 - Redaction is on by default and not silently disablable per import.
 
 ID policy:
@@ -576,8 +576,9 @@ database for content that is one re-parse away.
   event ordinal where applicable). It is an identity-based locator, not a byte
   offset, so upstream file rewrites do not break it.
 - `membox history fetch <id>` re-reads the upstream file on demand and prints
-  the full payload. Fetch output is raw upstream content, read fresh from the
-  user's own file; it is never persisted or indexed by Membox.
+  the full payload with secret redaction applied by default. `--raw` prints the
+  fresh upstream content unchanged; fetch output is never persisted or indexed
+  by Membox.
 - Accepted risk: if the upstream log is deleted or compacted away, the preview
   is all that remains. `history fetch` must say "source no longer available"
   honestly instead of silently returning the preview. Trace previews plus
@@ -836,10 +837,11 @@ weighting is a calibration target for the lifecycle eval; the structure
 (relevance x importance x recency) is the design commitment. Admitted items get
 their `recall_count` / `last_recalled_at` updated.
 
-Project scoping: `membox history search` and `membox memory search` default to
-the current project (same resolution as existing commands) and require an
-explicit `--all-projects` flag for cross-project search. A single shared
-database must not leak another project's session trace by default.
+Project scoping: trace read commands (`history search`, `history around`,
+`history fetch`, `history file`, `history failures`) and `membox memory search`
+default to the current project (same resolution as existing commands) and
+require an explicit `--all-projects` flag for cross-project output. A single
+shared database must not leak another project's session trace by default.
 
 ## CLI Surface
 
@@ -850,8 +852,9 @@ Phase-appropriate commands:
 membox history import <path> --format membox-history-jsonl --project X
 membox history import <path> --format codex-jsonl --project X
 membox history search "..." --project X --kind tool_error
-membox history around <message-id>
-membox history fetch <message-or-event-id>   # re-read full payload from upstream log
+membox history around <message-id> --project X
+membox history fetch <message-or-event-id> --project X   # redacted by default
+membox history fetch <message-or-event-id> --project X --raw
 membox history file <path> --project X
 membox history failures --project X
 
@@ -930,7 +933,8 @@ Acceptance:
 - Secret redaction runs on import; a fixture containing a fake API key must not
   be findable via `history search` or present in stored previews.
 - `history fetch` resolves a `payload_locator` back to the upstream file and
-  reports honestly when the source is gone.
+  reports honestly when the source is gone. CLI fetch output is redacted by
+  default; raw output requires `--raw`.
 - Search handles punctuation and CJK safely.
 - Filters work by project, session, kind, tool, file path, and time.
 - No external LLM or embedding API is required.
@@ -1190,7 +1194,7 @@ Owner-confirmed 2026-06-11 (engineering decisions, v2 review pass):
 - Lifecycle eval fixtures are the first deliverable of Phase C.
 - A HOT working-state tier is explicitly out of scope (see Rejected
   Alternatives).
-- `history search` / `memory search` are project-scoped by default;
+- Trace read commands and `memory search` are project-scoped by default;
   cross-project requires `--all-projects`.
 
 ## Review Checklist

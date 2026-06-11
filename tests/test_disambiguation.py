@@ -207,6 +207,8 @@ def test_concurrent_8_threads_create_exactly_one_entity(tmp_path: Path) -> None:
             results.append(eid)
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=worker) for _ in range(8)]
     for t in threads:
@@ -240,6 +242,8 @@ def test_concurrent_distinct_names_each_get_own_entity(tmp_path: Path) -> None:
                 results[name] = eid
         except Exception as exc:
             errors.append(exc)
+        finally:
+            store.close()
 
     threads = [threading.Thread(target=worker, args=(n,)) for n in names]
     for t in threads:

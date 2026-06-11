@@ -458,6 +458,22 @@ def test_fetch_payload_returns_full_text(tmp_path: Path) -> None:
     assert long_text in result["payload"]
 
 
+def test_fetch_payload_project_scope(tmp_path: Path) -> None:
+    """fetch_payload refuses rows outside the requested project scope."""
+    db = tmp_path / "mem.db"
+    fixture = tmp_path / "scoped-fetch.jsonl"
+    _write_basic_fixture(fixture)
+    store = KnowledgeStore(str(db))
+    import_history(store, fixture, _FMT, project="demo")
+
+    record_id = "membox-capture:s1:msg:m1"
+    allowed = fetch_payload(store, record_id, project="demo")
+    denied = fetch_payload(store, record_id, project="other")
+
+    assert allowed["found"] is True
+    assert denied["found"] is False
+
+
 # ---------------------------------------------------------------------------
 # 8. fetch_payload: delete upstream, unknown record_id
 # ---------------------------------------------------------------------------
@@ -669,14 +685,15 @@ def test_search_tool_filter(tmp_path: Path) -> None:
 
 
 def test_search_file_path_filter(tmp_path: Path) -> None:
-    """file_path substring filter restricts event results."""
+    """file_path filter restricts event results by exact path or directory prefix."""
     store, _db = _build_multi_session_store(tmp_path)
 
-    hits = store.search_history("searchterm", file_path="/alpha/")
+    hits = store.search_history("searchterm", file_path="/code/alpha")
     assert len(hits) >= 1
-    # All hits should be events whose file_path contains /alpha/
+    # All hits should be events matched by the directory prefix.
     for hit in hits:
         assert hit["kind"] == "event"
+        assert hit["project"] == "alpha"
 
 
 def test_search_since_excludes_null_created_at(tmp_path: Path) -> None:
@@ -792,6 +809,19 @@ def test_history_around_correct_ordering(tmp_path: Path) -> None:
     assert seqs == sorted(seqs)
 
 
+def test_history_around_project_scope(tmp_path: Path) -> None:
+    """history_around refuses a known message outside the requested project scope."""
+    db = tmp_path / "mem.db"
+    fixture = tmp_path / "around-scope.jsonl"
+    _write_basic_fixture(fixture)
+    store = KnowledgeStore(str(db))
+    import_history(store, fixture, _FMT, project="demo")
+
+    center_id = "membox-capture:s1:msg:m1"
+    assert store.history_around(center_id, radius=1, project="demo")
+    assert store.history_around(center_id, radius=1, project="other") == []
+
+
 def test_history_around_unknown_id_returns_empty(tmp_path: Path) -> None:
     """history_around with unknown ID returns []."""
     db = tmp_path / "mem.db"
@@ -806,13 +836,13 @@ def test_history_around_unknown_id_returns_empty(tmp_path: Path) -> None:
 
 
 def test_history_file_returns_events_by_file_path(tmp_path: Path) -> None:
-    """history_file returns events matching file_path substring, newest first."""
+    """history_file returns events matching exact path or directory prefix, newest first."""
     store, _db = _build_multi_session_store(tmp_path)
 
-    rows = store.history_file("/alpha/")
+    rows = store.history_file("/code/alpha")
     assert len(rows) >= 1
     for row in rows:
-        assert "/alpha/" in str(row["file_path"])
+        assert str(row["file_path"]).startswith("/code/alpha/")
 
 
 # ---------------------------------------------------------------------------

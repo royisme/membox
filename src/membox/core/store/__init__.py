@@ -8,7 +8,7 @@ surface is identical to the historical single-file ``store.py``.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING
 
 from membox.core.store.connection import ConnectionManager
@@ -95,3 +95,8 @@ class KnowledgeStore(DocumentOps, EntityOps, RelationOps, RetrievalOps, QueueOps
     def __exit__(self, *exc_info: object) -> None:
         """Close the current thread's connection on context exit."""
         self.close()
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for short-lived stores used outside a context manager."""
+        with suppress(Exception):
+            self.close()
