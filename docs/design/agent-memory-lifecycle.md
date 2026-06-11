@@ -1,6 +1,7 @@
 # Agent Memory Lifecycle Design
 
-Status: review draft v1
+Status: accepted v2.3 — all decisions owner-confirmed; remaining open items
+are calibration parameters gated on the lifecycle eval corpus
 Date: 2026-06-11
 Scope: next-stage memory-system design after graph + FTS retrieval quality gate
 Audience: project owner and coding agents reviewing future Membox phases
@@ -172,8 +173,9 @@ State meanings:
 | `active_unit` | `crystal_candidate` | Consolidation detects repeated support or explicit user signal | Candidate remains non-default until crystal promotion. |
 | `crystal_candidate` | `crystal` | Crystal policy pass | Eligible for `--include-memory` recall. |
 | `active_unit` / `crystal` | `superseded` | Newer unit replaces it | `superseded_by` points at replacement. |
+| `crystal_candidate` | `active_unit` | Crystal policy rejection | Demotion is audited; the unit stays queryable as an active unit and may re-candidate later. |
 | `active_unit` / `crystal` | `archived` | Decay or manual archive | Can be restored. |
-| `archived` | `active_unit` | Manual restore or new supporting trace | Restoration is audited. |
+| `archived` | prior status | Manual restore or new supporting trace | Restores to the pre-archive status recorded in `memory_unit_status_log`; an archived crystal returns as `crystal`, not as a demoted unit. Restoration is audited. |
 | any non-terminal state | `retracted` | Source invalidation or manual correction | Retraction is terminal unless a new unit is created. |
 
 Activation rule for the first implementation:
@@ -243,9 +245,15 @@ unit_type: one of the closed memory types
 importance_score: 0.0..1.0
 confidence_score: 0.0..1.0
 temporal_type: point | range | ongoing | unknown
+user_intent: manual | auto
 extraction_hint: short phrase for the extractor
 reason: short explanation
 ```
+
+`user_intent` records whether the capture was user-initiated (explicit
+"remember this" or a manual memory command) or automatic. The activation rule
+reads it, so it persists on the triage row and is copied into the unit's audit
+trail.
 
 Design rules:
 
@@ -291,6 +299,24 @@ The heuristic may lower confidence when the text is speculative, contradicted,
 or lacks a source path/session reference. The exact keyword lists should live in
 code as a small reviewed table, not inside an LLM prompt.
 
+Precision guards:
+
+- Signals are role-weighted. Decision/rule keywords fire at full strength only
+  in user messages; the same phrases in assistant output count as weak signals
+  and must combine with another signal to pass. "We decided" said by the user
+  and by the agent are not the same evidence.
+- The durable-project-change signal alone is never sufficient. In this
+  repository almost every message mentions architecture, schema, storage, or
+  retrieval, so that signal must co-occur with explicit intent, a decision
+  phrase, or a failure/fix pattern to set `should_extract=1`.
+- Each triage run enforces a per-session extraction cap (configurable, small by
+  default) so one noisy session cannot flood the extraction stage.
+- `weak_context_only` scores below the activation rule by construction
+  (importance 0.35 < 0.45), so the gate sets `should_extract=0` for it by
+  default; such rows are extracted only when the caller explicitly requests
+  candidates for review. Extracting units that can never activate is pure LLM
+  cost.
+
 ## Extraction
 
 Extraction turns selected trace into unit candidates.
@@ -300,6 +326,23 @@ Extraction turns selected trace into unit candidates.
 that would make triage and extraction disagree. `--dry-run` previews extracted
 candidates without writing units. `--apply` writes units and marks the triage
 rows as consumed.
+
+Extraction granularity: valuable memories (a decision plus its rationale) often
+span several adjacent messages. The extractor may cluster pending triage rows
+from the same session that fall within a small message-distance window and
+extract them as one candidate, recording every contributing trace row in
+`memory_unit_sources`. Triage stays per-row; clustering is an extraction-stage
+concern.
+
+Idempotency is anchored on source identity, not content. Before writing a unit,
+the apply path checks `memory_unit_sources` for an existing non-retracted unit
+that already covers the same `(trace_kind, trace_id)`; if one exists, the run
+updates or skips instead of inserting. This check spans gate versions: a
+re-triage under a newer `gate_version` produces new pending triage rows, but
+extraction must still recognize trace that already produced a unit. The
+`content_hash` UNIQUE constraint remains as a second-line guard against exact
+duplicates, but it cannot be the primary dedup mechanism because LLM-backed
+extraction will phrase the same trace differently across runs.
 
 Required fields:
 
@@ -378,9 +421,33 @@ OR independent_source_count >= 3
 OR (unit_type = decision AND confidence_score >= 0.90 AND importance_score >= 0.80)
 ```
 
+"Independent" is defined as distinct sessions: sources sharing a
+`history_sessions.id` (or, for non-trace sources, the same `source_ref`) count
+as one. Repeating a statement three times in one conversation is one source.
+
+Score evolution: when consolidation attaches a new independent source to an
+existing unit, it may raise `confidence_score` by a small documented increment
+(for example +0.05 per independent source, capped at 0.95). This is the only
+automatic path by which scores change after extraction. Under the heuristic
+gate the maximum extraction-time confidence is 0.85, so the
+`confidence_score >= 0.90` decision branch is reachable only through score
+evolution or an LLM-backed gate; this is intentional conservatism, not an
+oversight.
+
 The thresholds are calibration targets. They are intentionally conservative for
 the first implementation and can be revised only after lifecycle evaluation
-exists.
+exists. `recall_count` / `last_recalled_at` accumulate the usage data that a
+future calibration pass will need.
+
+### Decay Execution
+
+No daemon exists, so expiry must be owned by an explicit command:
+`memory consolidate --apply` also runs the decay pass. It archives units whose
+`valid_to` has passed, and surfaces (in dry-run and apply output) `plan` and
+`context` units past their review horizon. Decay only archives — it never
+retracts or deletes — and every decay transition is written to
+`memory_unit_status_log`. A standalone `membox memory gc` alias may be added if
+running decay without consolidation proves useful.
 
 ## Proposed Data Model
 
@@ -412,7 +479,7 @@ CREATE TABLE history_messages (
     parent_id       TEXT,
     text            TEXT NOT NULL DEFAULT '',
     text_truncated  INTEGER NOT NULL DEFAULT 0,
-    blob_ref        TEXT,
+    payload_locator TEXT,
     created_at      TEXT,
     UNIQUE (session_id, external_id)
 );
@@ -427,7 +494,7 @@ CREATE TABLE history_events (
     file_path       TEXT,
     body            TEXT NOT NULL DEFAULT '',
     body_truncated  INTEGER NOT NULL DEFAULT 0,
-    blob_ref        TEXT,
+    payload_locator TEXT,
     is_error        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT
 );
@@ -435,6 +502,38 @@ CREATE TABLE history_events (
 
 The exact split between messages and events should be validated against real
 Codex/Claude/MiMo logs before migration is finalized.
+
+Incremental re-import semantics (required before the migration is finalized):
+
+- Importing the same session file twice, including once mid-session and once
+  after the session ended, must converge to the same rows. Append-only growth
+  is the easy case: messages are keyed by `(session_id, external_id)`, so new
+  lines insert and existing lines upsert in place.
+- Upstream rewrites are the hard case. Claude/Codex logs can be compacted,
+  sidechained, or merged, which shifts file-order ordinals. Event IDs therefore
+  must not depend on file position: `ordinal` means the event's position within
+  its parent message (tool call #N of message M), which survives file rewrites,
+  not the line number in the JSONL file.
+- When an upstream message disappears on re-import (compaction), the importer
+  keeps the existing row rather than deleting it; trace is append-only from
+  Membox's perspective.
+- Importers should track per-source incremental state (path, mtime, lines or
+  bytes processed) so repeated imports of large logs stay cheap.
+
+Secret redaction policy (Phase B acceptance requirement):
+
+- Tool outputs routinely contain API keys, tokens, and environment dumps. The
+  importer must run a secret-pattern scrubber over `text` / `body` before
+  insertion and replace matches with a redaction marker.
+- The pattern table lives in code as a small reviewed list (common token
+  prefixes, `KEY=`/`TOKEN=` assignments, PEM blocks), like the triage keyword
+  table.
+- Redaction applies to everything Membox stores (previews and FTS), so secrets
+  never become searchable. `history fetch` re-reads the user's own upstream
+  file and returns it raw — Membox neither persists nor indexes that output,
+  so the redaction boundary is "what Membox stores", not "what the user can
+  see in their own files".
+- Redaction is on by default and not silently disablable per import.
 
 ID policy:
 
@@ -445,10 +544,19 @@ ID policy:
   Importers must synthesize a stable external ID when the upstream format lacks
   one.
 - Events use deterministic IDs based on `(source_kind, session_id, message_id,
-  ordinal, kind)` so repeated imports are idempotent.
+  ordinal, kind)` so repeated imports are idempotent. `ordinal` is the event's
+  index within its parent message, not a file line number (see incremental
+  re-import semantics above).
 - Generated integer IDs are reserved for internal memory units.
 - `project` is denormalized onto messages and events for filter speed. It must
   match the parent session's project; importers enforce this invariant.
+
+Timestamp policy: `created_at` is nullable because some upstream formats lack
+per-message timestamps. Importers must fall back in order: upstream timestamp,
+parent message timestamp, session `started_at`. Rows where even the session
+start is unknown get NULL and are excluded by `--since` filters; the triage
+dry-run reports how many rows were skipped for missing timestamps so the gap is
+visible rather than silent.
 
 Valid `source_kind` values for the initial trace layer:
 
@@ -456,15 +564,26 @@ Valid `source_kind` values for the initial trace layer:
 codex-jsonl | claude-jsonl | mimo-sqlite | membox-capture | manual
 ```
 
-Large payload policy:
+Large payload policy (owner decision, 2026-06-11): Membox does not copy large
+payloads at all. Tool outputs already live in the source session log (Codex,
+Claude, MiMo all retain them); duplicating them into Membox would bloat the
+database for content that is one re-parse away.
 
-- Inline `text` / `body` values should be capped by a configurable byte limit
-  before insertion.
-- If content exceeds the cap, store a preview in SQLite, set the truncated flag,
-  and write the full payload to a blob file under the Membox data directory.
-- The first implementation may skip blob storage and hard-truncate test
-  fixtures, but the schema keeps `blob_ref` so the migration does not need to
-  change later.
+- Inline `text` / `body` store a preview capped by `history_text_cap_bytes`;
+  the truncated flag marks rows whose preview is partial.
+- `payload_locator` records how to find the full payload in the upstream
+  source: the session's `source_ref` plus the record's `external_id` (and
+  event ordinal where applicable). It is an identity-based locator, not a byte
+  offset, so upstream file rewrites do not break it.
+- `membox history fetch <id>` re-reads the upstream file on demand and prints
+  the full payload. Fetch output is raw upstream content, read fresh from the
+  user's own file; it is never persisted or indexed by Membox.
+- Accepted risk: if the upstream log is deleted or compacted away, the preview
+  is all that remains. `history fetch` must say "source no longer available"
+  honestly instead of silently returning the preview. Trace previews plus
+  units/crystals are designed to survive upstream loss; full re-distillation
+  of old payloads is best-effort by construction.
+- There is no Membox-managed blob storage in any phase of this track.
 
 ### Triage Table
 
@@ -479,6 +598,7 @@ CREATE TABLE history_triage (
     importance_score    REAL NOT NULL DEFAULT 0,
     confidence_score    REAL NOT NULL DEFAULT 0,
     temporal_type       TEXT NOT NULL DEFAULT 'unknown',
+    user_intent         TEXT NOT NULL DEFAULT 'auto',
     extraction_hint     TEXT NOT NULL DEFAULT '',
     reason              TEXT NOT NULL DEFAULT '',
     gate_version        TEXT NOT NULL,
@@ -492,7 +612,18 @@ CREATE INDEX idx_history_triage_pending
 
 `trace_kind` is `message` or `event` in the first implementation. The unique key
 lets improved gate versions re-triage old trace without corrupting prior audit
-rows.
+rows. Re-triage under a new gate version creates new pending rows for old
+trace; the extraction-stage source-identity check (see Extraction) is what
+prevents that from producing duplicate units. When multiple gate versions have
+triaged the same trace item, extraction considers only the row from the newest
+gate version; older rows stay as audit history.
+
+`trace_id` is a polymorphic reference and cannot be a foreign key. Deleting a
+history session cascades through messages and events but leaves triage rows and
+unit sources pointing at removed trace. This is accepted: units must survive
+trace deletion, and a dangling source is rendered as "source no longer
+available (kind/id)" rather than treated as an error. The same rule applies to
+`memory_unit_sources.source_ref`.
 
 ### Unit Tables
 
@@ -514,6 +645,8 @@ CREATE TABLE memory_units (
     created_at          TEXT NOT NULL,
     updated_at          TEXT,
     superseded_by       INTEGER REFERENCES memory_units(id),
+    recall_count        INTEGER NOT NULL DEFAULT 0,
+    last_recalled_at    TEXT,
     UNIQUE (project, unit_type, content_hash)
 );
 
@@ -549,12 +682,20 @@ such as `source_thread_id` are deliberately not duplicated on `memory_units` in
 the first schema. If later profiling proves a denormalized shortcut is needed,
 add it with a documented invariant and backfill.
 
+`recall_count` and `last_recalled_at` are reinforcement bookkeeping: Phase E
+recall updates them when a unit or crystal is admitted into query output. They
+cost nothing to write and are the only data source from which crystal-promotion
+thresholds and decay policies can later be calibrated instead of guessed. They
+are not used for ranking until a lifecycle eval justifies it.
+
 Deduplication:
 
-- `content_hash` is computed over normalized `(unit_type, title, content,
-  context, project)`.
-- Re-running triage/extraction over the same trace must upsert or skip; it must
-  not create duplicate units.
+- Primary: source identity. The extraction apply path refuses to create a
+  second non-retracted unit for trace that already produced one (see
+  Extraction). This holds across gate versions and across LLM rephrasings.
+- Secondary: `content_hash`, computed over normalized `(unit_type, title,
+  content, context, project)`, as a hard guard against exact duplicates from
+  manual or document paths.
 - A future `membox memory dedup` command can merge legacy duplicates, but the
   first schema should prevent the common rerun duplicate path.
 
@@ -575,6 +716,31 @@ Potential FTS sidecars:
 Both should follow the existing CJK-aware FTS direction and avoid raw user MATCH
 strings.
 
+## Module Placement and Configuration
+
+New code follows the existing layer boundaries
+(`docs/agent/02-architecture-boundaries.md`):
+
+| Code | Location |
+|---|---|
+| History/triage/unit DDL | `core/store/migrations.py` — next migrations after the current head (check `MIGRATIONS` at implementation time; do not hardcode numbers in this doc) |
+| Trace storage ops | `core/store/history.py`, facade methods on `KnowledgeStore` |
+| Unit/crystal storage ops | `core/store/memory_units.py`, same facade pattern |
+| Heuristic triage gate + keyword/label/secret-pattern tables | `core/triage.py` (pure domain logic, no I/O) |
+| Log importers (codex-jsonl, claude-jsonl, …) | `services/importers/` — one module per format behind a shared `HistoryImporter` `Protocol`; file parsing only, no business logic |
+| Optional LLM gate/extractor | `services/extraction.py`, behind the existing injectable `Protocol` pattern |
+| CLI groups | `cli/commands/history.py`, `cli/commands/memory.py` — presentation only |
+
+Lifecycle states, unit types, labels, and `source_kind` enums are defined once
+in `model/schema.py` and imported everywhere else; SQL CHECK constraints are
+not used so that enum evolution stays a code change plus migration, not a
+table rebuild.
+
+New `MemboxConfig` keys (defaults in parentheses): `history_text_cap_bytes`
+(16384), `triage_session_extract_cap` (20), `memory_share` (0.15),
+`crystal_confidence_increment` (0.05). All are plain config fields following
+the existing per-capability pattern; none require an API key.
+
 ## Concurrency Model
 
 The first lifecycle implementation should be single-writer per project for
@@ -590,13 +756,23 @@ state-changing lifecycle commands:
 Implementation expectation:
 
 - Use the existing SQLite WAL and per-thread connection pattern.
-- Guard lifecycle write transactions with the same store-level write lock style
-  used for entity find-or-create.
+- The store-level `RLock` only protects threads inside one process. Membox's
+  real concurrency case is two CLI processes, and the existing answer in this
+  codebase is the `worker_lease` row in the `meta` table (see
+  `core/worker.py` / `queue.py`). Lifecycle apply commands acquire an
+  equivalent per-project lease (`lifecycle_lease:<project>`) before mutating
+  state; a second concurrent apply either waits briefly or exits with a clear
+  "another apply is running" message. Dry-runs and searches never take the
+  lease.
+- Within the lease, claiming is still explicit: apply marks triage rows
+  consumed (`consumed_at`) inside the same transaction that writes the unit,
+  using `BEGIN IMMEDIATE` and status-conditional UPDATEs, so even a lease bug
+  cannot produce duplicate units — the source-identity dedup check is the
+  final backstop.
 - Each apply command should run in one transaction per bounded batch.
 - Supersession updates must check that the old row is still in the expected
-  status before writing `superseded_by`.
-- Concurrent apply attempts may skip already-claimed work, but must not create
-  duplicate units or competing supersession chains.
+  status before writing `superseded_by` (`UPDATE ... WHERE status = ?`), and
+  treat zero affected rows as "lost the race, skip".
 
 Parallel read/search remains allowed. Parallel dry-runs are allowed because they
 do not mutate state.
@@ -623,10 +799,14 @@ Recommended output ordering:
 3. Active units, only when requested or when no crystal covers the need.
 4. History trace, only when requested or through a follow-up command.
 
-The footer should report every pool:
+The footer reports every pool that was eligible for this query. History never
+enters default output, so the history segment appears only under
+`--include-history`; reporting a pool that can never be admitted would only
+confuse readers:
 
 ```text
-(returned 14/40 triples, 4/10 chunks, 2/5 crystals, 0/12 history hits, ~1900/2000 tokens)
+(returned 14/40 triples, 4/10 chunks, 2/5 crystals, ~1900/2000 tokens)
+(returned 14/40 triples, 4/10 chunks, 2/5 crystals, 3/12 history hits, ~1900/2000 tokens)
 ```
 
 Memory fusion must not change the default graph + FTS path. `--include-memory`
@@ -646,6 +826,21 @@ unused budget flows back to the existing graph + FTS renderer. Raw history hits
 are never admitted into normal `query` output unless `--include-history` is
 explicitly set.
 
+Ranking inside the memory pool is not static-score order. Items are ranked by a
+combined score of query relevance (FTS rank), stored importance/confidence, and
+recency (decayed age since `updated_at` or `last_recalled_at`). Encoding-time
+scores alone cannot order recall well: a three-month-old crystal and
+yesterday's crystal are not equally useful, and a highly relevant
+moderate-score unit should beat an irrelevant high-score one. The exact
+weighting is a calibration target for the lifecycle eval; the structure
+(relevance x importance x recency) is the design commitment. Admitted items get
+their `recall_count` / `last_recalled_at` updated.
+
+Project scoping: `membox history search` and `membox memory search` default to
+the current project (same resolution as existing commands) and require an
+explicit `--all-projects` flag for cross-project search. A single shared
+database must not leak another project's session trace by default.
+
 ## CLI Surface
 
 Phase-appropriate commands:
@@ -656,6 +851,7 @@ membox history import <path> --format membox-history-jsonl --project X
 membox history import <path> --format codex-jsonl --project X
 membox history search "..." --project X --kind tool_error
 membox history around <message-id>
+membox history fetch <message-or-event-id>   # re-read full payload from upstream log
 membox history file <path> --project X
 membox history failures --project X
 
@@ -664,10 +860,11 @@ membox memory triage --project X --since 7d --dry-run
 membox memory triage --project X --since 7d --apply
 membox memory extract --project X --dry-run
 membox memory extract --project X --apply
-membox memory list --project X --status active
+membox memory list --project X --status active_unit
 membox memory show <id>
 membox memory supersede <old-id> <new-id>
 membox memory retract <id> --reason "..."
+membox memory restore <id>
 
 # Consolidation
 membox memory consolidate --project X --since 7d --dry-run
@@ -713,7 +910,12 @@ Deliverables:
 - `history_sessions`, `history_messages`, `history_events` tables.
 - `history_fts` sidecar.
 - Importer contract for `membox-history-jsonl`, a normalized fixture format used
-  in tests.
+  in tests. `--format` names the file format being parsed; `source_kind` records
+  the origin and is carried per record. The fixture format sets
+  `source_kind=membox-capture` unless a record specifies its own.
+- Secret-redaction scrubber, applied before FTS indexing.
+- Per-source incremental import state (path, mtime, progress offset) so
+  re-importing a grown log is cheap.
 - First real adapter: `codex-jsonl`, unless review finds the local Codex
   history format unavailable or unstable. If so, use `claude-jsonl` as the first
   real adapter and keep `codex-jsonl` queued.
@@ -722,7 +924,13 @@ Deliverables:
 
 Acceptance:
 
-- Import is deterministic and idempotent.
+- Import is deterministic and idempotent, including incremental re-import of a
+  session file that grew or was rewritten upstream (see incremental re-import
+  semantics).
+- Secret redaction runs on import; a fixture containing a fake API key must not
+  be findable via `history search` or present in stored previews.
+- `history fetch` resolves a `payload_locator` back to the upstream file and
+  reports honestly when the source is gone.
 - Search handles punctuation and CJK safely.
 - Filters work by project, session, kind, tool, file path, and time.
 - No external LLM or embedding API is required.
@@ -731,8 +939,12 @@ Acceptance:
 
 Goal: create typed unit candidates from trace with strict provenance.
 
-Deliverables:
+Deliverables (the lifecycle eval fixtures are the FIRST deliverable, not a
+later gate — the Phase C/D acceptance metrics below cannot be measured without
+them, and the heuristic gate's keyword table cannot be tuned blind):
 
+- Lifecycle eval fixture corpus (see Evaluation Strategy) covering at minimum
+  triage decisions and extracted unit types.
 - `history_triage`, `memory_units`, `memory_unit_sources`,
   `memory_unit_labels`, and `memory_unit_status_log` tables.
 - Deterministic heuristic gate for tests.
@@ -805,8 +1017,14 @@ Acceptance:
 ## Evaluation Strategy
 
 The existing 26-question corpus measures document-backed KG/RAG retrieval. It
-does not measure lifecycle quality. Add a separate lifecycle eval before Phase E
-is enabled by default.
+does not measure lifecycle quality. The lifecycle eval corpus is built at the
+START of Phase C, not before Phase E: the Phase C/D acceptance criteria (triage
+precision, type accuracy, duplicate rate, crystal precision) are themselves
+measured against these fixtures, so building the corpus last would mean
+accepting C and D blind. The single most fragile assumption in this design is
+that a cheap triage gate reaches usable precision on real agent trace; the
+fixtures are what surface a gate failure early, instead of after months of
+noisy accumulation in a real database.
 
 ### Lifecycle Eval Corpus
 
@@ -875,16 +1093,28 @@ later.
 Rejected. This causes taxonomy drift and weakens downstream filtering. The first
 implementation should use closed type and label sets.
 
+### Add a HOT state tier (current task, open loops, session focus)
+
+Rejected for this track. The Sibyl-style tier model includes a working-state
+layer; Membox deliberately does not. Working state has opposite mechanics from
+long-term memory: tiny capacity, very high churn, no provenance requirement,
+and a lifespan of hours. It is better owned by the agent harness and handoff
+documents than by a provenance-tracked SQLite lifecycle. Trace, unit, and
+crystal map to episodic and consolidated memory; "what am I doing right now" is
+not a memory problem. If a future need appears, it should be a separate design,
+not a new `memory_units.unit_type`. A placeholder lives in `docs/roadmap.md`
+under "Future Tracks" so the idea is not lost. (Owner-confirmed 2026-06-11.)
+
 ## Open Questions
 
-1. Should `dream` be exposed as a documented alias for `memory consolidate`, or
-   avoided entirely in public CLI help?
-2. What is the initial closed label set? Labels are separate from memory types
-   and need a small reviewed list before `memory_unit_labels` can enforce them.
-3. Should future Markdown export be one-way only, or should human-edited
-   Markdown be importable back into SQLite with provenance?
-4. Should full blob overflow storage ship in Phase B, or can the first slice
-   hard-truncate large tool outputs while keeping `blob_ref` reserved?
+All v1 open questions have proposed resolutions in "Decisions" (marked v2,
+pending owner sign-off). Remaining open items:
+
+1. The exact per-session extraction cap default and the confidence increment
+   for score evolution (+0.05 proposed) — calibrate once the lifecycle eval
+   fixtures exist.
+2. The exact ranking weights for the Phase E memory pool (relevance x
+   importance x recency) — structure is decided, weights are an eval target.
 
 ## Decisions
 
@@ -915,6 +1145,53 @@ implementation should use closed type and label sets.
 - Lifecycle writes are single-writer per project; dry-runs and searches can run
   concurrently.
 - Reinforcement metadata is deferred until Phase E query fusion.
+
+Owner-confirmed 2026-06-11 (v2.2 discussion):
+
+- No Membox-managed blob storage in any phase. Previews + `payload_locator` +
+  `history fetch` re-reading the upstream session log replace the v1/v2 blob
+  proposal entirely. (v1 OQ4, superseded by owner direction)
+- Markdown export is one-way only. (v1 OQ3)
+- The initial closed label set is the 11-label list below, accepted as
+  proposed. (v1 OQ2)
+- The HOT working-state tier stays out of this track but is recorded in
+  `docs/roadmap.md` under "Future Tracks" as a future standalone design.
+
+Owner-confirmed 2026-06-11 (engineering decisions, v2 review pass):
+
+- `dream` is not exposed in public CLI help, not even as a documented alias.
+  One verb (`consolidate`) keeps the CLI surface unambiguous; continuity with
+  external project terminology is not worth a second name. (v1 OQ1)
+- Initial closed label set, deliberately orthogonal to unit types (types say
+  what KIND of memory; labels say what AREA it touches): `architecture`,
+  `storage`, `retrieval`, `cli`, `testing`, `tooling`, `workflow`,
+  `conventions`, `dependencies`, `performance`, `security`. Stored as a
+  reviewed constant next to the triage keyword table; changing it is a
+  reviewed code change, not a runtime write. (v1 OQ2)
+- (Rationale for the one-way Markdown decision above) Re-importing
+  human-edited Markdown cannot carry trustworthy provenance and would create a
+  second write path competing with the lifecycle; a human who wants to correct
+  memory uses `memory supersede` / `memory retract` / manual capture.
+- (Owner decision 2026-06-11, supersedes the earlier blob proposal) Membox
+  never copies large payloads. Tool outputs already live in the upstream
+  session log; Membox stores a capped preview plus a `payload_locator` and
+  re-reads the upstream file on demand via `history fetch`. No Membox-managed
+  blob storage in any phase. (v1 OQ4)
+- Cross-process write coordination uses a per-project lease row in `meta`
+  (same pattern as `worker_lease`); the in-process `RLock` is not a
+  cross-process mechanism and is not relied on for one.
+- Unit deduplication is anchored on source identity (trace already produced a
+  unit), with `content_hash` as a secondary exact-match guard.
+- Decay is executed by `memory consolidate --apply`; no background process.
+- Archived crystals restore as crystals (prior status from the status log),
+  not as demoted units.
+- "Independent sources" for crystal promotion means distinct sessions.
+- Secret redaction at import time is a Phase B acceptance requirement.
+- Lifecycle eval fixtures are the first deliverable of Phase C.
+- A HOT working-state tier is explicitly out of scope (see Rejected
+  Alternatives).
+- `history search` / `memory search` are project-scoped by default;
+  cross-project requires `--all-projects`.
 
 ## Review Checklist
 
@@ -950,3 +1227,7 @@ For implementation review:
 |---|---|---|
 | 2026-06-11 | v0 review draft | Initial lifecycle design based on Sibyl, Obelisk, MiMo, and Trace/Unit/Crystal review. |
 | 2026-06-11 | v1 review response | Addressed first review pass: locked DB scope, specified heuristic triage, added triage table, activation rules, source enums, dedup, status log, label table, concurrency model, memory budget partition, and lifecycle eval strategy. |
+| 2026-06-11 | v2.3 accepted | Owner confirmed the nine engineering decisions from the v2 review pass (lease-based cross-process coordination, source-identity dedup, consolidate-owned decay, status-log restore, distinct-session independence, import-time redaction, eval-first Phase C, project-scoped search defaults, no dream alias). Status moved from review draft to accepted; remaining open items are eval-gated calibration parameters only. |
+| 2026-06-11 | v2.2 owner decisions | Owner resolved the four product questions: no Membox blob storage in any phase — previews + `payload_locator` + `history fetch` re-read the upstream session log instead (supersedes the v1/v2 blob/truncation proposal); Markdown export one-way; 11-label set accepted; HOT state tier excluded but recorded in roadmap Future Tracks. Renamed `blob_ref` → `payload_locator`; added `history fetch` to the CLI surface and Phase B acceptance; clarified the redaction boundary is what Membox stores, not what the user's own files contain. |
+| 2026-06-11 | v2.1 dev cleanup | Pre-commit consistency pass: `user_intent` persisted on triage rows (activation rule reads it), newest-gate-version rule for pending row selection, CLI `--status` value matches state names, `memory restore` added to surface, importer `--format` vs `source_kind` distinction, module placement table, config keys with defaults, migration numbers deliberately not hardcoded. |
+| 2026-06-11 | v2 review response | Second review pass (engineering + theory). Blockers fixed: cross-process lease replaces the misattributed RLock claim; dedup re-anchored on source identity across gate versions; incremental re-import semantics and rewrite-safe event ordinals; secret redaction as Phase B acceptance. Decisions resolved: independent-source definition, score evolution (explains the 0.90 branch), archive/restore preserves crystal status, crystal_candidate demotion path, decay owned by consolidate, default project scoping. Theory-driven additions: memory-pool ranking is relevance x importance x recency (not static scores), recall_count/last_recalled_at reinforcement bookkeeping, HOT state tier explicitly rejected, lifecycle eval moved to start of Phase C. Refinements: role-weighted triage signals with per-session cap, weak_context_only not extracted by default, extraction-stage clustering of adjacent triage rows, polymorphic-reference dangling-source policy, timestamp fallback chain, footer omits ineligible pools. All v1 open questions resolved (pending owner sign-off). |

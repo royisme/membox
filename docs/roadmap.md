@@ -322,3 +322,16 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
 ```
 
 **Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.
+
+---
+
+## Future Tracks (not yet scheduled)
+
+- **Agent memory lifecycle** (Trace → Unit → Crystal): design under review in
+  `docs/design/agent-memory-lifecycle.md`. Merges back into this roadmap as
+  Phases A–F once the owner accepts the design.
+- **HOT working-state tier** (current task, open loops, session focus):
+  explicitly excluded from the lifecycle track (see its Rejected Alternatives —
+  working state has opposite mechanics from long-term memory). Recorded here as
+  a future standalone design, owned by a separate doc when picked up; it must
+  not be implemented as a `memory_units.unit_type`.
