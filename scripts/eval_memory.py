@@ -17,12 +17,14 @@ Default mode (Ollama)
 
 ``--provider gemini``
     Same pipeline against the Gemini API's OpenAI-compatible endpoint —
-    extraction ``gemini-3-flash-preview``, embedding ``gemini-embedding-001``
-    (1536-dim), much faster than local Ollama.  Requires ``GEMINI_API_KEY``
-    or ``GOOGLE_API_KEY``.  Model/dim/threshold overridable via the same
-    ``MEMBOX_EVAL_*`` env vars.  The completion-token cap defaults to 16384
-    for Gemini (vs. 2048 for Ollama) because thinking models like
-    ``gemini-3-flash-preview`` consume thinking tokens from the same
+    extraction ``gemini-3.1-flash-lite`` (formal eval default, owner decision
+    2026-06-12; basis of the 24/26 = 92.3% retrieval baseline), embedding
+    ``gemini-embedding-001`` (1536-dim), much faster than local Ollama.
+    Requires ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY``.  Model/dim/threshold
+    overridable via the same ``MEMBOX_EVAL_*`` env vars — but baseline
+    numbers are only comparable when produced with the default model.  The
+    completion-token cap defaults to 16384 for Gemini (vs. 2048 for Ollama)
+    because Gemini thinking models consume thinking tokens from the same
     ``max_completion_tokens`` budget, so a low cap silently truncates the
     JSON output; override with ``MEMBOX_EVAL_MAX_COMPLETION_TOKENS``.
     ``reasoning_effort`` defaults to ``"low"`` for Gemini (suppresses
@@ -315,6 +317,11 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
             msg = "GEMINI_API_KEY (or GOOGLE_API_KEY) must be set for --provider gemini"
             raise SystemExit(msg)
         base_url = _GEMINI_BASE_URL
+        # gemini-3.1-flash-lite is the FORMAL eval default (owner decision
+        # 2026-06-12): the 24/26 (92.3%) retrieval baseline was produced with
+        # it (sessions 8-9).  Changing this model invalidates baseline
+        # comparability — re-run the full corpus and record a new baseline if
+        # you do.
         extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemini-3.1-flash-lite")
         embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "gemini-embedding-001")
         embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1536"))

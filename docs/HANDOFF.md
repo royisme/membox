@@ -2,19 +2,12 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-11 (session 9 — lifecycle design accepted, test corpus CI fix)
-**Current phase**: Phase 7.5 retrieval quality gate complete (24/26 verified, merged to main at `77c4090`). The next-stage agent memory lifecycle design (Trace → Unit → Crystal) is **accepted at v2.3** on `feature/lifecycle-design-v2` — all product and engineering decisions owner-confirmed, no remaining open items blocking Phase B implementation.
+**Last updated**: 2026-06-12 (session 10 — Phase B + M4 + M5 implemented, spec reorganized into `docs/spec/`)
+**Current phase**: Lifecycle Phase B (history trace index) **implemented and merged to main**, along with M4 (relation supersession, migration 7) and M5 (close-the-loop via Ollama verified). Spec is now a chapter directory: `docs/spec.md` is the index, normative chapters live in `docs/spec/spec_NN_<topic>.md`. Next implementation track: **Phase C (triage + memory units, migration 8)** per `docs/spec/spec_02_memory_lifecycle.md`.
 
 ### Pending user decisions before next work item
-<<<<<<< HEAD
-- **Merge `feature/lifecycle-design-v2` into main** (see session 9 below). After that, Phase B (history trace index) is unblocked and becomes the next implementation track.
-- `scripts/eval_memory.py` has a working-tree edit changing the default Gemini extraction model `gemini-3-flash-preview` → `gemini-3.1-flash-lite` (origin unclear, made before session 8, used in session 8 evals). **Commit, revert, or pin differently?** — only the user can decide.
-- Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches) and `develop` — safe to delete after user confirms.
-=======
-- `scripts/eval_memory.py` has an **unstaged working-tree edit** changing the default Gemini extraction model `gemini-3-flash-preview` → `gemini-3.1-flash-lite`. Origin unclear (made before session 8). Session 8 evals used it and ran clean (24/26, 1 transient 503). **Commit, revert, or pin differently?**
-- The lifecycle design (Trace→Unit→Crystal) has been accepted (v2.3, 2026-06-11) and promoted to `docs/spec/spec_02_memory_lifecycle.md`. Phase B is next.
-- Stale `feature/*` branches and `develop` — safe to delete after user confirms (see "Next concrete steps").
->>>>>>> docs/spec-directory-reorg
+- Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
+- `docs/spec-v0.2-draft.md` (per-project DB storage model) — still pending review; listed in the spec index Drafts section.
 
 ### New conventions worth remembering across sessions
 - **Merge into main uses `merge --no-ff` with a `merge: <theme>` message**, then a separate commit for handoff/design-doc syncs on the feature branch. See `git log main --merges` for examples. No PR/CODEOWNERS flow is required.
@@ -22,6 +15,15 @@
 - **Long-running commands that print only at the end** (full eval, ingest) can be run in the background, but a "wait for terminal output" pattern via `until grep ...; do sleep N; done` blocks the shell and is rejected by the harness. Use `run_in_background: true` and let the harness notify on exit.
 
 ---
+
+### Session 10 (2026-06-12) — Phase B + M4 + M5 implemented; spec reorganized
+- **Phase B (history trace index) implemented and merged** (`84a1cdf`): migration 6 (`history_sessions/messages/events`, `history_import_state`, 4 FTS5 sidecars — unicode61 + trigram for message text and event body), `HistoryImporter` Protocol with `membox-history-jsonl` fixture + `codex-jsonl` real adapter (verified against live `~/.codex/sessions` rollout logs), secret-redaction scrubber in `core/triage.py` (store-boundary, unconditional), identity-based `payload_locator` + `history fetch` with honest source-gone reporting, `membox history import/search/around/fetch/file/failures` CLI group with default current-project scoping (`--all-projects` opt-out). Acceptance criteria of spec_02 Phase B all covered by tests.
+- **M4 supersession merged** (`f99c99c`, migration 7): `relations.superseded_by` self-FK + partial active index; same source_path + newer doc version asserting a different object marks the old relation superseded (forward-only direction); retrieval excludes superseded edges by default; `membox query --include-superseded` for audit; `list-relations` shows superseded markers; evidence never deleted.
+- **M5 close-the-loop verified**: added `MEMBOX_EXTRACTION_*` / `MEMBOX_EMBEDDING_*` env overrides (the production CLI previously could not target Ollama at all — that was the real gap); `membox ingest-file docs/HANDOFF.md` end-to-end against local Ollama (gemma-4-E2B + qwen3-embedding) on both the sync path (6 chunks) and the async queue path (worker spawn → drain, 190 entities / 85 relations). `history fetch` CLI output is redacted by default with `--raw` opt-out.
+- **Spec reorganized into a chapter directory** (`9988fb1`, owner decision): `docs/spec.md` is now the index/precedence anchor; normative chapters live in `docs/spec/spec_01_core.md` and `docs/spec/spec_02_memory_lifecycle.md` (promoted from the accepted lifecycle design); future requirements are added as `docs/spec/spec_NN_<topic>.md`; old design doc is a tombstone pointer.
+- **Owner decision: `gemini-3.1-flash-lite` is the formal eval extraction default** (recorded in `scripts/eval_memory.py`; the 24/26 baseline was produced with it; changing the model invalidates baseline comparability).
+- **Subagent worktree lesson**: two background subagents based their worktrees on a stale main (pre-Phase B) and produced work numbered against the wrong migration head. Fix pattern: cherry-pick their commit onto the current line, resolve the migration-number conflict by renumbering (M4 became migration 7), re-run the full gate. When dispatching schema work to a subagent, pin the expected migration number in the brief AND verify the worktree base.
+- State at session end: main `9988fb1`, migration head 7, 492 tests / ~93% coverage, all gates green.
 
 ### Session 9 (2026-06-11) — Lifecycle design accepted + test corpus CI fix
 - **Agent memory lifecycle design accepted at v2.3** on `feature/lifecycle-design-v2` (branch ahead of main, 4 commits). Three review passes; every product and engineering decision is owner-confirmed. See `docs/design/agent-memory-lifecycle.md` Revision Log for the full v0→v1→v2→v2.1→v2.2→v2.3 trail. The doc is the single source of truth for the next-stage design and merges into `docs/spec.md`/`docs/roadmap.md` only after the owner accepts it on main.
@@ -84,18 +86,10 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Current state
 
-<<<<<<< HEAD
-- **main** (HEAD `f6c8a99`): Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, Step 1 graph+FTS budget fusion, and the CJK trigram sidecar (migration v5, CJK query dispatch, CJK excerpts) are merged. Verified eval baseline 24/26. The `f6c8a99` "working-tree cleanup" merge commit also contains the `gemini-3.1-flash-lite` default swap and the lifecycle design as a review draft.
-- **`feature/lifecycle-design-v2`** (HEAD `4bfb427`, ahead of main by 4 commits): the lifecycle design at v2.3 (accepted) plus the `requires_corpus` CI fixture. **Needs to be merged into main** so the design lands in the main tree and Phase B can start. After that merge, the test corpus CI fix becomes part of main's CI gate.
-- **Working-tree state on `feature/lifecycle-design-v2`**: clean (session 9 committed everything).
-- `feature/cjk-trigram-fts-design` is merged to main and can be deleted after user confirms (no longer the working branch).
-=======
-- **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, Step 1 graph+FTS budget fusion, and the CJK trigram sidecar (migration v5, CJK query dispatch, CJK excerpts) are merged. Verified eval baseline 24/26. HEAD = `77c4090`; origin and local are in sync.
-- **Working-tree state on main**:
-  - `scripts/eval_memory.py` modified (default extraction model) — uncommitted, awaiting user decision.
-  - `docs/design/agent-memory-lifecycle.md` — tombstone pointer; spec chapter at `docs/spec/spec_02_memory_lifecycle.md`.
-- `feature/cjk-trigram-fts-design` is now merged and can be deleted after user confirms (no longer the working branch).
->>>>>>> docs/spec-directory-reorg
+- **main**: Phases 1-7 + 7.5 (M1-M3, M6, fusion, CJK sidecar — baseline 24/26) plus, merged 2026-06-12: lifecycle design v2.3 (`10deea9`), **Phase B history trace index** (`84a1cdf`, migration 6: `history_*` tables + 4 FTS sidecars, importers for membox-history-jsonl/codex-jsonl, secret redaction, `membox history` CLI group), **M4 supersession + M5 close-the-loop** (`f99c99c`, migration 7: `relations.superseded_by`, retrieval excludes superseded by default, `--include-superseded`; `MEMBOX_EXTRACTION_*`/`MEMBOX_EMBEDDING_*` env provider config verified against local Ollama sync+async), and the **spec directory reorg** (`9988fb1`).
+- **Migration head: 7.** 492 tests, ~93% coverage; ruff/mypy/pre-commit green.
+- `docs/design/agent-memory-lifecycle.md` is a tombstone pointer; the normative chapter is `docs/spec/spec_02_memory_lifecycle.md`.
+- Merged branches awaiting deletion after user confirms: `feature/lifecycle-design-v2`, `feature/phase-b-history-trace`, `feature/m4-supersession`, `feature/cjk-trigram-fts-design`, the phase 1-7 branches, and `develop`.
 - **Old phase 1-7 feature branches + `develop`** still exist but are historical; main is authoritative. Safe to delete after confirmation.
 - **Working eval DBs**: `/tmp/membox-eval-gemini3.db` (58 chunks, 459 entities, 340 relations — cleanest Gemini run; basis for the 53.8% result). `/tmp/membox-eval-m3.db` (Ollama baseline, 51 chunks). `/tmp/membox-eval-gemini3-trigram-full.db` (re-ingested, v5 sidecar, basis for the 24/26 result).
 - **`eval/corpus/` is gitignored** (private handoff docs from local projects). Tests in `tests/test_eval_corpus.py` that need it skip cleanly on CI via the new `requires_corpus` fixture; they only run on developer machines.
@@ -115,43 +109,23 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 ## Open questions / decisions needed
 
 1. ~~CJK/trigram FTS full eval~~ — **resolved session 8**: 24/26, q12 HIT, no regression; merged to main.
-<<<<<<< HEAD
-2. **Merge `feature/lifecycle-design-v2` into main** — the design is accepted and the test corpus CI fix is needed in main's CI gate. Use `merge --no-ff` per project convention (see "New conventions"). After merge, Phase B implementation is unblocked.
-3. **Confirm or revert the Lite default**: `scripts/eval_memory.py` is on main with `gemini-3.1-flash-lite` as the default Gemini extraction model. Origin pre-dates session 8; session 8 evals ran clean at 24/26 with it. Decide: keep (formalize in `scripts/eval_memory.py` docs), revert to `gemini-3-flash-preview`, or pin a different model.
+2. ~~Merge `feature/lifecycle-design-v2` into main~~ — **resolved session 10**: merged at `10deea9`; Phase B implemented on top.
+3. ~~Confirm or revert the Lite default~~ — **resolved session 10 (owner decision 2026-06-12): keep.** `gemini-3.1-flash-lite` is the formal eval extraction default; recorded in `scripts/eval_memory.py` docstring. Baseline numbers are only comparable when produced with it.
 4. **Ingest performance**: even with `reasoning_effort=low`, 58 chunks take about 35 min on Gemini because every entity/relation still triggers a single-text embed call (about 900 serial HTTPS round-trips). Three queued optimizations: process-internal embed cache, batched embed calls (`OpenAIEmbedClient.embed()` already takes `list[str]`), chunk-level concurrency. Expected 3-5x speedup.
 5. **Residual recall misses**: q08 and q19 remain — both default-2000-token budget/ranking tradeoffs on the English path.
 6. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
 7. Old branches + `develop` cleanup — delete after user confirms.
 8. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
 9. **Lifecycle eval fixture design** (Phase C first deliverable): categories listed in `docs/spec/spec_02_memory_lifecycle.md` Evaluation Strategy — explicit user rules, ephemeral chatter that should stay trace, plans becoming decisions, facts superseded by newer sources, repeated failures → learning/procedure, conflicting memories (surface not merge), user corrections retracting/superseding old units. Must be in place before Phase C's gate/activation thresholds can be tuned.
-=======
-2. **Ingest performance**: even with `reasoning_effort=low`, 58 chunks take about 35 min on Gemini because every entity/relation still triggers a single-text embed call (about 900 serial HTTPS round-trips). Three queued optimizations: process-internal embed cache, batched embed calls (`OpenAIEmbedClient.embed()` already takes `list[str]`), chunk-level concurrency. Expected 3-5x speedup.
-3. **Residual recall misses**: q08 and q19 remain — both default-2000-token budget/ranking tradeoffs on the English path.
-3a. **Uncommitted working-tree items needing a user decision**: (a) `scripts/eval_memory.py` has a local edit switching the default Gemini extraction model `gemini-3-flash-preview` → `gemini-3.1-flash-lite` (origin unclear — possibly made outside a session; all session-8 eval runs used it). Commit or revert? (b) Lifecycle spec chapter `docs/spec/spec_02_memory_lifecycle.md` — accepted and committed in `docs/spec-directory-reorg` branch; Phase B is next.
-4. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
-5. Old branches + `develop` cleanup — delete after user confirms.
-6. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
->>>>>>> docs/spec-directory-reorg
 
 ---
 
 ## Next concrete steps
 
-<<<<<<< HEAD
-1. **Merge `feature/lifecycle-design-v2` into main** (`merge --no-ff`, then a separate handoff commit per convention). The test corpus CI fix lands with it; the design lands as the active design surface for the next track.
-2. **Decide on the Lite default** (keep, revert, or pin differently).
+1. **Phase C (triage + memory units, migration 8)** per `docs/spec/spec_02_memory_lifecycle.md`: lifecycle eval fixture corpus first (see open question 9), then `history_triage` table + heuristic gate in `core/triage.py`, `memory_units` tables, `membox memory triage/extract` dry-run + apply, per-project `lifecycle_lease:<project>` reusing the worker-lease pattern.
+2. **Re-snapshot eval corpus + update temporal gold answers** now that M4 supersession is live (superseded relations are excluded by default — temporal questions may need re-verification against the 24/26 baseline).
 3. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch. **Do not chain merge+test in one Bash call** (lesson from session 8).
-4. **M4 supersession semantics** (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers. Owner-direction on Lite default may affect which tests to commit with the migration.
-5. **M5 close-the-loop**: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
-6. **Phase B (history trace index)** can start immediately after step 1: `history_sessions/messages/events` tables (next migration after v5), `membox-history-jsonl` fixture format + importer protocol, secret-redaction scrubber, `history search/around/fetch/file/failures` commands, incremental re-import tests, CJK-safe FTS. Per the lifecycle design's Phase B acceptance criteria.
-7. Cleanup: delete the stale `feature/*` (phase 1-7, phase 7.5 sub-branches including `feature/cjk-trigram-fts-design`) and `develop` branches after the user confirms.
-=======
-1. **Decide on the remaining pending item first** (extraction-model default). Lifecycle design accepted and committed as `docs/spec/spec_02_memory_lifecycle.md`. Then:
-2. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch. **Do not chain merge+test in one Bash call** (lesson from session 8).
-3. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
-4. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
-5. Cleanup: delete the stale `feature/*` (phase 1-7, phase 7.5 sub-branches) and `develop` branches after the user confirms.
->>>>>>> docs/spec-directory-reorg
+4. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms.
 
 ---
 
