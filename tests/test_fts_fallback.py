@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from membox.config import RetrievalConfig
 from membox.core.agent import MemoryAgent
 from membox.core.store import KnowledgeStore
-from membox.core.store.retrieval import _fts5_or_query
+from membox.core.store.retrieval import _cjk_trigram_terms, _fts5_or_query
+from membox.core.tokens import est_tokens
 from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
 from membox.services.extraction import DummyExtractor
 
@@ -50,6 +51,9 @@ class TestFts5OrQuery:
 
     def test_cjk_punctuation_stripped(self) -> None:
         assert _fts5_or_query("存储后端是什么?") == '"存储后端是什么"'
+
+    def test_cjk_trigram_terms_for_sidecar(self) -> None:
+        assert _cjk_trigram_terms("苏轼八字") == ["苏轼八", "轼八字"]
 
 
 class TestFallbackChunks:
@@ -102,6 +106,86 @@ class TestFallbackChunks:
         store = KnowledgeStore(str(tmp_path / "s.db"))
         store.insert_document("anything at all")
         assert store.fts_fallback_chunks("anything", limit=0) == []
+
+    def test_cjk_query_uses_trigram_sidecar(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        query = "苏轼八字案例的命格名是什么?"
+
+        # unicode61 sees the whole Chinese sentence as one token and misses.
+        unicode_rows = (
+            store._conn()
+            .execute(
+                "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?;",
+                (_fts5_or_query(query),),
+            )
+            .fetchall()
+        )
+        assert unicode_rows == []
+
+        chunks = store.fts_fallback_chunks(query)
+        assert len(chunks) == 1
+        assert "癸水七杀格" in chunks[0][1]
+
+    def test_short_cjk_query_uses_like_fallback(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼案例已经上线。")
+
+        chunks = store.fts_fallback_chunks("苏轼")
+        assert len(chunks) == 1
+        assert "苏轼" in chunks[0][1]
+
+    def test_cjk_oversized_chunk_is_excerpted(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        filler = "背景资料。" * 1200
+        content = f"{filler}\n苏轼八字案例上线,命格名是癸水七杀格,供名人命理案例使用。\n{filler}"
+        store.insert_document(content, project="china-zhouyi-app", section="Current state")
+
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?")
+        assert len(chunks) == 1
+        excerpt = chunks[0][1]
+        assert "[excerpt]" in excerpt
+        assert "癸水七杀格" in excerpt
+        assert est_tokens(excerpt) < 2000
+
+        out = store.fts_fallback_output(chunks, budget=2000)
+        assert "癸水七杀格" in out
+        assert "1/1 FTS chunks" in out
+
+    def test_cjk_focus_rerank_gets_answer_past_distractors(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document(
+            "命格名和学名字段尚未建设, 当前苏轼卡片字段仍是手工撰写。",
+            project="china-zhouyi-app",
+            section="Open questions",
+        )
+        store.insert_document(
+            "八字到命格名的引擎表计划后续实现, 案例内容先发布。",
+            project="china-zhouyi-app",
+            section="Decisions",
+        )
+        filler = "背景资料。" * 900
+        store.insert_document(
+            f"{filler}\n苏轼八字案例上线, 命格卡片写明丙子辛丑癸亥乙卯, 癸水七杀格。\n{filler}",
+            project="china-zhouyi-app",
+            section="Current state",
+        )
+
+        chunks = store.fts_fallback_chunks("玲珑命理项目中苏轼八字案例的命格名是什么?")
+        out = store.fts_fallback_output(chunks, budget=2000)
+        assert "苏轼" in out
+        assert "癸水" in out
+        assert "七杀" in out
+
+    def test_cjk_relation_bm25_uses_trigram_sidecar(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        doc_id = store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        src = store.create_entity("Su Shi case", "Case", "", None)
+        tgt = store.create_entity("Qishage", "Concept", "", None)
+        rid = store.upsert_relation(src, tgt, "has_archetype", doc_id)
+
+        scores = store._bm25_scores_for_relations([rid], "苏轼八字案例的命格名是什么?")
+        assert rid in scores
 
 
 class TestFallbackOutput:

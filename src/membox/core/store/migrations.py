@@ -40,6 +40,11 @@ Migration 0004 (M6 — Asynchronous Ingestion Queue) creates the
 time, drained by a short-lived worker process (spec §3.9).  The
 ``worker_lease`` single-worker guarantee reuses the existing ``meta`` table
 (no schema change needed for the lease itself).
+
+Migration 0005 adds ``documents_fts_trigram``, an additive CJK sidecar FTS5
+index over ``documents(content)``.  The existing ``documents_fts`` table remains
+the default unicode61 index for English/mixed queries; the sidecar is used only
+by CJK-aware retrieval paths.
 """
 
 from __future__ import annotations
@@ -233,11 +238,71 @@ CREATE INDEX IF NOT EXISTS idx_queue_status ON ingest_queue(status);
 """
 
 
+def _migrate_0005(conn: sqlite3.Connection) -> None:
+    """Apply the CJK trigram FTS sidecar schema changes.
+
+    Adds an external-content FTS5 table using SQLite's built-in trigram
+    tokenizer.  ``detail=none`` keeps the sidecar smaller; query code must emit
+    3-character MATCH terms for this table.
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts_trigram
+        USING fts5(
+            content,
+            content='documents',
+            content_rowid='id',
+            tokenize='trigram',
+            detail=none
+        );
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_tri_ai
+        AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts_trigram(rowid, content) VALUES (new.id, new.content);
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_tri_au
+        AFTER UPDATE OF content ON documents BEGIN
+            INSERT INTO documents_fts_trigram(documents_fts_trigram, rowid, content)
+                VALUES ('delete', old.id, old.content);
+            INSERT INTO documents_fts_trigram(rowid, content) VALUES (new.id, new.content);
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_fts_tri_ad
+        AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts_trigram(documents_fts_trigram, rowid, content)
+                VALUES ('delete', old.id, old.content);
+        END;
+        """
+    )
+
+    conn.execute(
+        """
+        INSERT INTO documents_fts_trigram(rowid, content)
+        SELECT id, content FROM documents;
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
     (3, _migrate_0003),
     (4, _DDL_0004),
+    (5, _migrate_0005),
 ]
 
 

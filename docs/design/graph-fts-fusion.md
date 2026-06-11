@@ -134,18 +134,14 @@ keyword queries against `/tmp/membox-eval-gemini3.db`:
 | q11 | Answer doc ranked #6 in FTS; cut off by `fts_fallback_k=5` | **Fixed** by k=10 (now HIT) |
 | q19 | k=10 admits the first m5go candidates that were cut off at k=5, but the relevant keyword chunk still loses during budget admission | Remaining miss; budget pressure at the default 2000-token budget |
 | q08 | Graph contains the key `handleAnswerNow -> handleWhatToSay` triple, but the answer-bearing source chunk ranks below the shipped FTS candidate cap; `chunk_share` tuning did not recover it | Remaining miss; ranking + budget tradeoff under the default 2000-token budget |
-| q12 | FTS5 `unicode61` does not segment CJK well enough for whitespace-free Chinese questions, so the current MATCH expression returns 0 rows even though the corpus contains `癸水七杀格`. Graph side also lacks the needed CJK entities | Needs CJK-aware query construction plus a trigram/sidecar FTS index design |
+| q12 | FTS5 `unicode61` does not segment CJK well enough for whitespace-free Chinese questions, so the current MATCH expression returns 0 rows even though the corpus contains `癸水七杀格`. Graph side also lacks the needed CJK entities | Addressed on `feature/cjk-trigram-fts-design` with a trigram sidecar and CJK excerpts; full eval rerun pending |
 
 ## Follow-up Work
 
-- **CJK FTS design**: add CJK-aware query construction plus a trigram or sidecar
-  FTS index (`tokenize='trigram'`, SQLite >= 3.34) to fix q12-class recall. A
-  plain tokenizer swap is not sufficient: the current `_fts5_or_query` can still
-  turn a whitespace-free Chinese question into one long quoted expression, and
-  trigram matching has different behavior for short two-character terms. A
-  global rebuild may increase index size and change English BM25 ranking, so the
-  next branch should compare global trigram vs sidecar CJK index and rerun the
-  full eval.
+- **CJK FTS full eval**: the follow-up branch implements an additive
+  `documents_fts_trigram` sidecar and CJK query-time excerpts. q12 passes on a
+  copy of `/tmp/membox-eval-gemini3.db`; the remaining work is to rerun the full
+  26-question eval and confirm no regression from the shipped 23/26 baseline.
 - Consider shared FTS query execution only after preserving equivalence with the
   current two-query implementation.
 - Move to M4 supersession semantics now that the Phase 7.5 retrieval gate is met.

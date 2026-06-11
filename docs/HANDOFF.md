@@ -43,14 +43,14 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 - **Step 1 budget-partitioned fusion implemented**: default `RetrievalConfig.fusion_mode="merge"` fetches both graph triples and direct FTS chunks, then renders them through a three-pass budget partition (`chunk_share=0.4`): triple pass, chunk pass, triple backfill. `fusion_mode="fallback"` preserves the old either/or behavior for A/B testing and rollback.
 - **Acceptance run passed** (`chunk_share=0.4`, `fts_fallback_k=5`): 84.6% overall (22/26), single 12/15, multi 6/7, temporal 4/4, mean 1551 tokens. This cleared the Phase 7.5 retrieval gates: overall >=80%, temporal 100%, multi-hop not below 4/7, default 2000-token budget. The footer remains budget-exempt, so one observed 2006-token output is expected and not a budget-contract violation.
 - **Final shipped default**: `fts_fallback_k=10` recovered q11 with no regression: 88.5% overall (23/26), single 13/15, multi 6/7, temporal 4/4, mean 1941 tokens. The prior 22 hits stayed hits. `chunk_share` sweep over 0.25 / 0.4 / 0.6 at k=5 produced identical hit sets, so `chunk_share=0.4` remains the robust default.
-- Remaining misses are q08, q12, and q19. q08 has the key graph triple but its answer-bearing source chunk ranks below the shipped FTS candidate cap; q19 admits m5go candidates with k=10 but loses the relevant keyword chunk during budget admission; both are default-2000-token budget/ranking tradeoffs. q12 is a CJK FTS/query-construction gap: the corpus contains `癸水七杀格`, but the current unicode61 + whitespace-token query path returns 0 rows.
+- Remaining shipped-baseline misses are q08, q12, and q19. q08 has the key graph triple but its answer-bearing source chunk ranks below the shipped FTS candidate cap; q19 admits m5go candidates with k=10 but loses the relevant keyword chunk during budget admission; both are default-2000-token budget/ranking tradeoffs. q12 is a CJK FTS/query-construction gap in `main`: the corpus contains `癸水七杀格`, but the unicode61 + whitespace-token query path returns 0 rows. The current feature branch implements an additive trigram sidecar and CJK excerpts; q12 passes on a copied eval DB, full 26-question eval is still pending.
 
 ---
 
 ## Current state
 
 - **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, and Step 1 graph+FTS budget fusion are merged.
-- **Current branch**: create a new branch from `main` for CJK/trigram FTS design before changing retrieval schema or query construction.
+- **Current branch**: `feature/cjk-trigram-fts-design` contains the CJK trigram sidecar implementation (migration v5, CJK query dispatch, excerpted CJK FTS chunks, tests, and design docs). Full 26-question eval is still pending before merge.
 - **Old phase 1-7 feature branches + `develop`** still exist but are historical; main is authoritative. Safe to delete after confirmation.
 - **Working eval DBs**: `/tmp/membox-eval-gemini3.db` (58 chunks, 459 entities, 340 relations — cleanest Gemini run; basis for the 53.8% result). `/tmp/membox-eval-m3.db` (Ollama baseline, 51 chunks).
 
@@ -67,9 +67,9 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Open questions / decisions needed
 
-1. **CJK/trigram FTS design**: q12 needs CJK-aware query construction plus a trigram or sidecar FTS index. Do not treat this as a plain `documents_fts` tokenizer swap without evaluating query behavior, index size, and English BM25 ranking impact.
+1. **CJK/trigram FTS full eval**: the feature branch implements q12-class CJK recall using a `documents_fts_trigram` sidecar plus query-time excerpts. Rerun the full 26-question Gemini eval before merging; required result is no regression from the shipped 23/26 baseline.
 2. **Ingest performance**: even with `reasoning_effort=low`, 58 chunks take about 35 min on Gemini because every entity/relation still triggers a single-text embed call (about 900 serial HTTPS round-trips). Three queued optimizations: process-internal embed cache, batched embed calls (`OpenAIEmbedClient.embed()` already takes `list[str]`), chunk-level concurrency. Expected 3-5x speedup.
-3. **Residual recall misses**: q08 and q19 are default-2000-token budget/ranking tradeoffs; q12 is the CJK FTS/query-construction gap.
+3. **Residual recall misses**: q08 and q19 are default-2000-token budget/ranking tradeoffs. q12 is addressed on the current branch but needs full eval confirmation.
 4. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
 5. Old branches + `develop` cleanup — delete after user confirms.
 6. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
@@ -78,7 +78,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. Design the CJK/trigram FTS approach on a fresh branch: compare global trigram rebuild vs sidecar CJK index and specify query construction changes.
+1. Run the full 26-question Gemini eval on `feature/cjk-trigram-fts-design`; confirm q12 flips to HIT and existing HITs do not regress.
 2. Start ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency).
 3. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
 4. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.

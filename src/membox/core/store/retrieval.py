@@ -42,6 +42,12 @@ if TYPE_CHECKING:
 
 # BFS depth for seed entities.
 _SEED_DEPTH = 0
+_CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
+_CJK_TRIGRAM_LIMIT = 64
+_CJK_ANCHOR_LIMIT = 96
+_CJK_EXCERPT_BEFORE_CHARS = 260
+_CJK_EXCERPT_AFTER_CHARS = 520
+_CJK_EXCERPT_WINDOWS = 2
 
 
 class RetrievalOps:
@@ -202,29 +208,20 @@ class RetrievalOps:
 
         conn = self._cm.connection()  # type: ignore[attr-defined]
 
-        # Check FTS5 table exists (absent before migration 3 on old DBs).
-        has_fts = bool(
-            conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts';"
-            ).fetchone()
-        )
-        if not has_fts:
+        table_name, match_expr = _fts_table_and_query(conn, query)
+        if table_name is None or match_expr is None:
             return {}
 
         placeholders = ",".join("?" * len(relation_ids))
-        safe_query = _fts5_or_query(query)
-        if safe_query == '""':
-            # All tokens stripped to nothing — no useful MATCH expression.
-            return {}
 
         try:
             rows = conn.execute(
-                f"SELECT re.relation_id, -bm25(documents_fts) AS score "  # noqa: S608
-                f"FROM documents_fts "
-                f"JOIN relation_evidence re ON re.doc_id = documents_fts.rowid "
-                f"WHERE documents_fts MATCH ? "
+                f"SELECT re.relation_id, -bm25({table_name}) AS score "  # noqa: S608
+                f"FROM {table_name} "
+                f"JOIN relation_evidence re ON re.doc_id = {table_name}.rowid "
+                f"WHERE {table_name} MATCH ? "
                 f"  AND re.relation_id IN ({placeholders})",
-                [safe_query, *relation_ids],
+                [match_expr, *relation_ids],
             ).fetchall()
         except Exception:
             return {}
@@ -530,16 +527,14 @@ class RetrievalOps:
 
         conn = self._cm.connection()  # type: ignore[attr-defined]
 
-        # Check FTS5 table exists (absent before migration 3 on old DBs).
-        has_fts = bool(
-            conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts';"
-            ).fetchone()
-        )
-        if not has_fts:
-            return []
+        if _contains_cjk(query):
+            cjk_chunks = self._cjk_fts_chunks(query, limit=limit, project_filter=project_filter)
+            if cjk_chunks:
+                return cjk_chunks
 
         match_expr = _fts5_or_query(query)
+        if match_expr == '""' or not _fts_table_exists(conn, "documents_fts"):
+            return []
         project_clause = "" if project_filter is None else "AND d.project = ? "
         params: list[object] = [match_expr]
         if project_filter is not None:
@@ -562,32 +557,85 @@ class RetrievalOps:
         except Exception:
             return []
 
-        # Dedup re-ingested chunks: keep the highest version per
-        # (source_path, section), preserving best-score-first group order.
-        chosen: dict[object, tuple[int, int, tuple[object, ...]]] = {}
-        order = 0
-        for row in rows:
-            doc_id, _content, _proj, sp, section, _doc_date, version = row
-            key: object = (sp, section) if sp else ("doc", doc_id)
-            ver = int(version) if version is not None else 0
-            if key not in chosen:
-                chosen[key] = (order, ver, tuple(row))
-                order += 1
-            elif ver > chosen[key][1]:
-                chosen[key] = (chosen[key][0], ver, tuple(row))
+        return _dedup_chunk_rows(rows, limit=limit, query=None)
 
-        result = [
-            (
-                int(r[0]),  # type: ignore[call-overload]
-                str(r[1]),
-                r[2],
-                r[3],
-                r[4],
-                r[5],
-            )
-            for _, _, r in sorted(chosen.values(), key=lambda item: item[0])
-        ]
-        return result[:limit]  # type: ignore[return-value]
+    def _cjk_fts_chunks(
+        self,
+        query: str,
+        limit: int,
+        project_filter: str | None,
+    ) -> list[tuple[int, str, str | None, str | None, str | None, str | None]]:
+        """Return CJK-aware FTS chunks using the trigram sidecar when available."""
+        conn = self._cm.connection()  # type: ignore[attr-defined]
+
+        trigram_terms = _cjk_trigram_terms(query)
+        if trigram_terms and _fts_table_exists(conn, "documents_fts_trigram"):
+            match_expr = _fts5_query_from_terms(trigram_terms)
+            project_clause = "" if project_filter is None else "AND d.project = ? "
+            params: list[object] = [match_expr]
+            if project_filter is not None:
+                params.append(project_filter)
+            params.append(limit * 8)
+            try:
+                rows = conn.execute(
+                    "SELECT d.id, d.content, d.project, d.source_path, d.section, "  # noqa: S608
+                    "       d.doc_date, d.version, bm25(documents_fts_trigram) "
+                    "FROM documents_fts_trigram "
+                    "JOIN documents d ON d.id = documents_fts_trigram.rowid "
+                    "WHERE documents_fts_trigram MATCH ? "
+                    f"{project_clause}"
+                    "ORDER BY bm25(documents_fts_trigram) "
+                    "LIMIT ?",
+                    params,
+                ).fetchall()
+            except Exception:
+                rows = []
+
+            if rows:
+                focus_query = _cjk_focus_query(query)
+                anchors = _cjk_anchor_terms(focus_query)
+                reranked = sorted(
+                    rows,
+                    key=lambda row: (
+                        -_cjk_content_score(str(row[1]), anchors),
+                        float(row[7]),
+                    ),
+                )
+                return _dedup_chunk_rows(reranked, limit=limit, query=focus_query)
+
+        return self._short_cjk_like_chunks(query, limit=limit, project_filter=project_filter)
+
+    def _short_cjk_like_chunks(
+        self,
+        query: str,
+        limit: int,
+        project_filter: str | None,
+    ) -> list[tuple[int, str, str | None, str | None, str | None, str | None]]:
+        """Guarded LIKE fallback for CJK queries without usable trigram terms."""
+        conn = self._cm.connection()  # type: ignore[attr-defined]
+        terms = _cjk_anchor_terms(query, min_len=1, max_len=2, limit=8)
+        if not terms:
+            return []
+
+        clauses = " OR ".join("d.content LIKE ?" for _ in terms)
+        project_clause = "" if project_filter is None else "AND d.project = ? "
+        params: list[object] = [f"%{term}%" for term in terms]
+        if project_filter is not None:
+            params.append(project_filter)
+        params.append(limit * 8)
+        rows = conn.execute(
+            "SELECT d.id, d.content, d.project, d.source_path, d.section, "  # noqa: S608
+            "       d.doc_date, d.version "
+            "FROM documents d "
+            f"WHERE ({clauses}) "
+            f"{project_clause}"
+            "ORDER BY d.doc_date DESC, d.id DESC "
+            "LIMIT ?",
+            params,
+        ).fetchall()
+        focus_query = _cjk_focus_query(query)
+        reranked = sorted(rows, key=lambda row: -_cjk_content_score(str(row[1]), terms))
+        return _dedup_chunk_rows(reranked, limit=limit, query=focus_query)
 
     def fts_fallback_output(
         self,
@@ -876,6 +924,179 @@ def _fts5_or_query(query: str) -> str:
     if not tokens:
         return '""'
     return " OR ".join(f'"{t}"' for t in tokens)
+
+
+def _fts_table_exists(conn: object, table_name: str) -> bool:
+    """Return whether an FTS table exists in the current SQLite database."""
+    return bool(
+        conn.execute(  # type: ignore[attr-defined]
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?;",
+            (table_name,),
+        ).fetchone()
+    )
+
+
+def _fts_table_and_query(conn: object, query: str) -> tuple[str | None, str | None]:
+    """Choose the FTS table and MATCH expression for a query."""
+    if _contains_cjk(query) and _fts_table_exists(conn, "documents_fts_trigram"):
+        terms = _cjk_trigram_terms(query)
+        if terms:
+            return "documents_fts_trigram", _fts5_query_from_terms(terms)
+
+    if not _fts_table_exists(conn, "documents_fts"):
+        return None, None
+
+    match_expr = _fts5_or_query(query)
+    if match_expr == '""':
+        return None, None
+    return "documents_fts", match_expr
+
+
+def _dedup_chunk_rows(
+    rows: list[tuple[object, ...]],
+    limit: int,
+    query: str | None,
+) -> list[tuple[int, str, str | None, str | None, str | None, str | None]]:
+    """Deduplicate FTS document rows and optionally convert CJK content to excerpts."""
+    chosen: dict[object, tuple[int, int, tuple[object, ...]]] = {}
+    order = 0
+    for row in rows:
+        doc_id, _content, _proj, sp, section, _doc_date, version = row[:7]
+        key: object = (sp, section) if sp else ("doc", doc_id)
+        ver = int(str(version)) if version is not None else 0
+        if key not in chosen:
+            chosen[key] = (order, ver, tuple(row[:7]))
+            order += 1
+        elif ver > chosen[key][1]:
+            chosen[key] = (chosen[key][0], ver, tuple(row[:7]))
+
+    result: list[tuple[int, str, str | None, str | None, str | None, str | None]] = []
+    for _, _, row in sorted(chosen.values(), key=lambda item: item[0]):
+        content = str(row[1])
+        if query is not None:
+            content = _cjk_excerpt(query, content)
+        result.append(
+            (
+                int(row[0]),  # type: ignore[call-overload]
+                content,
+                row[2] if row[2] is None else str(row[2]),
+                row[3] if row[3] is None else str(row[3]),
+                row[4] if row[4] is None else str(row[4]),
+                row[5] if row[5] is None else str(row[5]),
+            )
+        )
+    return result[:limit]
+
+
+def _contains_cjk(text: str) -> bool:
+    """Return whether *text* contains a CJK Unified Ideograph."""
+    return bool(_CJK_RUN_RE.search(text))
+
+
+def _cjk_trigram_terms(query: str, limit: int = _CJK_TRIGRAM_LIMIT) -> list[str]:
+    """Return ordered unique 3-character CJK windows for trigram FTS MATCH."""
+    return _cjk_anchor_terms(query, min_len=3, max_len=3, limit=limit)
+
+
+def _cjk_focus_query(query: str) -> str:
+    """Return the CJK portion most useful for reranking and excerpts."""
+    focus = query
+    for marker in ("项目中", "项目里", "项目的"):
+        if marker in focus:
+            focus = focus.split(marker, 1)[1]
+            break
+    for marker in ("是什么", "是哪个", "有哪些", "?", "\uff1f"):
+        if marker in focus:
+            focus = focus.split(marker, 1)[0]
+            break
+    return focus.strip() or query
+
+
+def _cjk_anchor_terms(
+    query: str,
+    min_len: int = 2,
+    max_len: int = 4,
+    limit: int = _CJK_ANCHOR_LIMIT,
+) -> list[str]:
+    """Return ordered unique CJK n-grams for reranking and excerpt anchoring."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for run_match in _CJK_RUN_RE.finditer(query):
+        run = run_match.group(0)
+        for size in range(max_len, min_len - 1, -1):
+            if len(run) < size:
+                continue
+            for idx in range(len(run) - size + 1):
+                term = run[idx : idx + size]
+                if term not in seen:
+                    seen.add(term)
+                    terms.append(term)
+                    if len(terms) >= limit:
+                        return terms
+    return terms
+
+
+def _fts5_query_from_terms(terms: list[str]) -> str:
+    """Build a quoted OR MATCH expression from pre-sanitized terms."""
+    if not terms:
+        return '""'
+    return " OR ".join(f'"{term}"' for term in terms)
+
+
+def _cjk_content_score(content: str, terms: list[str]) -> int:
+    """Score a CJK candidate document by query-term coverage."""
+    return sum(len(term) for term in terms if term in content)
+
+
+def _cjk_excerpt(query: str, content: str) -> str:
+    """Return a compact CJK query-centered excerpt for an FTS chunk."""
+    text = content.strip()
+    anchors = _cjk_anchor_terms(query)
+    if not anchors:
+        return text
+
+    candidates: list[tuple[int, int, int, int]] = []
+    for term in anchors:
+        start_at = 0
+        while True:
+            pos = text.find(term, start_at)
+            if pos < 0:
+                break
+            start = max(0, pos - _CJK_EXCERPT_BEFORE_CHARS)
+            end = min(len(text), pos + _CJK_EXCERPT_AFTER_CHARS)
+            window = text[start:end]
+            score = _cjk_content_score(window, anchors)
+            candidates.append((score, start, end, pos))
+            start_at = pos + 1
+
+    if not candidates:
+        return text
+
+    selected: list[tuple[int, int]] = []
+    for _score, start, end, _pos in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        overlaps = any(
+            not (end <= sel_start or start >= sel_end) for sel_start, sel_end in selected
+        )
+        if overlaps:
+            continue
+        selected.append((start, end))
+        if len(selected) >= _CJK_EXCERPT_WINDOWS:
+            break
+
+    if not selected:
+        return text
+
+    parts: list[str] = []
+    for start, end in sorted(selected):
+        snippet = text[start:end].strip()
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(text):
+            snippet = snippet + "..."
+        parts.append(snippet)
+
+    excerpt = "\n\n[excerpt]\n" + "\n\n...\n\n".join(parts)
+    return excerpt if est_tokens(excerpt) < est_tokens(text) else text
 
 
 def _best_doc_date(

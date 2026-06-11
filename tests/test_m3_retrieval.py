@@ -7,7 +7,7 @@ Coverage targets:
 - Knapsack: triple admission, evidence eligibility (top-K + admitted parent),
   skip-and-continue (skip expensive item but continue)
 - Compact output: subject-grouped format, footer always present
-- Migration v2→v3: existing DB gains embedding column + FTS5 table + triggers
+- Migration v2→v5: existing DB gains embedding column + FTS5 tables + triggers
 - Meta guard: mismatch raises EmbedderMismatchError; no embedder = no-op
 - Config defaults: RetrievalConfig field values
 """
@@ -663,6 +663,75 @@ class TestMigrationV3:
         ).fetchall()
         assert rows, "Migration v3 backfill did not index pre-existing document"
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 6b. Migration v4→v5
+# ---------------------------------------------------------------------------
+
+
+class TestMigrationV5:
+    """Migration 0005 adds the CJK trigram sidecar FTS5 table + triggers."""
+
+    def test_v4_db_upgraded_to_v5(self, tmp_path: Path) -> None:
+        from membox.core.store.migrations import MIGRATIONS, apply_migrations, get_user_version
+
+        db_path = str(tmp_path / "v4tov5.db")
+        conn = sqlite3.connect(db_path, isolation_level=None)
+        apply_migrations(conn, [(v, a) for v, a in MIGRATIONS if v <= 4])
+        assert get_user_version(conn) == 4
+
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute("INSERT INTO documents(content, source) VALUES ('苏轼八字案例命格名', 'src');")
+        conn.execute("COMMIT;")
+
+        apply_migrations(conn, [(v, a) for v, a in MIGRATIONS if v == 5])
+        assert get_user_version(conn) == 5
+
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+        }
+        assert "documents_fts_trigram" in tables
+
+        rows = conn.execute(
+            "SELECT rowid FROM documents_fts_trigram "
+            "WHERE documents_fts_trigram MATCH '\"命格名\"';"
+        ).fetchall()
+        assert rows, "Migration v5 backfill did not index pre-existing CJK document"
+        conn.close()
+
+    def test_trigram_triggers_sync_insert_update_delete(self, tmp_path: Path) -> None:
+        from membox.core.store import KnowledgeStore
+
+        store = KnowledgeStore(str(tmp_path / "tri.db"))
+        doc_id = store.insert_document("苏轼八字案例命格名")
+        conn = store._conn()
+
+        rows = conn.execute(
+            "SELECT rowid FROM documents_fts_trigram "
+            "WHERE documents_fts_trigram MATCH '\"命格名\"';"
+        ).fetchall()
+        assert rows == [(doc_id,)]
+
+        conn.execute("UPDATE documents SET content='李白诗歌案例' WHERE id=?;", (doc_id,))
+        old_rows = conn.execute(
+            "SELECT rowid FROM documents_fts_trigram "
+            "WHERE documents_fts_trigram MATCH '\"命格名\"';"
+        ).fetchall()
+        assert old_rows == []
+        new_rows = conn.execute(
+            "SELECT rowid FROM documents_fts_trigram "
+            "WHERE documents_fts_trigram MATCH '\"诗歌案\"';"
+        ).fetchall()
+        assert new_rows == [(doc_id,)]
+
+        conn.execute("DELETE FROM documents WHERE id=?;", (doc_id,))
+        deleted_rows = conn.execute(
+            "SELECT rowid FROM documents_fts_trigram "
+            "WHERE documents_fts_trigram MATCH '\"诗歌案\"';"
+        ).fetchall()
+        assert deleted_rows == []
 
 
 # ---------------------------------------------------------------------------
