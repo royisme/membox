@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from membox.config import RetrievalConfig
 from membox.core.agent import MemoryAgent
 from membox.core.store import KnowledgeStore
-from membox.core.store.retrieval import _fts5_or_query
+from membox.core.store.retrieval import _cjk_trigram_terms, _fts5_or_query
+from membox.core.tokens import est_tokens
 from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
 from membox.services.extraction import DummyExtractor
 
@@ -50,6 +51,21 @@ class TestFts5OrQuery:
 
     def test_cjk_punctuation_stripped(self) -> None:
         assert _fts5_or_query("存储后端是什么?") == '"存储后端是什么"'
+
+    def test_cjk_trigram_terms_for_sidecar(self) -> None:
+        assert _cjk_trigram_terms("苏轼八字") == ["苏轼八", "轼八字"]
+
+    def test_cjk_content_score_counts_maximal_terms_only(self) -> None:
+        from membox.core.store.retrieval import _cjk_anchor_terms, _cjk_content_score
+
+        anchors = _cjk_anchor_terms("苏轼八字案例")
+        # Document covering the full phrase scores its maximal terms only:
+        # the 4-gram matches subsume every contained 2/3-gram.
+        full = _cjk_content_score("文中提到苏轼八字案例上线。", anchors)
+        # Document repeating one short fragment scores just that fragment once.
+        frag = _cjk_content_score("案例很多, 案例不少, 还是案例。", anchors)
+        assert full > frag
+        assert frag == _cjk_content_score("一个案例。", anchors)
 
 
 class TestFallbackChunks:
@@ -102,6 +118,102 @@ class TestFallbackChunks:
         store = KnowledgeStore(str(tmp_path / "s.db"))
         store.insert_document("anything at all")
         assert store.fts_fallback_chunks("anything", limit=0) == []
+
+    def test_cjk_query_uses_trigram_sidecar(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        query = "苏轼八字案例的命格名是什么?"
+
+        # unicode61 sees the whole Chinese sentence as one token and misses.
+        unicode_rows = (
+            store._conn()
+            .execute(
+                "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?;",
+                (_fts5_or_query(query),),
+            )
+            .fetchall()
+        )
+        assert unicode_rows == []
+
+        chunks = store.fts_fallback_chunks(query)
+        assert len(chunks) == 1
+        assert "癸水七杀格" in chunks[0][1]
+
+    def test_short_cjk_query_uses_like_fallback(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼案例已经上线。")
+
+        chunks = store.fts_fallback_chunks("苏轼")
+        assert len(chunks) == 1
+        assert "苏轼" in chunks[0][1]
+
+    def test_cjk_oversized_chunk_is_excerpted(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        filler = "背景资料。" * 1200
+        content = f"{filler}\n苏轼八字案例上线,命格名是癸水七杀格,供名人命理案例使用。\n{filler}"
+        store.insert_document(content, project="china-zhouyi-app", section="Current state")
+
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?")
+        assert len(chunks) == 1
+        excerpt = chunks[0][1]
+        assert "[excerpt]" in excerpt
+        assert "癸水七杀格" in excerpt
+        assert est_tokens(excerpt) < 2000
+
+        out = store.fts_fallback_output(chunks, budget=2000)
+        assert "癸水七杀格" in out
+        assert "1/1 FTS chunks" in out
+
+    def test_cjk_excerpt_drops_weak_redundant_window(self, tmp_path: Path) -> None:
+        from membox.core.store.retrieval import _cjk_excerpt, est_tokens
+
+        filler = "背景资料。" * 300
+        # All query concepts cluster in one region; a lone weak repeat of one
+        # short fragment (命格) sits far away and adds no new anchor terms.
+        content = (
+            f"{filler}\n苏轼八字案例的命格名是癸水七杀格。\n{filler}\n命格一词再次出现。\n{filler}"
+        )
+        excerpt = _cjk_excerpt("苏轼八字案例的命格名", content)
+        assert "[excerpt]" in excerpt
+        assert "癸水七杀格" in excerpt
+        # The weak redundant window is dropped, keeping the excerpt compact.
+        assert "再次出现" not in excerpt
+        assert est_tokens(excerpt) < est_tokens(content)
+
+    def test_cjk_focus_rerank_gets_answer_past_distractors(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document(
+            "命格名和学名字段尚未建设, 当前苏轼卡片字段仍是手工撰写。",
+            project="china-zhouyi-app",
+            section="Open questions",
+        )
+        store.insert_document(
+            "八字到命格名的引擎表计划后续实现, 案例内容先发布。",
+            project="china-zhouyi-app",
+            section="Decisions",
+        )
+        filler = "背景资料。" * 900
+        store.insert_document(
+            f"{filler}\n苏轼八字案例上线, 命格卡片写明丙子辛丑癸亥乙卯, 癸水七杀格。\n{filler}",
+            project="china-zhouyi-app",
+            section="Current state",
+        )
+
+        chunks = store.fts_fallback_chunks("玲珑命理项目中苏轼八字案例的命格名是什么?")
+        out = store.fts_fallback_output(chunks, budget=2000)
+        assert "苏轼" in out
+        assert "癸水" in out
+        assert "七杀" in out
+
+    def test_cjk_relation_bm25_uses_trigram_sidecar(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        doc_id = store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        src = store.create_entity("Su Shi case", "Case", "", None)
+        tgt = store.create_entity("Qishage", "Concept", "", None)
+        rid = store.upsert_relation(src, tgt, "has_archetype", doc_id)
+
+        scores = store._bm25_scores_for_relations([rid], "苏轼八字案例的命格名是什么?")
+        assert rid in scores
 
 
 class TestFallbackOutput:
@@ -211,3 +323,115 @@ class TestAgentFallbackIntegration:
         out = agent.compact_query("what storage backend is used")
         assert "FTS chunks" in out
         assert "pending" in out
+
+
+class TestCjkFallbackBehavior:
+    """Regression tests for the CJK LIKE/trigram fallback routing rules.
+
+    Covers the three cases mandated by the design doc:
+
+    1. Trigram terms exist but sidecar missing (pre-v5 DB) → fall through to
+       unicode61 path, no crash.
+    2. Trigram terms exist, sidecar present, MATCH returns 0 rows → return []
+       (do NOT degrade to LIKE).
+    3. Short CJK query (all runs < 3 chars) → LIKE path used.
+    4. project_filter respected on both trigram and short-CJK LIKE paths.
+    5. Long CJK query term cap: at most _CJK_TRIGRAM_LIMIT (64) terms emitted.
+    """
+
+    def test_trigram_terms_empty_for_short_cjk_runs(self) -> None:
+        """_cjk_trigram_terms returns [] when all CJK runs are 1-2 chars long."""
+        # "苏轼" is a 2-char run — no 3-char trigram can be formed.
+        assert _cjk_trigram_terms("苏轼") == []
+
+    def test_cjk_no_sidecar_falls_through_to_unicode61(self, tmp_path: Path) -> None:
+        """CJK query with trigram terms on a DB without the sidecar uses unicode61.
+
+        Simulates a pre-v5 database by dropping the sidecar table after the
+        store is created.  The result should equal what the unicode61 path
+        would return — here the document is ASCII-compatible, so it matches.
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        # Insert an ASCII doc that unicode61 can match.
+        store.insert_document("membox stores evidence in SQLite databases.")
+        # Drop the trigram sidecar to mimic a pre-v5 DB.
+        store._conn().execute("DROP TABLE IF EXISTS documents_fts_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ai_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ad_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_au_trigram;")
+
+        # A CJK query with trigram terms (>= 3-char run): sidecar absent → []
+        # from _cjk_fts_chunks, then fts_fallback_chunks falls through to
+        # unicode61.  The doc itself is non-CJK so unicode61 finds it.
+        chunks = store.fts_fallback_chunks("苏轼八字案例 databases")
+        # unicode61 path should still find "databases" in the doc.
+        assert any("SQLite" in c[1] for c in chunks)
+
+    def test_cjk_no_sidecar_pure_cjk_query_no_crash(self, tmp_path: Path) -> None:
+        """Pure CJK query on a sidecar-less DB returns [] without crashing.
+
+        With a sidecar-less DB and a pure-CJK query that produces trigram terms,
+        _cjk_fts_chunks returns [].  unicode61 also finds nothing because it
+        treats the whole run as a single token.  The expected result is [].
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        # Drop the sidecar.
+        store._conn().execute("DROP TABLE IF EXISTS documents_fts_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ai_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ad_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_au_trigram;")
+
+        # Must not crash, and must not return LIKE-based results.
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?")
+        # The result is empty: sidecar missing → [] from CJK path; unicode61
+        # cannot tokenise the run and also returns [].
+        assert chunks == []
+
+    def test_cjk_sidecar_present_no_match_returns_empty(self, tmp_path: Path) -> None:
+        """CJK MATCH with sidecar present but term not in corpus returns [], not LIKE results.
+
+        Ensures the code does NOT degrade to LIKE when the trigram MATCH finds
+        no rows.  A weakly-related doc with overlapping 1-2-char substrings
+        must NOT appear in the results.
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        # Insert a doc that shares characters with the query but not the trigrams.
+        store.insert_document("苏轼是一位诗人。")
+        # Query whose 3-char trigrams are absent from the corpus.
+        chunks = store.fts_fallback_chunks("黄庭坚写了什么诗歌?")
+        # If LIKE were used it might return the doc above (shares "诗" with the
+        # query via the anchor "诗歌").  With the fixed code, result must be [].
+        assert chunks == []
+
+    def test_cjk_project_filter_trigram_path(self, tmp_path: Path) -> None:
+        """project_filter is respected when the trigram sidecar is used."""
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。", project="china")
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。", project="other")
+
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?", project_filter="china")
+        assert len(chunks) == 1
+        assert chunks[0][2] == "china"
+
+    def test_cjk_project_filter_like_path(self, tmp_path: Path) -> None:
+        """project_filter is respected on the short-CJK LIKE path."""
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼案例已经上线。", project="china")
+        store.insert_document("苏轼案例已经上线。", project="other")
+
+        # "苏轼" is a 2-char run → no trigram terms → LIKE path.
+        chunks = store.fts_fallback_chunks("苏轼", project_filter="china")
+        assert len(chunks) == 1
+        assert chunks[0][2] == "china"
+
+    def test_cjk_trigram_term_cap(self) -> None:
+        """A very long CJK query emits at most _CJK_TRIGRAM_LIMIT (64) terms."""
+        from membox.core.store.retrieval import _CJK_TRIGRAM_LIMIT
+
+        # Build a run of 100 distinct CJK ideographs (U+4E00..U+4E63).
+        # A 100-char run yields 98 unique trigrams before dedup, so the cap
+        # at 64 is always reached.  Use chr() so the literal stays ASCII.
+        long_query = "".join(chr(c) for c in range(0x4E00, 0x4E00 + 100))
+        terms = _cjk_trigram_terms(long_query)
+        assert len(terms) == _CJK_TRIGRAM_LIMIT

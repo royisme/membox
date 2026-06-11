@@ -40,14 +40,14 @@ class TestMigration0002:
     """Migration 0002 adds metadata columns and meta table."""
 
     def test_latest_version_is_2(self) -> None:
-        # Latest is now 4 (M6 adds the ingest_queue table).
-        assert latest_version() == 4
+        # Latest is now 5 (CJK trigram sidecar adds documents_fts_trigram).
+        assert latest_version() == 5
 
     def test_fresh_db_reaches_version_2(self, tmp_path: Path) -> None:
-        # Fresh DB is migrated through all versions; current latest is 4.
+        # Fresh DB is migrated through all versions; current latest is 5.
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
         version = get_user_version(store._conn())
-        assert version == 4
+        assert version == 5
 
     def test_fresh_db_has_all_new_columns(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
@@ -79,10 +79,10 @@ class TestMigration0002:
         assert "project" not in cols_v1
         conn.close()
 
-        # Open via KnowledgeStore — should trigger v2 + v3 + v4 migrations.
+        # Open via KnowledgeStore — should trigger all current migrations.
         store = KnowledgeStore(db_path)
         conn2 = store._conn()
-        assert get_user_version(conn2) == 4
+        assert get_user_version(conn2) == 5
         cols_v2 = {row[1] for row in conn2.execute("PRAGMA table_info(documents);").fetchall()}
         assert {"project", "source_path", "section", "doc_date", "version"}.issubset(cols_v2)
 
