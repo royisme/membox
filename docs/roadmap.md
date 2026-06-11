@@ -328,7 +328,7 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
 ## Future Tracks (not yet scheduled)
 
 - **Agent memory lifecycle** (Trace → Unit → Crystal): design accepted at v2.3
-  in `docs/design/agent-memory-lifecycle.md`, but not yet scheduled in the main
+  in `docs/spec/spec_02_memory_lifecycle.md`, but not yet scheduled in the main
   phase sequence. Promote into this roadmap as Phases A–F when implementation
   begins.
 - **HOT working-state tier** (current task, open loops, session focus):

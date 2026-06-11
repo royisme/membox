@@ -102,6 +102,9 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/design/cjk-trigram-fts.md`
     - `docs/design/graph-fts-fusion.md`
     - `docs/design/retrieval-architecture.md`
+  - `docs/spec/`
+    - `docs/spec/spec_01_core.md`
+    - `docs/spec/spec_02_memory_lifecycle.md`
   - `docs/code-standards.md`
   - `docs/HANDOFF.md`
   - `docs/repository-map.md`
