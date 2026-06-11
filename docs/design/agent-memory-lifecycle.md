@@ -1,6 +1,7 @@
 # Agent Memory Lifecycle Design
 
-Status: review draft v2
+Status: accepted v2.3 — all decisions owner-confirmed; remaining open items
+are calibration parameters gated on the lifecycle eval corpus
 Date: 2026-06-11
 Scope: next-stage memory-system design after graph + FTS retrieval quality gate
 Audience: project owner and coding agents reviewing future Membox phases
@@ -1156,7 +1157,7 @@ Owner-confirmed 2026-06-11 (v2.2 discussion):
 - The HOT working-state tier stays out of this track but is recorded in
   `docs/roadmap.md` under "Future Tracks" as a future standalone design.
 
-Resolved in v2 (proposed by agent review, pending owner sign-off):
+Owner-confirmed 2026-06-11 (engineering decisions, v2 review pass):
 
 - `dream` is not exposed in public CLI help, not even as a documented alias.
   One verb (`consolidate`) keeps the CLI surface unambiguous; continuity with
@@ -1226,6 +1227,7 @@ For implementation review:
 |---|---|---|
 | 2026-06-11 | v0 review draft | Initial lifecycle design based on Sibyl, Obelisk, MiMo, and Trace/Unit/Crystal review. |
 | 2026-06-11 | v1 review response | Addressed first review pass: locked DB scope, specified heuristic triage, added triage table, activation rules, source enums, dedup, status log, label table, concurrency model, memory budget partition, and lifecycle eval strategy. |
+| 2026-06-11 | v2.3 accepted | Owner confirmed the nine engineering decisions from the v2 review pass (lease-based cross-process coordination, source-identity dedup, consolidate-owned decay, status-log restore, distinct-session independence, import-time redaction, eval-first Phase C, project-scoped search defaults, no dream alias). Status moved from review draft to accepted; remaining open items are eval-gated calibration parameters only. |
 | 2026-06-11 | v2.2 owner decisions | Owner resolved the four product questions: no Membox blob storage in any phase — previews + `payload_locator` + `history fetch` re-read the upstream session log instead (supersedes the v1/v2 blob/truncation proposal); Markdown export one-way; 11-label set accepted; HOT state tier excluded but recorded in roadmap Future Tracks. Renamed `blob_ref` → `payload_locator`; added `history fetch` to the CLI surface and Phase B acceptance; clarified the redaction boundary is what Membox stores, not what the user's own files contain. |
 | 2026-06-11 | v2.1 dev cleanup | Pre-commit consistency pass: `user_intent` persisted on triage rows (activation rule reads it), newest-gate-version rule for pending row selection, CLI `--status` value matches state names, `memory restore` added to surface, importer `--format` vs `source_kind` distinction, module placement table, config keys with defaults, migration numbers deliberately not hardcoded. |
 | 2026-06-11 | v2 review response | Second review pass (engineering + theory). Blockers fixed: cross-process lease replaces the misattributed RLock claim; dedup re-anchored on source identity across gate versions; incremental re-import semantics and rewrite-safe event ordinals; secret redaction as Phase B acceptance. Decisions resolved: independent-source definition, score evolution (explains the 0.90 branch), archive/restore preserves crystal status, crystal_candidate demotion path, decay owned by consolidate, default project scoping. Theory-driven additions: memory-pool ranking is relevance x importance x recency (not static scores), recall_count/last_recalled_at reinforcement bookkeeping, HOT state tier explicitly rejected, lifecycle eval moved to start of Phase C. Refinements: role-weighted triage signals with per-session cap, weak_context_only not extracted by default, extraction-stage clustering of adjacent triage rows, polymorphic-reference dangling-source policy, timestamp fallback chain, footer omits ineligible pools. All v1 open questions resolved (pending owner sign-off). |
