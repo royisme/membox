@@ -19,6 +19,7 @@ from membox.model.schema import (
 )
 
 if TYPE_CHECKING:
+    from membox.config import RetrievalConfig
     from membox.services.embedding import Embedder
     from membox.services.extraction import LLMExtractor
 
@@ -418,7 +419,9 @@ class MemoryAgent:
                 seed_ids.append(eid)
 
         if not seed_ids:
-            return self._append_pending_note("(returned 0/0 triples, ~0/0 tokens)")
+            return self._append_pending_note(
+                self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+            )
 
         query_emb: list[float] | None = None
         if self._embedder is not None:
@@ -433,12 +436,52 @@ class MemoryAgent:
             project_filter=project_filter,
         )
 
+        if not scored:
+            return self._append_pending_note(
+                self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+            )
+
         output = self.store.compact_output(
             scored=scored,
             budget=effective_budget,
             top_evidence_k=ret_cfg.top_evidence_k,
         )
         return self._append_pending_note(output)
+
+    def _fts_fallback(
+        self,
+        question: str,
+        budget: int,
+        project_filter: str | None,
+        ret_cfg: RetrievalConfig,
+    ) -> str:
+        """Direct FTS5 chunk search when graph retrieval comes back empty.
+
+        Seed-resolution failure (no extracted entity matches the graph) and
+        empty BFS recall are the dominant miss modes on real corpora; rather
+        than returning a bare ``0/0`` footer, search the evidence chunks
+        directly so keyword-bearing prose still surfaces (spec §3.6).
+
+        Args:
+            question: Original natural-language question.
+            budget: Effective token budget for the output.
+            project_filter: Restrict chunks to this project name.
+            ret_cfg: Resolved retrieval configuration (``fts_fallback_k``).
+
+        Returns:
+            Provenance-tagged chunk output with coverage footer, or the bare
+            empty footer when the fallback is disabled or finds nothing.
+        """
+        if ret_cfg.fts_fallback_k <= 0:
+            return "(returned 0/0 triples, ~0/0 tokens)"
+        chunks = self.store.fts_fallback_chunks(
+            question,
+            limit=ret_cfg.fts_fallback_k,
+            project_filter=project_filter,
+        )
+        if not chunks:
+            return "(returned 0/0 triples, ~0/0 tokens)"
+        return self.store.fts_fallback_output(chunks, budget=budget)
 
     def _append_pending_note(self, output: str) -> str:
         """Append a pending-ingests note to query output when the queue is non-empty.

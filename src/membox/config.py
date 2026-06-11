@@ -102,6 +102,10 @@ class RetrievalConfig(BaseModel):
             ``find_or_create_entity``).  Default ``0.85``, which is appropriate
             for OpenAI embeddings.  Set to ``0.70`` when using ``embeddinggemma``
             via Ollama.
+        fts_fallback_k: Maximum number of document chunks returned by the
+            direct FTS5 fallback search when seed-entity resolution (or graph
+            recall) yields nothing.  ``0`` disables the fallback.  Default
+            ``5``.
     """
 
     hop_decay: float = 0.7
@@ -109,6 +113,7 @@ class RetrievalConfig(BaseModel):
     budget: int = 2000
     top_evidence_k: int = 3
     disambiguation_threshold: float = 0.85
+    fts_fallback_k: int = 5
 
 
 class MemboxConfig(BaseModel):

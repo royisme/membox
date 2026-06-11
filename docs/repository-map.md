@@ -122,6 +122,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
   - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
+  - `tests/test_fts_fallback.py` — FTS fallback: direct chunk search when seed resolution or graph recall is empty.
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
