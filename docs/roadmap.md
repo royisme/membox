@@ -336,3 +336,14 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
   working state has opposite mechanics from long-term memory). Recorded here as
   a future standalone design, owned by a separate doc when picked up; it must
   not be implemented as a `memory_units.unit_type`.
+- **Global memory scope** (cross-project distillation): the surviving idea from
+  the retired `docs/spec-v0.2-draft.md` (owner decision 2026-06-13 — the draft's
+  per-project DB storage model was rejected; single global DB stays locked).
+  Goal: distill reusable cross-project memory (user preferences, workflows,
+  problem-solving procedures) from per-project memory units into a global
+  scope, with provenance back to the source units. Builds ON TOP of the
+  lifecycle track — depends on Phases C–F (`memory_units` with sources/labels
+  give it the substrate the draft lacked); likely realized as a `project=''`
+  or dedicated-scope query surface plus a `memory distill` command, NOT as a
+  second DB file. Owns its own `docs/spec/spec_NN_global_scope.md` chapter
+  when picked up.

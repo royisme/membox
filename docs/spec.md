@@ -20,8 +20,11 @@ When documents conflict:
 
 ## Drafts
 
-The following spec drafts are under review and not yet accepted:
+No spec drafts are currently under review.
 
-| File | Topic |
-|------|-------|
-| [spec-v0.2-draft.md](spec-v0.2-draft.md) | Storage model v0.2 (per-project DB files) — pending review |
+Retired: [spec-v0.2-draft.md](spec-v0.2-draft.md) (per-project DB files) — rejected as a whole
+(owner decision 2026-06-13): the two-DB storage model conflicts with the locked single-global-DB
+decision, and its lifecycle/gate/provenance ideas were independently realized in
+[spec_02_memory_lifecycle.md](spec/spec_02_memory_lifecycle.md). One idea survives: a **global
+memory scope** (distilling cross-project preferences/procedures), formally parked as a future
+`spec_NN` chapter in `docs/roadmap.md` Future Tracks. The draft file is kept as design history.
