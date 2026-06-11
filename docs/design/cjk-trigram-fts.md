@@ -1,6 +1,6 @@
 # CJK Trigram FTS Design
 
-Status: implemented on `feature/cjk-trigram-fts-design`; full 26-question eval pending
+Status: implemented and eval-verified — 24/26 (q12 HIT, no regression vs the 23/26 shipped baseline; remaining misses q08/q19 are pre-existing budget/ranking tradeoffs)
 Date: 2026-06-11
 Scope: q12-class CJK recall failures after graph + FTS fusion
 
@@ -256,6 +256,22 @@ Manual eval gates:
   output stays within the default budget contract.
 - Inspect q08/q19 to confirm CJK changes do not alter pure-English miss
   attribution.
+
+### Measured results (2026-06-11)
+
+- Full 26-question Gemini eval on a re-ingested copy of the gemini3 DB:
+  initial run 23/26 with q12 still MISS — trigram recall found the answer
+  chunk, but raw anchor-density reranking placed it 3rd and a redundant second
+  excerpt window bloated it past budget admission.
+- Two follow-up fixes inside the CJK path only: maximal-term scoring in
+  `_cjk_content_score` (a matched n-gram subsumed by a longer matched n-gram
+  no longer double-counts) and a marginal-gain gate on extra excerpt windows
+  (an additional window must add a new anchor term or carry at least half the
+  best window's anchor weight).
+- Final verified result on the post-eval DB at budget 2000: **24/26 — q12
+  HIT, all 23 baseline HITs preserved, temporal 4/4, multi-hop 6/7**.
+  Remaining misses q08/q19 are the pre-existing English budget/ranking
+  tradeoffs. q12 also verified HIT on a fresh pre-re-ingest gemini3 copy.
 
 ## Rollback
 
