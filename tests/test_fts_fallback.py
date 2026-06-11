@@ -295,3 +295,115 @@ class TestAgentFallbackIntegration:
         out = agent.compact_query("what storage backend is used")
         assert "FTS chunks" in out
         assert "pending" in out
+
+
+class TestCjkFallbackBehavior:
+    """Regression tests for the CJK LIKE/trigram fallback routing rules.
+
+    Covers the three cases mandated by the design doc:
+
+    1. Trigram terms exist but sidecar missing (pre-v5 DB) → fall through to
+       unicode61 path, no crash.
+    2. Trigram terms exist, sidecar present, MATCH returns 0 rows → return []
+       (do NOT degrade to LIKE).
+    3. Short CJK query (all runs < 3 chars) → LIKE path used.
+    4. project_filter respected on both trigram and short-CJK LIKE paths.
+    5. Long CJK query term cap: at most _CJK_TRIGRAM_LIMIT (64) terms emitted.
+    """
+
+    def test_trigram_terms_empty_for_short_cjk_runs(self) -> None:
+        """_cjk_trigram_terms returns [] when all CJK runs are 1-2 chars long."""
+        # "苏轼" is a 2-char run — no 3-char trigram can be formed.
+        assert _cjk_trigram_terms("苏轼") == []
+
+    def test_cjk_no_sidecar_falls_through_to_unicode61(self, tmp_path: Path) -> None:
+        """CJK query with trigram terms on a DB without the sidecar uses unicode61.
+
+        Simulates a pre-v5 database by dropping the sidecar table after the
+        store is created.  The result should equal what the unicode61 path
+        would return — here the document is ASCII-compatible, so it matches.
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        # Insert an ASCII doc that unicode61 can match.
+        store.insert_document("membox stores evidence in SQLite databases.")
+        # Drop the trigram sidecar to mimic a pre-v5 DB.
+        store._conn().execute("DROP TABLE IF EXISTS documents_fts_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ai_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ad_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_au_trigram;")
+
+        # A CJK query with trigram terms (>= 3-char run): sidecar absent → []
+        # from _cjk_fts_chunks, then fts_fallback_chunks falls through to
+        # unicode61.  The doc itself is non-CJK so unicode61 finds it.
+        chunks = store.fts_fallback_chunks("苏轼八字案例 databases")
+        # unicode61 path should still find "databases" in the doc.
+        assert any("SQLite" in c[1] for c in chunks)
+
+    def test_cjk_no_sidecar_pure_cjk_query_no_crash(self, tmp_path: Path) -> None:
+        """Pure CJK query on a sidecar-less DB returns [] without crashing.
+
+        With a sidecar-less DB and a pure-CJK query that produces trigram terms,
+        _cjk_fts_chunks returns [].  unicode61 also finds nothing because it
+        treats the whole run as a single token.  The expected result is [].
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。")
+        # Drop the sidecar.
+        store._conn().execute("DROP TABLE IF EXISTS documents_fts_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ai_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_ad_trigram;")
+        store._conn().execute("DROP TRIGGER IF EXISTS documents_au_trigram;")
+
+        # Must not crash, and must not return LIKE-based results.
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?")
+        # The result is empty: sidecar missing → [] from CJK path; unicode61
+        # cannot tokenise the run and also returns [].
+        assert chunks == []
+
+    def test_cjk_sidecar_present_no_match_returns_empty(self, tmp_path: Path) -> None:
+        """CJK MATCH with sidecar present but term not in corpus returns [], not LIKE results.
+
+        Ensures the code does NOT degrade to LIKE when the trigram MATCH finds
+        no rows.  A weakly-related doc with overlapping 1-2-char substrings
+        must NOT appear in the results.
+        """
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        # Insert a doc that shares characters with the query but not the trigrams.
+        store.insert_document("苏轼是一位诗人。")
+        # Query whose 3-char trigrams are absent from the corpus.
+        chunks = store.fts_fallback_chunks("黄庭坚写了什么诗歌?")
+        # If LIKE were used it might return the doc above (shares "诗" with the
+        # query via the anchor "诗歌").  With the fixed code, result must be [].
+        assert chunks == []
+
+    def test_cjk_project_filter_trigram_path(self, tmp_path: Path) -> None:
+        """project_filter is respected when the trigram sidecar is used."""
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。", project="china")
+        store.insert_document("苏轼八字案例的命格名是癸水七杀格。", project="other")
+
+        chunks = store.fts_fallback_chunks("苏轼八字案例的命格名是什么?", project_filter="china")
+        assert len(chunks) == 1
+        assert chunks[0][2] == "china"
+
+    def test_cjk_project_filter_like_path(self, tmp_path: Path) -> None:
+        """project_filter is respected on the short-CJK LIKE path."""
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        store.insert_document("苏轼案例已经上线。", project="china")
+        store.insert_document("苏轼案例已经上线。", project="other")
+
+        # "苏轼" is a 2-char run → no trigram terms → LIKE path.
+        chunks = store.fts_fallback_chunks("苏轼", project_filter="china")
+        assert len(chunks) == 1
+        assert chunks[0][2] == "china"
+
+    def test_cjk_trigram_term_cap(self) -> None:
+        """A very long CJK query emits at most _CJK_TRIGRAM_LIMIT (64) terms."""
+        from membox.core.store.retrieval import _CJK_TRIGRAM_LIMIT
+
+        # Build a run of 100 distinct CJK ideographs (U+4E00..U+4E63).
+        # A 100-char run yields 98 unique trigrams before dedup, so the cap
+        # at 64 is always reached.  Use chr() so the literal stays ASCII.
+        long_query = "".join(chr(c) for c in range(0x4E00, 0x4E00 + 100))
+        terms = _cjk_trigram_terms(long_query)
+        assert len(terms) == _CJK_TRIGRAM_LIMIT

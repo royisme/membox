@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 # BFS depth for seed entities.
 _SEED_DEPTH = 0
+# Intentionally covers only Han ideographs (U+3400-U+9FFF) for this slice;
+# Hiragana, Katakana, and Hangul are out of scope.
 _CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 _CJK_TRIGRAM_LIMIT = 64
 _CJK_ANCHOR_LIMIT = 96
@@ -569,41 +571,55 @@ class RetrievalOps:
         conn = self._cm.connection()  # type: ignore[attr-defined]
 
         trigram_terms = _cjk_trigram_terms(query)
-        if trigram_terms and _fts_table_exists(conn, "documents_fts_trigram"):
-            match_expr = _fts5_query_from_terms(trigram_terms)
-            project_clause = "" if project_filter is None else "AND d.project = ? "
-            params: list[object] = [match_expr]
-            if project_filter is not None:
-                params.append(project_filter)
-            params.append(limit * 8)
-            try:
-                rows = conn.execute(
-                    "SELECT d.id, d.content, d.project, d.source_path, d.section, "  # noqa: S608
-                    "       d.doc_date, d.version, bm25(documents_fts_trigram) "
-                    "FROM documents_fts_trigram "
-                    "JOIN documents d ON d.id = documents_fts_trigram.rowid "
-                    "WHERE documents_fts_trigram MATCH ? "
-                    f"{project_clause}"
-                    "ORDER BY bm25(documents_fts_trigram) "
-                    "LIMIT ?",
-                    params,
-                ).fetchall()
-            except Exception:
-                rows = []
 
-            if rows:
-                focus_query = _cjk_focus_query(query)
-                anchors = _cjk_anchor_terms(focus_query)
-                reranked = sorted(
-                    rows,
-                    key=lambda row: (
-                        -_cjk_content_score(str(row[1]), anchors),
-                        float(row[7]),
-                    ),
-                )
-                return _dedup_chunk_rows(reranked, limit=limit, query=focus_query)
+        # If there are no trigram terms (all CJK runs are shorter than 3 chars),
+        # fall back to the guarded LIKE path which handles 1-2-char runs.
+        if not trigram_terms:
+            return self._short_cjk_like_chunks(query, limit=limit, project_filter=project_filter)
 
-        return self._short_cjk_like_chunks(query, limit=limit, project_filter=project_filter)
+        # Trigram terms exist but the sidecar table is absent (pre-v5 DB).
+        # Return [] so the caller (fts_fallback_chunks) falls through to the
+        # existing unicode61 path, preserving the pre-v5 behaviour exactly.
+        if not _fts_table_exists(conn, "documents_fts_trigram"):
+            return []
+
+        match_expr = _fts5_query_from_terms(trigram_terms)
+        project_clause = "" if project_filter is None else "AND d.project = ? "
+        params: list[object] = [match_expr]
+        if project_filter is not None:
+            params.append(project_filter)
+        params.append(limit * 8)
+        try:
+            rows = conn.execute(
+                "SELECT d.id, d.content, d.project, d.source_path, d.section, "  # noqa: S608
+                "       d.doc_date, d.version, bm25(documents_fts_trigram) "
+                "FROM documents_fts_trigram "
+                "JOIN documents d ON d.id = documents_fts_trigram.rowid "
+                "WHERE documents_fts_trigram MATCH ? "
+                f"{project_clause}"
+                "ORDER BY bm25(documents_fts_trigram) "
+                "LIMIT ?",
+                params,
+            ).fetchall()
+        except Exception:
+            rows = []
+
+        # Sidecar present but no corpus match: return empty — do NOT degrade to
+        # LIKE.  A CJK query with no real match must return [] just as it would
+        # on main (unicode61 also returns nothing for an unmatched CJK query).
+        if not rows:
+            return []
+
+        focus_query = _cjk_focus_query(query)
+        anchors = _cjk_anchor_terms(focus_query)
+        reranked = sorted(
+            rows,
+            key=lambda row: (
+                -_cjk_content_score(str(row[1]), anchors),
+                float(row[7]),
+            ),
+        )
+        return _dedup_chunk_rows(reranked, limit=limit, query=focus_query)
 
     def _short_cjk_like_chunks(
         self,
