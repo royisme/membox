@@ -1,8 +1,153 @@
-"""membox schema — Pydantic data models for the knowledge graph."""
+"""membox schema — Pydantic data models for the knowledge graph and history trace."""
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
+
+
+class SourceKind(StrEnum):
+    """Origin of an imported history trace record.
+
+    ``source_kind`` is carried per record and prefixes all trace IDs so
+    sessions imported from different tools can never collide.  Values are
+    stored as plain text (no SQL CHECK constraint) so the enum can evolve
+    without a table rebuild.
+    """
+
+    CODEX_JSONL = "codex-jsonl"
+    CLAUDE_JSONL = "claude-jsonl"
+    MIMO_SQLITE = "mimo-sqlite"
+    MEMBOX_CAPTURE = "membox-capture"
+    MANUAL = "manual"
+
+
+class HistoryEventKind(StrEnum):
+    """Kind of a non-message history event.
+
+    ``TOOL_ERROR`` is not stored directly: failed tool results are stored as
+    ``TOOL_RESULT`` with ``is_error=1`` and ``tool_error`` is accepted as a
+    search-filter alias for that combination.
+    """
+
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    REASONING = "reasoning"
+    OTHER = "other"
+
+
+class HistorySessionRecord(BaseModel):
+    """A normalized history session as produced by an importer.
+
+    Attributes:
+        id: Stable text ID prefixed by ``source_kind``
+            (e.g. ``codex-jsonl:019e88ee-…``).
+        external_id: Upstream session ID (synthesized when absent upstream).
+        project: Project scope; CLI ``--project`` overrides importer inference.
+        title: Human-readable label (e.g. upstream cwd or first user line).
+        started_at: ISO-8601 start time, or None when unknown.
+        ended_at: ISO-8601 end time, or None when unknown.
+        source_kind: Origin format of the session.
+        source_ref: How to find the upstream source again (file path).
+    """
+
+    id: str
+    external_id: str
+    project: str = ""
+    title: str = ""
+    started_at: str | None = None
+    ended_at: str | None = None
+    source_kind: SourceKind
+    source_ref: str
+
+
+class HistoryMessageRecord(BaseModel):
+    """A normalized session message as produced by an importer.
+
+    ``text`` carries the full untruncated payload; the store layer applies
+    secret redaction and the ``history_text_cap_bytes`` preview cap before
+    anything is persisted or indexed.
+
+    Attributes:
+        id: Stable text ID (``{source_kind}:{session_external_id}:msg:{external_id}``).
+        session_id: Parent session's stable ID.
+        external_id: Upstream message ID, or a synthesized stable hash.
+        role: Speaker role (``user``, ``assistant``, ``developer``, …).
+        agent_id: Subagent identifier when applicable, else empty.
+        parent_id: Stable ID of the parent message (threads), or None.
+        seq: Display order within the session (may refresh on re-import).
+        text: Full message text (uncapped; capped only at the store boundary).
+        created_at: ISO-8601 timestamp, or None when the upstream lacks one.
+    """
+
+    id: str
+    session_id: str
+    external_id: str
+    role: str
+    agent_id: str = ""
+    parent_id: str | None = None
+    seq: int = 0
+    text: str = ""
+    created_at: str | None = None
+
+
+class HistoryEventRecord(BaseModel):
+    """A normalized non-message event (tool call/result, …) from an importer.
+
+    Event identity is deterministic and never derived from file position:
+    ``anchor`` is the upstream call ID when one exists, else
+    ``{message_external_id}#{ordinal}`` where ``ordinal`` is the event's index
+    within its parent message.  Both survive upstream file rewrites.
+
+    Attributes:
+        id: Stable text ID
+            (``{source_kind}:{session_external_id}:evt:{anchor}:{kind}``).
+        session_id: Parent session's stable ID.
+        message_id: Stable ID of the parent message, or None.
+        message_external_id: Upstream ID of the parent message (for locators).
+        anchor: Upstream call ID or ``{message_external_id}#{ordinal}``.
+        kind: Event kind (see :class:`HistoryEventKind`).
+        tool_name: Tool name for tool events, else None.
+        file_path: File touched by the event when known, else None.
+        ordinal: Event index within its parent message (ordering only).
+        body: Full event payload (uncapped; capped only at the store boundary).
+        is_error: True when the event represents a failed tool result.
+        created_at: ISO-8601 timestamp, or None when the upstream lacks one.
+    """
+
+    id: str
+    session_id: str
+    message_id: str | None = None
+    message_external_id: str = ""
+    anchor: str
+    kind: HistoryEventKind = HistoryEventKind.OTHER
+    tool_name: str | None = None
+    file_path: str | None = None
+    ordinal: int = 0
+    body: str = ""
+    is_error: bool = False
+    created_at: str | None = None
+
+
+class HistoryImportBatch(BaseModel):
+    """Everything one importer pass produced from a single source file.
+
+    Attributes:
+        session: The session record (one source file = one session).
+        messages: Normalized messages in file order.
+        events: Normalized events in file order.
+        next_offset_bytes: Byte offset after the last fully parsed line;
+            stored as incremental-import state so re-importing a grown log
+            resumes here.
+        next_seq: Next message ``seq`` value, fed back in on resume.
+    """
+
+    session: HistorySessionRecord
+    messages: list[HistoryMessageRecord] = Field(default_factory=list)
+    events: list[HistoryEventRecord] = Field(default_factory=list)
+    next_offset_bytes: int = 0
+    next_seq: int = 0
 
 
 class ExtractedEntity(BaseModel):
