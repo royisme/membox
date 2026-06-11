@@ -26,7 +26,13 @@ The default `chunk_share=0.4` passed the acceptance gate on the Gemini eval DB:
 |---|---:|---:|---:|---:|---:|
 | Baseline either/or fallback | 53.8% | 7/15 | 4/7 | 3/4 | 953 |
 | Step 0 only, BM25 query fix | 53.8% | 7/15 | 4/7 | 3/4 | 1033 |
-| Step 1 fusion, `chunk_share=0.4` | 84.6% | 12/15 | 6/7 | 4/4 | 1551 |
+| Step 1 fusion, `chunk_share=0.4`, k=5 | 84.6% | 12/15 | 6/7 | 4/4 | 1551 |
+| Step 1 fusion + `fts_fallback_k=10` (shipped defaults) | 88.5% | 13/15 | 6/7 | 4/4 | 1941 |
+
+The `chunk_share` sweep (0.25 / 0.4 / 0.6 at k=5) produced identical hit rates
+and identical misses across all three values, confirming 0.4 is robust: leftover
+flow between passes makes the partition insensitive on this corpus, so
+`chunk_share` acts as a floor guarantee rather than a sensitive tuning knob.
 
 Acceptance requirements:
 
@@ -117,17 +123,29 @@ comparison and rollback:
 to graph-only output; in fallback mode it preserves the old bare-footer behavior
 when no graph evidence exists.
 
-## Remaining Misses
+## Remaining Misses (per-question root cause, verified against the eval DB)
 
-The accepted run left four misses: q08, q11, q12, and q19. The common pattern is
-recall failure: the answer keywords are absent from both graph triples and the
-top five direct FTS chunks. q12 is a Chinese bazi-case detail question. These
-misses are not fusion failures; they point to extraction and recall-depth work.
+All four original misses had their answer keywords present in the corpus — none
+was a gold/corpus gap. Verified by replaying the exact FTS MATCH expressions and
+keyword queries against `/tmp/membox-eval-gemini3.db`:
+
+| Q | Root cause | Status |
+|---|---|---|
+| q11 | Answer doc ranked #6 in FTS; cut off by `fts_fallback_k=5` | **Fixed** by k=10 (now HIT) |
+| q19 | k=10 admits the first m5go candidates that were cut off at k=5, but the relevant keyword chunk still loses during budget admission | Remaining miss; budget pressure at the default 2000-token budget |
+| q08 | Graph contains the key `handleAnswerNow -> handleWhatToSay` triple, but the answer-bearing source chunk ranks below the shipped FTS candidate cap; `chunk_share` tuning did not recover it | Remaining miss; ranking + budget tradeoff under the default 2000-token budget |
+| q12 | FTS5 `unicode61` does not segment CJK well enough for whitespace-free Chinese questions, so the current MATCH expression returns 0 rows even though the corpus contains `癸水七杀格`. Graph side also lacks the needed CJK entities | Needs CJK-aware query construction plus a trigram/sidecar FTS index design |
 
 ## Follow-up Work
 
-- Finish the `chunk_share` sweep over 0.25 and 0.6 to confirm that 0.4 remains
-  the best default.
+- **CJK FTS design**: add CJK-aware query construction plus a trigram or sidecar
+  FTS index (`tokenize='trigram'`, SQLite >= 3.34) to fix q12-class recall. A
+  plain tokenizer swap is not sufficient: the current `_fts5_or_query` can still
+  turn a whitespace-free Chinese question into one long quoted expression, and
+  trigram matching has different behavior for short two-character terms. A
+  global rebuild may increase index size and change English BM25 ranking, so the
+  next branch should compare global trigram vs sidecar CJK index and rerun the
+  full eval.
 - Consider shared FTS query execution only after preserving equivalence with the
   current two-query implementation.
 - Move to M4 supersession semantics now that the Phase 7.5 retrieval gate is met.

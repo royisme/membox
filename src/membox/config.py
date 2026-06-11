@@ -102,10 +102,12 @@ class RetrievalConfig(BaseModel):
             ``find_or_create_entity``).  Default ``0.85``, which is appropriate
             for OpenAI embeddings.  Set to ``0.70`` when using ``embeddinggemma``
             via Ollama.
-        fts_fallback_k: Maximum number of document chunks returned by the
-            direct FTS5 fallback search when seed-entity resolution (or graph
-            recall) yields nothing.  ``0`` disables the fallback.  Default
-            ``5``.
+        fts_fallback_k: Maximum number of FTS5 chunk candidates fetched for
+            the chunk pool (merge mode) or the direct fallback search
+            (fallback mode).  This caps the candidate pool only — actual
+            output is still bounded by the token budget.  ``0`` disables the
+            FTS channel.  Default ``10`` (eval-calibrated: answer-bearing
+            chunks ranked 6-8 were cut off at the previous default of 5).
         fusion_mode: Retrieval fusion strategy.  ``"merge"`` (default) runs
             the budget-partitioned graph+FTS fusion (spec §3.6 Step 1):
             both the triple pool and the chunk pool are always fetched and
@@ -125,7 +127,7 @@ class RetrievalConfig(BaseModel):
     budget: int = 2000
     top_evidence_k: int = 3
     disambiguation_threshold: float = 0.85
-    fts_fallback_k: int = 5
+    fts_fallback_k: int = 10
     fusion_mode: str = "merge"
     chunk_share: float = 0.4
 

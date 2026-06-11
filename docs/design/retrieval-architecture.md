@@ -148,13 +148,14 @@ rollback. The default product behavior is `fusion_mode="merge"`.
 
 ## Acceptance Snapshot
 
-The first accepted Gemini run with `chunk_share=0.4` reached:
+The shipped Gemini defaults (`fusion_mode="merge"`, `chunk_share=0.4`,
+`fts_fallback_k=10`) reached:
 
-- Overall: 22/26, 84.6%.
-- Single-hop: 12/15, 80.0%.
+- Overall: 23/26, 88.5%.
+- Single-hop: 13/15, 86.7%.
 - Multi-hop: 6/7, 85.7%.
 - Temporal: 4/4, 100%.
-- Mean output: 1551 estimated tokens.
+- Mean output: 1941 estimated tokens.
 
 The acceptance threshold was overall >= 80%, temporal 100%, multi-hop at least
 4/7, and default 2000-token budget.

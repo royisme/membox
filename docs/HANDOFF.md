@@ -2,8 +2,8 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-11 (session 7 — graph + FTS fusion passed the quality gate)
-**Current phase**: Phase 7.5 in progress. M1-M3, M6, retrieval fallback, online eval, and graph+FTS fusion are implemented. **The retrieval acceptance gate is now met**: Gemini fusion reached 84.6% overall, temporal 100%, multi-hop 6/7, within the default 2000-token budget contract.
+**Last updated**: 2026-06-11 (session 7 — graph + FTS fusion finalized)
+**Current phase**: Phase 7.5 retrieval quality gate complete. M1-M3, M6, retrieval fallback, online eval, and graph+FTS fusion are implemented. **The shipped Gemini fusion default is 88.5% overall (23/26)**, temporal 100%, multi-hop 6/7, within the default 2000-token budget contract.
 
 ---
 
@@ -25,7 +25,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 - Materialization extracted into `MemoryAgent.ingest_content` so worker and sync paths share one pipeline.
 
 ### Session 5 (2026-06-10) — FTS fallback
-- **FTS fallback seeding implemented** (commits `a0f3c12`, `d88ac72`) — resolves open question #2. When seed resolution finds no entities OR `scored_query` returns no triples, `compact_query` falls back to direct FTS5 BM25 over `documents.content`. Design: OR-of-tokens MATCH (`_fts5_or_query`); version dedup by `(source_path, section)`; honest footer `(returned 0/0 triples, K/M FTS chunks, ~X/Y tokens…)`; `RetrievalConfig.fts_fallback_k` (default 5, `0` disables); `--project` applies.
+- **FTS fallback seeding implemented** (commits `a0f3c12`, `d88ac72`) — resolves open question #2. When seed resolution finds no entities OR `scored_query` returns no triples, `compact_query` falls back to direct FTS5 BM25 over `documents.content`. Design: OR-of-tokens MATCH (`_fts5_or_query`); version dedup by `(source_path, section)`; honest footer `(returned 0/0 triples, K/M FTS chunks, ~X/Y tokens…)`; `RetrievalConfig.fts_fallback_k` (initial default 5, later calibrated to 10 in session 7, `0` disables); `--project` applies.
 - New code: `RetrievalOps.fts_fallback_chunks` / `fts_fallback_output` (`retrieval.py`), `MemoryAgent._fts_fallback` (`agent.py`). 21 new tests; 372 total green.
 
 ### Session 6 (2026-06-10 → 2026-06-11) — Online eval + gap analysis
@@ -41,15 +41,16 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 ### Session 7 (2026-06-11) — Graph + FTS fusion
 - **Step 0 BM25 scorer fix implemented**: `_bm25_scores_for_relations` now uses OR-of-tokens FTS5 matching (`_fts5_or_query`) instead of phrase matching (`_fts5_escape`). This restored the lexical component of graph triple scoring but did not change hit rate by itself: 53.8% overall, single 7/15, multi 4/7, temporal 3/4, mean 1033 tokens.
 - **Step 1 budget-partitioned fusion implemented**: default `RetrievalConfig.fusion_mode="merge"` fetches both graph triples and direct FTS chunks, then renders them through a three-pass budget partition (`chunk_share=0.4`): triple pass, chunk pass, triple backfill. `fusion_mode="fallback"` preserves the old either/or behavior for A/B testing and rollback.
-- **Acceptance run passed** (`chunk_share=0.4`): 84.6% overall (22/26), single 12/15, multi 6/7, temporal 4/4, mean 1551 tokens. This clears the Phase 7.5 retrieval gates: overall >=80%, temporal 100%, multi-hop not below 4/7, default 2000-token budget. The footer remains budget-exempt, so one observed 2006-token output is expected and not a budget-contract violation.
-- Remaining misses are q08, q11, q12, and q19. The common pattern is recall failure: answer keywords are absent from both graph triples and the top five direct FTS chunks. q12 is a Chinese bazi-case detail question. These are extraction/recall-depth issues, not fusion failures.
+- **Acceptance run passed** (`chunk_share=0.4`, `fts_fallback_k=5`): 84.6% overall (22/26), single 12/15, multi 6/7, temporal 4/4, mean 1551 tokens. This cleared the Phase 7.5 retrieval gates: overall >=80%, temporal 100%, multi-hop not below 4/7, default 2000-token budget. The footer remains budget-exempt, so one observed 2006-token output is expected and not a budget-contract violation.
+- **Final shipped default**: `fts_fallback_k=10` recovered q11 with no regression: 88.5% overall (23/26), single 13/15, multi 6/7, temporal 4/4, mean 1941 tokens. The prior 22 hits stayed hits. `chunk_share` sweep over 0.25 / 0.4 / 0.6 at k=5 produced identical hit sets, so `chunk_share=0.4` remains the robust default.
+- Remaining misses are q08, q12, and q19. q08 has the key graph triple but its answer-bearing source chunk ranks below the shipped FTS candidate cap; q19 admits m5go candidates with k=10 but loses the relevant keyword chunk during budget admission; both are default-2000-token budget/ranking tradeoffs. q12 is a CJK FTS/query-construction gap: the corpus contains `癸水七杀格`, but the current unicode61 + whitespace-token query path returns 0 rows.
 
 ---
 
 ## Current state
 
-- **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline all merged.
-- **Current branch**: `feature/phase-7.5-eval-gemini` contains the online eval work plus Step 0 BM25 scorer fix and Step 1 graph+FTS budget fusion. Code is split into logical commits for review.
+- **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, and Step 1 graph+FTS budget fusion are merged.
+- **Current branch**: create a new branch from `main` for CJK/trigram FTS design before changing retrieval schema or query construction.
 - **Old phase 1-7 feature branches + `develop`** still exist but are historical; main is authoritative. Safe to delete after confirmation.
 - **Working eval DBs**: `/tmp/membox-eval-gemini3.db` (58 chunks, 459 entities, 340 relations — cleanest Gemini run; basis for the 53.8% result). `/tmp/membox-eval-m3.db` (Ollama baseline, 51 chunks).
 
@@ -66,9 +67,9 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Open questions / decisions needed
 
-1. **Chunk-share sweep**: `chunk_share=0.4` passed. Runs for `0.25` and `0.6` are useful to confirm the most stable default, but they are no longer blocking the retrieval gate.
+1. **CJK/trigram FTS design**: q12 needs CJK-aware query construction plus a trigram or sidecar FTS index. Do not treat this as a plain `documents_fts` tokenizer swap without evaluating query behavior, index size, and English BM25 ranking impact.
 2. **Ingest performance**: even with `reasoning_effort=low`, 58 chunks take about 35 min on Gemini because every entity/relation still triggers a single-text embed call (about 900 serial HTTPS round-trips). Three queued optimizations: process-internal embed cache, batched embed calls (`OpenAIEmbedClient.embed()` already takes `list[str]`), chunk-level concurrency. Expected 3-5x speedup.
-3. **Residual recall misses**: q08/q11/q12/q19 need extraction or recall-depth work. q12 is a Chinese bazi-case detail question.
+3. **Residual recall misses**: q08 and q19 are default-2000-token budget/ranking tradeoffs; q12 is the CJK FTS/query-construction gap.
 4. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
 5. Old branches + `develop` cleanup — delete after user confirms.
 6. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
@@ -77,18 +78,17 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. Finish and record the `chunk_share` sweep for 0.25 / 0.4 / 0.6; keep 0.4 unless another value improves hit rate without hurting multi-hop or token budget.
-2. Review and merge the current branch once code, spec, and visual docs are committed.
-3. Start ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency).
-4. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
-5. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
+1. Design the CJK/trigram FTS approach on a fresh branch: compare global trigram rebuild vs sidecar CJK index and specify query construction changes.
+2. Start ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency).
+3. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
+4. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
 
 ---
 
 ## Notes / scratchpad
 
-- Acceptance gates for retrieval are met by Step 1 fusion at `chunk_share=0.4`: 84.6% overall, temporal 100%, multi-hop 6/7, mean 1551 tokens.
-- Reference points: Ollama 11.5% / offline pure-FTS 80.8% / Gemini either-or 53.8% / Step 0 only 53.8% / Step 1 fusion 84.6%.
-- Mean output tokens: 275 (Ollama baseline) → 1278 (offline FTS) → 953 (Gemini either-or) → 1033 (Step 0) → 1551 (Step 1 fusion).
+- Acceptance gates for retrieval are met by Step 1 fusion at `chunk_share=0.4`; shipped defaults use `fts_fallback_k=10`: 88.5% overall, temporal 100%, multi-hop 6/7, mean 1941 tokens.
+- Reference points: Ollama 11.5% / offline pure-FTS 80.8% / Gemini either-or 53.8% / Step 0 only 53.8% / Step 1 fusion k=5 84.6% / shipped fusion k=10 88.5%.
+- Mean output tokens: 275 (Ollama baseline) → 1278 (offline FTS) → 953 (Gemini either-or) → 1033 (Step 0) → 1551 (Step 1 fusion k=5) → 1941 (shipped fusion k=10).
 - ResourceWarning re unclosed SQLite connections in CLI tests — cosmetic, future `close()` cleanup.
 - The "why did graph+FTS fall below pure-FTS" finding is resolved by fusion: graph hits no longer suppress FTS evidence.
