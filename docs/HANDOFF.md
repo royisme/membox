@@ -5,6 +5,16 @@
 **Last updated**: 2026-06-11 (session 8 — CJK trigram sidecar verified and merged)
 **Current phase**: Phase 7.5 retrieval quality gate complete. M1-M3, M6, retrieval fallback, online eval, graph+FTS fusion, and the CJK trigram sidecar are implemented and merged. **Verified retrieval baseline is 24/26 (92.3%)** — q12 (CJK) now HIT; remaining misses q08/q19 are known budget/ranking tradeoffs. Temporal 100%, multi-hop 6/7, default 2000-token budget contract.
 
+### Pending user decisions before next work item
+- `scripts/eval_memory.py` has an **unstaged working-tree edit** changing the default Gemini extraction model `gemini-3-flash-preview` → `gemini-3.1-flash-lite`. Origin unclear (made before session 8). Session 8 evals used it and ran clean (24/26, 1 transient 503). **Commit, revert, or pin differently?**
+- `docs/design/agent-memory-lifecycle.md` is an **untracked review draft** (Trace→Unit→Crystal next-stage design). Not yet reviewed; defer until M4/M5 progress so the design lands with context.
+- Stale `feature/*` branches and `develop` — safe to delete after user confirms (see "Next concrete steps").
+
+### New conventions worth remembering across sessions
+- **Merge into main uses `merge --no-ff` with a `merge: <theme>` message**, then a separate commit for handoff/design-doc syncs on the feature branch. See `git log main --merges` for examples. No PR/CODEOWNERS flow is required.
+- **When asking a subagent to "merge and run tests", do NOT chain them in one Bash call with `run_in_background: true`** — the output buffer hides pytest results and forces poll loops. Pattern: merge first (seconds), then a separate `pytest` call. Lesson learned in session 8.
+- **Long-running commands that print only at the end** (full eval, ingest) can be run in the background, but a "wait for terminal output" pattern via `until grep ...; do sleep N; done` blocks the shell and is rejected by the harness. Use `run_in_background: true` and let the harness notify on exit.
+
 ---
 
 ## What's been done
@@ -55,14 +65,17 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Current state
 
-- **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, Step 1 graph+FTS budget fusion, and the CJK trigram sidecar (migration v5, CJK query dispatch, CJK excerpts) are merged. Verified eval baseline 24/26.
-- `docs/design/agent-memory-lifecycle.md` (Trace→Unit→Crystal three-stage memory design) exists as an untracked review draft — next-stage design, not yet reviewed/committed.
+- **main**: Phases 1-7 + 7.5 M1-M3, M6, FTS fallback, online-eval pipeline, Step 0 BM25 scorer fix, Step 1 graph+FTS budget fusion, and the CJK trigram sidecar (migration v5, CJK query dispatch, CJK excerpts) are merged. Verified eval baseline 24/26. HEAD = `77c4090`; origin and local are in sync.
+- **Working-tree state on main**:
+  - `scripts/eval_memory.py` modified (default extraction model) — uncommitted, awaiting user decision.
+  - `docs/design/agent-memory-lifecycle.md` untracked — awaiting review.
+- `feature/cjk-trigram-fts-design` is now merged and can be deleted after user confirms (no longer the working branch).
 - **Old phase 1-7 feature branches + `develop`** still exist but are historical; main is authoritative. Safe to delete after confirmation.
 - **Working eval DBs**: `/tmp/membox-eval-gemini3.db` (58 chunks, 459 entities, 340 relations — cleanest Gemini run; basis for the 53.8% result). `/tmp/membox-eval-m3.db` (Ollama baseline, 51 chunks).
 
 ### Locked architectural decisions
 - **Single global DB** (`~/.membox/membox.db` default; `--db` > `MEMBOX_DB` env > default). No per-project DBs, no registry, no ATTACH federation. `documents.project` column scopes; entities/relations are global for cross-project identity.
-- **Provider defaults** (last calibrated 2026-06-10): extraction ollama `gemma-4-E2B:latest`, embedding ollama `qwen3-embedding:latest` 1024-dim, disambig threshold 0.72 (same-entity ≥0.763, diff-entity ≤0.680 measured). **Online alternative via `--provider gemini`**: extraction `gemini-3-flash-preview` with `reasoning_effort="low"`, embedding `gemini-embedding-001` 1536-dim, disambig threshold 0.85. All overridable via `MEMBOX_EVAL_*` env vars.
+- **Provider defaults** (last calibrated 2026-06-10): extraction ollama `gemma-4-E2B:latest`, embedding ollama `qwen3-embedding:latest` 1024-dim, disambig threshold 0.72 (same-entity ≥0.763, diff-entity ≤0.680 measured). **Online alternative via `--provider gemini`**: extraction `gemini-3-flash-preview` with `reasoning_effort="low"` (working-tree edit suggests switching default to `gemini-3.1-flash-lite` — uncommitted, see "Pending user decisions"), embedding `gemini-embedding-001` 1536-dim, disambig threshold 0.85. All overridable via `MEMBOX_EVAL_*` env vars.
 - **Read path has no LLM**: pruning is ranking + budgeting only (spec §3.7). Compact budgeted output is the default; silent truncation/staleness forbidden (coverage footer).
 - **Write path is async** (M6, implemented): enqueue in ms, transient worker materializes the graph; eventual consistency surfaced in query footer. No resident daemon. `--sync` exists for scripts/eval that need determinism.
 - **Default retrieval is graph+FTS fusion**: `fusion_mode="merge"` is the default; `fusion_mode="fallback"` preserves the old either/or path for A/B and rollback.
@@ -85,10 +98,11 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch.
-2. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
-3. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
-4. Review `docs/design/agent-memory-lifecycle.md` (Trace→Unit→Crystal) and decide whether/where it fits after M4/M5.
+1. **Decide on the two pending items first** (extraction-model default; lifecycle design draft). Then:
+2. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch. **Do not chain merge+test in one Bash call** (lesson from session 8).
+3. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
+4. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end with the tuned retrieval.
+5. Cleanup: delete the stale `feature/*` (phase 1-7, phase 7.5 sub-branches) and `develop` branches after the user confirms.
 
 ---
 
