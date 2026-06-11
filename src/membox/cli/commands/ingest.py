@@ -98,7 +98,7 @@ def ingest_file(
     if sync:
         results = agent.ingest_file(file, metadata=metadata)
         chunk_count = len(results)
-        console.print(f"[green]Ingested {file} — {chunk_count} chunk(s).[/green]")
+        console.print(f"[green]Ingested {file} — {chunk_count} chunk(s).[/green]", soft_wrap=False)
         return
     queue_id = agent.enqueue_file(file, metadata=metadata)
     _finish_enqueue(db, queue_id, agent.store.pending_ingest_count(), no_spawn)
