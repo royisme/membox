@@ -132,6 +132,21 @@ class RetrievalConfig(BaseModel):
     chunk_share: float = 0.4
 
 
+class HistoryConfig(BaseModel):
+    """Settings for the history trace layer (Phase B; no API key required).
+
+    Attributes:
+        text_cap_bytes: Maximum bytes of message ``text`` / event ``body``
+            stored inline as a preview.  Larger payloads are truncated (the
+            ``*_truncated`` flag is set) and remain reachable through
+            ``membox history fetch``, which re-reads the upstream log via the
+            row's ``payload_locator``.  Default ``16384`` per the lifecycle
+            design (owner decision 2026-06-11: no Membox-managed blob storage).
+    """
+
+    text_cap_bytes: int = 16384
+
+
 class MemboxConfig(BaseModel):
     """Top-level membox runtime configuration.
 
@@ -139,8 +154,10 @@ class MemboxConfig(BaseModel):
         extraction: Provider settings for LLM triple extraction.
         embedding: Provider settings for text embedding.
         retrieval: Hybrid retrieval scoring and token-budget settings.
+        history: History trace import/preview settings.
     """
 
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    history: HistoryConfig = Field(default_factory=HistoryConfig)

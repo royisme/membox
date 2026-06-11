@@ -45,6 +45,18 @@ Migration 0005 adds ``documents_fts_trigram``, an additive CJK sidecar FTS5
 index over ``documents(content)``.  The existing ``documents_fts`` table remains
 the default unicode61 index for English/mixed queries; the sidecar is used only
 by CJK-aware retrieval paths.
+
+Migration 0006 (Lifecycle Phase B — History Trace Index) creates the trace
+layer: ``history_sessions``, ``history_messages``, ``history_events``,
+``history_import_state`` (per-source incremental import state), plus four FTS5
+sidecars mirroring the documents pattern — unicode61 and trigram indexes for
+both message ``text`` and event ``body``.  Messages and events use stable TEXT
+ids (prefixed by ``source_kind``) as their public identity; an internal ``rid
+INTEGER PRIMARY KEY`` alias exists only because external-content FTS5 requires
+a rowid that stays stable across ``VACUUM`` (implicit rowids of text-PK tables
+do not).  Stored ``text``/``body`` are secret-redacted, size-capped previews
+(see ``core/triage.py`` and ``HistoryConfig.text_cap_bytes``); full payloads
+stay in the upstream log, reachable via ``payload_locator``.
 """
 
 from __future__ import annotations
@@ -297,12 +309,186 @@ def _migrate_0005(conn: sqlite3.Connection) -> None:
     )
 
 
+def _create_history_fts(
+    conn: sqlite3.Connection,
+    fts_name: str,
+    content_table: str,
+    content_column: str,
+    trigger_prefix: str,
+    *,
+    trigram: bool,
+) -> None:
+    """Create one external-content FTS5 sidecar with its three sync triggers.
+
+    Mirrors the ``documents_fts`` / ``documents_fts_trigram`` pattern from
+    migrations 0003/0005 for the history tables.  ``content_rowid`` is the
+    explicit ``rid`` column.  No backfill is issued: migration 0006 creates
+    the content tables in the same transaction, so they are empty.
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+        fts_name: Name of the FTS5 virtual table to create.
+        content_table: External-content source table.
+        content_column: Indexed text column on the source table.
+        trigger_prefix: Unique prefix for the three trigger names.
+        trigram: Use the trigram tokenizer with ``detail=none`` (CJK sidecar)
+            instead of the default unicode61 tokenizer.
+    """
+    tokenize = ", tokenize='trigram', detail=none" if trigram else ""
+    conn.execute(
+        f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS {fts_name}
+        USING fts5(
+            {content_column},
+            content='{content_table}',
+            content_rowid='rid'{tokenize}
+        );
+        """
+    )
+    # All interpolated names are module-internal constants, not user input.
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_ai
+        AFTER INSERT ON {content_table} BEGIN
+            INSERT INTO {fts_name}(rowid, {content_column})
+                VALUES (new.rid, new.{content_column});
+        END;
+        """  # noqa: S608
+    )
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_au
+        AFTER UPDATE OF {content_column} ON {content_table} BEGIN
+            INSERT INTO {fts_name}({fts_name}, rowid, {content_column})
+                VALUES ('delete', old.rid, old.{content_column});
+            INSERT INTO {fts_name}(rowid, {content_column})
+                VALUES (new.rid, new.{content_column});
+        END;
+        """  # noqa: S608
+    )
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_ad
+        AFTER DELETE ON {content_table} BEGIN
+            INSERT INTO {fts_name}({fts_name}, rowid, {content_column})
+                VALUES ('delete', old.rid, old.{content_column});
+        END;
+        """  # noqa: S608
+    )
+
+
+def _migrate_0006(conn: sqlite3.Connection) -> None:
+    """Apply the Lifecycle Phase B history-trace schema.
+
+    Creates the trace tables (sessions, messages, events), the per-source
+    incremental import-state table, query indexes, and the four FTS5 sidecars
+    (unicode61 + trigram over message text and event body).
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history_sessions (
+            id              TEXT PRIMARY KEY,
+            external_id     TEXT NOT NULL DEFAULT '',
+            project         TEXT NOT NULL DEFAULT '',
+            title           TEXT NOT NULL DEFAULT '',
+            started_at      TEXT,
+            ended_at        TEXT,
+            source_kind     TEXT NOT NULL,
+            source_ref      TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history_messages (
+            rid             INTEGER PRIMARY KEY,
+            id              TEXT NOT NULL UNIQUE,
+            session_id      TEXT NOT NULL REFERENCES history_sessions(id) ON DELETE CASCADE,
+            project         TEXT NOT NULL DEFAULT '',
+            external_id     TEXT NOT NULL,
+            role            TEXT NOT NULL,
+            agent_id        TEXT NOT NULL DEFAULT '',
+            parent_id       TEXT,
+            seq             INTEGER NOT NULL DEFAULT 0,
+            text            TEXT NOT NULL DEFAULT '',
+            text_truncated  INTEGER NOT NULL DEFAULT 0,
+            payload_locator TEXT,
+            created_at      TEXT,
+            UNIQUE (session_id, external_id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history_events (
+            rid             INTEGER PRIMARY KEY,
+            id              TEXT NOT NULL UNIQUE,
+            session_id      TEXT NOT NULL REFERENCES history_sessions(id) ON DELETE CASCADE,
+            project         TEXT NOT NULL DEFAULT '',
+            message_id      TEXT REFERENCES history_messages(id) ON DELETE CASCADE,
+            kind            TEXT NOT NULL,
+            tool_name       TEXT,
+            file_path       TEXT,
+            ordinal         INTEGER NOT NULL DEFAULT 0,
+            body            TEXT NOT NULL DEFAULT '',
+            body_truncated  INTEGER NOT NULL DEFAULT 0,
+            payload_locator TEXT,
+            is_error        INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history_import_state (
+            source_ref      TEXT PRIMARY KEY,
+            source_kind     TEXT NOT NULL,
+            project         TEXT NOT NULL DEFAULT '',
+            session_id      TEXT,
+            mtime           REAL,
+            size_bytes      INTEGER NOT NULL DEFAULT 0,
+            offset_bytes    INTEGER NOT NULL DEFAULT 0,
+            next_seq        INTEGER NOT NULL DEFAULT 0,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS idx_hmsg_session ON history_messages(session_id, seq);",
+        "CREATE INDEX IF NOT EXISTS idx_hmsg_project ON history_messages(project, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_session ON history_events(session_id, ordinal);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_project ON history_events(project, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_kind ON history_events(project, kind, is_error);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_file ON history_events(file_path);",
+        "CREATE INDEX IF NOT EXISTS idx_hevt_message ON history_events(message_id);",
+    ):
+        conn.execute(ddl)
+
+    _create_history_fts(
+        conn, "history_messages_fts", "history_messages", "text", "hmsg_fts", trigram=False
+    )
+    _create_history_fts(
+        conn, "history_messages_fts_trigram", "history_messages", "text", "hmsg_tri", trigram=True
+    )
+    _create_history_fts(
+        conn, "history_events_fts", "history_events", "body", "hevt_fts", trigram=False
+    )
+    _create_history_fts(
+        conn, "history_events_fts_trigram", "history_events", "body", "hevt_tri", trigram=True
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
     (3, _migrate_0003),
     (4, _DDL_0004),
     (5, _migrate_0005),
+    (6, _migrate_0006),
 ]
 
 

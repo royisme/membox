@@ -75,6 +75,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `src/membox/cli/`
       - `src/membox/cli/commands/`
         - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
+        - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace import and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
         - `src/membox/cli/commands/query.py` — `membox query` command.
@@ -89,6 +90,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/connection.py` — SQLite connection management: per-thread connections, PRAGMAs, transactions, locking.
         - `src/membox/core/store/documents.py` — Document persistence for evidence lineage.
         - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
+        - `src/membox/core/store/history.py` — History trace storage operations (lifecycle Phase B).
         - `src/membox/core/store/meta_guard.py` — Embedding-model guard for the membox meta table.
         - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
         - `src/membox/core/store/queue.py` — Asynchronous ingestion queue operations (spec §3.9, M6).
@@ -97,17 +99,25 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
+      - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
+      - `src/membox/core/triage.py` — membox triage — pure domain logic for the memory lifecycle gates.
       - `src/membox/core/worker.py` — Ingestion queue worker — drain loop, lease management, crash recovery (M6).
     - `src/membox/model/`
       - `src/membox/model/__init__.py` — Data model layer: Pydantic models and public data shapes.
-      - `src/membox/model/schema.py` — membox schema — Pydantic data models for the knowledge graph.
+      - `src/membox/model/schema.py` — membox schema — Pydantic data models for the knowledge graph and history trace.
     - `src/membox/providers/`
       - `src/membox/providers/__init__.py` — Provider adapter layer: protocol-level LLM clients (auth, request shape, error normalization).
       - `src/membox/providers/base.py` — Low-level provider client Protocols: ChatClient and EmbedClient.
       - `src/membox/providers/openai_compat.py` — OpenAI-compatible protocol adapter.
     - `src/membox/services/`
+      - `src/membox/services/importers/`
+        - `src/membox/services/importers/__init__.py` — History log importers — one module per upstream format, parsing only.
+        - `src/membox/services/importers/base.py` — HistoryImporter protocol — the contract every log-format adapter satisfies.
+        - `src/membox/services/importers/codex_jsonl.py` — Importer for Codex CLI rollout logs (``codex-jsonl``).
+        - `src/membox/services/importers/common.py` — Shared helpers for history importers: JSONL iteration and stable IDs.
+        - `src/membox/services/importers/membox_jsonl.py` — Importer for ``membox-history-jsonl`` — the normalized fixture format.
       - `src/membox/services/prompts/`
         - `src/membox/services/prompts/__init__.py` — Prompt templates for the membox service layer.
         - `src/membox/services/prompts/extraction.py` — Prompt templates for LLM knowledge extraction.
@@ -129,6 +139,9 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
   - `tests/test_fts_fallback.py` — FTS fallback: direct chunk search when seed resolution or graph recall is empty.
   - `tests/test_fusion.py` — Fusion: three-pass knapsack, allowance boundaries, cross-pool dedup, edge cases.
+  - `tests/test_history_cli.py` — Tests for the ``membox history`` CLI command group.
+  - `tests/test_history_importers.py` — Tests for the Phase B history importer utilities and format parsers.
+  - `tests/test_history_store.py` — Tests for the Phase B History Trace Index — KnowledgeStore-level operations.
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
