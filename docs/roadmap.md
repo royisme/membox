@@ -241,15 +241,15 @@ Worker is spawned as a detached subprocess (`start_new_session=True`); its stdou
 
 #### Acceptance criteria (M6)
 
-- [ ] Schema migration v4: `ingest_queue` table created, `worker_lease` key in `meta`
-- [ ] `membox ingest` / `ingest-file` returns in <100 ms for a 5 KB markdown file (measured at the API layer, excluding interpreter startup; `DummyExtractor` wired)
-- [ ] `--sync` flag: enqueue + drain complete inline before the call returns; `eval_memory.py` uses this path
-- [ ] `--no-spawn` flag: enqueue without spawning worker (queue id returned; worker started manually via `membox process`)
-- [ ] `membox process` drains the queue then exits (asserted in a test — no daemon)
-- [ ] `membox queue` prints per-status counts and recent failure details
-- [ ] `membox query` coverage footer includes a pending-ingests note when the queue is non-empty
-- [ ] Crash recovery: a killed worker's `processing` rows return to `pending`; a new worker completes them
-- [ ] `uv run pytest` + ruff + mypy green; coverage ≥ 80%
+- [x] Schema migration v4: `ingest_queue` table created, `worker_lease` key in `meta`
+- [x] `membox ingest` / `ingest-file` returns in <100 ms for a 5 KB markdown file (measured at the API layer, excluding interpreter startup; `DummyExtractor` wired)
+- [x] `--sync` flag: enqueue + drain complete inline before the call returns; `eval_memory.py` uses this path
+- [x] `--no-spawn` flag: enqueue without spawning worker (queue id returned; worker started manually via `membox process`)
+- [x] `membox process` drains the queue then exits (asserted in a test — no daemon)
+- [x] `membox queue` prints per-status counts and recent failure details
+- [x] `membox query` coverage footer includes a pending-ingests note when the queue is non-empty
+- [x] Crash recovery: a killed worker's `processing` rows return to `pending`; a new worker completes them
+- [x] `uv run pytest` + ruff + mypy green; coverage ≥ 80%
 
 **Validation**:
 

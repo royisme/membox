@@ -17,6 +17,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `.crew/state/`
     - `.crew/state/metrics/`
       - `.crew/state/metrics/2026-06-10.jsonl`
+      - `.crew/state/metrics/2026-06-11.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
@@ -72,8 +73,10 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
         - `src/membox/cli/commands/query.py` — `membox query` command.
+        - `src/membox/cli/commands/queue.py` — `membox process` and `membox queue` commands (M6 async ingestion).
         - `src/membox/cli/commands/version.py` — `membox version` command.
       - `src/membox/cli/__init__.py` — membox CLI — Typer app assembly.
+      - `src/membox/cli/__main__.py` — Allow ``python -m membox.cli`` — used by the M6 worker spawn path.
       - `src/membox/cli/_common.py` — Shared helpers for membox CLI commands: console, agent factory, notices.
     - `src/membox/core/`
       - `src/membox/core/store/`
@@ -83,6 +86,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
         - `src/membox/core/store/meta_guard.py` — Embedding-model guard for the membox meta table.
         - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
+        - `src/membox/core/store/queue.py` — Asynchronous ingestion queue operations (spec §3.9, M6).
         - `src/membox/core/store/relations.py` — Relation persistence: relation CRUD and evidence links.
         - `src/membox/core/store/retrieval.py` — BFS multi-hop graph retrieval with hybrid scoring, token-budget truncation, and compact output.
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
@@ -90,6 +94,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
+      - `src/membox/core/worker.py` — Ingestion queue worker — drain loop, lease management, crash recovery (M6).
     - `src/membox/model/`
       - `src/membox/model/__init__.py` — Data model layer: Pydantic models and public data shapes.
       - `src/membox/model/schema.py` — membox schema — Pydantic data models for the knowledge graph.
@@ -120,6 +125,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
+  - `tests/test_queue.py` — Phase 7.5 M6 asynchronous-ingestion-queue tests.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
   - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.

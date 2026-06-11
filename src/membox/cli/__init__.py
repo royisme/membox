@@ -12,6 +12,7 @@ import typer
 from membox.cli.commands.ingest import ingest, ingest_file
 from membox.cli.commands.listing import list_entities, list_relations
 from membox.cli.commands.query import query
+from membox.cli.commands.queue import process, queue_status
 from membox.cli.commands.version import version
 
 app = typer.Typer(
@@ -24,6 +25,8 @@ app.command()(version)
 app.command()(ingest)
 app.command("ingest-file")(ingest_file)
 app.command()(query)
+app.command()(process)
+app.command("queue")(queue_status)
 app.command("list-entities")(list_entities)
 app.command("list-relations")(list_relations)
 

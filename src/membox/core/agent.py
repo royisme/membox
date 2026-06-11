@@ -123,6 +123,80 @@ class MemoryAgent:
             rel_count += 1
         return {"doc_id": doc_id, "entities": len(graph.entities), "relations": rel_count}
 
+    def ingest_content(
+        self,
+        content: str,
+        *,
+        source: str = "",
+        project: str | None = None,
+        source_path: str | None = None,
+        doc_date: str | None = None,
+        markdown: bool | None = None,
+        chunk_max_tokens: int = _DEFAULT_MAX_TOKENS,
+    ) -> list[dict[str, int | str]]:
+        """Run the full chunk → extract → embed → store pipeline on raw text.
+
+        This is the synchronous materialization primitive shared by
+        :meth:`ingest_file` (direct path) and the M6 queue worker (deferred
+        path).  Markdown content is chunked on ``##`` section boundaries;
+        per-chunk extraction failures are isolated into the result list.
+
+        Args:
+            content: Raw document text.
+            source: Legacy source identifier stored on each document row.
+            project: Repository / project name for scoping.
+            source_path: Canonical file path; drives re-ingest versioning.
+            doc_date: ISO-8601 date string of the document snapshot.
+            markdown: Force markdown chunking on/off.  ``None`` infers from
+                the ``source_path`` suffix (``.md`` / ``.markdown``).
+            chunk_max_tokens: Maximum estimated tokens per chunk before
+                paragraph-level sub-chunking is applied.
+
+        Returns:
+            List of per-chunk result dicts.  Successful chunks have keys
+            ``doc_id``, ``entities``, and ``relations``.  Failed chunks have
+            keys ``section`` and ``error``.
+        """
+        if markdown is None:
+            suffix = Path(source_path).suffix.lower() if source_path else ""
+            markdown = suffix in {".md", ".markdown"}
+
+        if markdown:
+            raw_chunks = chunk_markdown(content, max_tokens=chunk_max_tokens)
+        else:
+            raw_chunks = [(None, content)]
+
+        results: list[dict[str, int | str]] = []
+        for section_title, chunk_content in raw_chunks:
+            if not chunk_content.strip():
+                continue
+            chunk = DocumentChunk(section=section_title, content=chunk_content)
+            try:
+                graph = self._extractor.extract(chunk.content)
+                _ok = self.ingest_extracted(
+                    chunk.content,
+                    graph,
+                    source=source,
+                    project=project,
+                    source_path=source_path,
+                    section=chunk.section,
+                    doc_date=doc_date,
+                )
+                result: dict[str, int | str] = dict(_ok)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # broad catch is intentional at orchestration layer
+                results.append(
+                    {
+                        "section": section_title or "",
+                        "error": str(exc),
+                    }
+                )
+                continue
+            results.append(result)
+
+        return results
+
     def ingest_file(
         self,
         file_path: Path,
@@ -187,43 +261,81 @@ class MemoryAgent:
         effective_doc_date = metadata.doc_date or _file_mtime_date(resolved)
 
         content = resolved.read_text(encoding="utf-8")
-        suffix = resolved.suffix.lower()
 
-        if suffix in {".md", ".markdown"}:
-            raw_chunks = chunk_markdown(content, max_tokens=chunk_max_tokens)
-        else:
-            raw_chunks = [(None, content)]
+        return self.ingest_content(
+            content,
+            source=effective_source_path,
+            project=effective_project,
+            source_path=effective_source_path,
+            doc_date=effective_doc_date,
+            markdown=resolved.suffix.lower() in {".md", ".markdown"},
+            chunk_max_tokens=chunk_max_tokens,
+        )
 
-        results: list[dict[str, int | str]] = []
-        for section_title, chunk_content in raw_chunks:
-            if not chunk_content.strip():
-                continue
-            chunk = DocumentChunk(section=section_title, content=chunk_content)
-            try:
-                graph = self._extractor.extract(chunk.content)
-                _ok = self.ingest_extracted(
-                    chunk.content,
-                    graph,
-                    source=effective_source_path,
-                    project=effective_project,
-                    source_path=effective_source_path,
-                    section=chunk.section,
-                    doc_date=effective_doc_date,
-                )
-                result: dict[str, int | str] = dict(_ok)
-            except KeyboardInterrupt:
-                raise
-            except Exception as exc:  # broad catch is intentional at orchestration layer
-                results.append(
-                    {
-                        "section": section_title or "",
-                        "error": str(exc),
-                    }
-                )
-                continue
-            results.append(result)
+    def enqueue(
+        self,
+        content: str,
+        *,
+        project: str | None = None,
+        source_path: str | None = None,
+        doc_date: str | None = None,
+    ) -> int:
+        """Accept a document for deferred ingestion (spec §3.9 fast path).
 
-        return results
+        Performs a single SQLite INSERT — no chunking, no LLM calls — and
+        returns immediately.  Materialization happens when a worker drains the
+        queue (``membox process`` or the auto-spawned worker subprocess).
+
+        Args:
+            content: Raw document text.
+            project: Repository / project name captured at enqueue time.
+            source_path: Canonical file path captured at enqueue time.
+            doc_date: ISO-8601 date string captured at enqueue time.
+
+        Returns:
+            Queue row id.
+        """
+        return self.store.enqueue_ingest(
+            content,
+            project=project,
+            source_path=source_path,
+            doc_date=doc_date,
+        )
+
+    def enqueue_file(
+        self,
+        file_path: Path,
+        metadata: IngestMetadata | None = None,
+    ) -> int:
+        """Read a file and enqueue its content for deferred ingestion.
+
+        Metadata defaults mirror :meth:`ingest_file` (project inferred from
+        the nearest git root, doc_date from mtime) so the worker materializes
+        identical document rows to a synchronous ingest.
+
+        Args:
+            file_path: Path to the file to enqueue.  Must exist.
+            metadata: Optional metadata overrides (project, source_path,
+                doc_date).
+
+        Returns:
+            Queue row id.
+
+        Raises:
+            FileNotFoundError: If ``file_path`` does not exist.
+        """
+        resolved = file_path.resolve()
+        if not resolved.exists():
+            msg = f"File not found: {file_path}"
+            raise FileNotFoundError(msg)
+        if metadata is None:
+            metadata = IngestMetadata()
+        return self.enqueue(
+            resolved.read_text(encoding="utf-8"),
+            project=metadata.project or _infer_project(resolved),
+            source_path=metadata.source_path or str(resolved),
+            doc_date=metadata.doc_date or _file_mtime_date(resolved),
+        )
 
     def query(
         self,
@@ -306,7 +418,7 @@ class MemoryAgent:
                 seed_ids.append(eid)
 
         if not seed_ids:
-            return "(returned 0/0 triples, ~0/0 tokens)"
+            return self._append_pending_note("(returned 0/0 triples, ~0/0 tokens)")
 
         query_emb: list[float] | None = None
         if self._embedder is not None:
@@ -321,11 +433,30 @@ class MemoryAgent:
             project_filter=project_filter,
         )
 
-        return self.store.compact_output(
+        output = self.store.compact_output(
             scored=scored,
             budget=effective_budget,
             top_evidence_k=ret_cfg.top_evidence_k,
         )
+        return self._append_pending_note(output)
+
+    def _append_pending_note(self, output: str) -> str:
+        """Append a pending-ingests note to query output when the queue is non-empty.
+
+        Eventual consistency must be observable (spec §3.9): when queue rows
+        are still pending or processing, the reader is told results may be
+        incomplete instead of silently serving a stale graph.
+
+        Args:
+            output: Compact query output ending with the coverage footer.
+
+        Returns:
+            Output, with a staleness note appended when applicable.
+        """
+        pending = self.store.pending_ingest_count()
+        if pending == 0:
+            return output
+        return f"{output}\n({pending} ingest(s) pending — results may be incomplete)"
 
     def retrieve(self, seed_names: list[str], max_hops: int = 2) -> HopResult:
         """Resolve seed names to entity IDs and BFS-expand the graph.
