@@ -77,6 +77,8 @@ When graph-only traversal is insufficient (e.g., long natural-language sentences
 
 Results from both signals are merged before being assembled into the context prompt. The `--project` filter scopes retrieval to a single project; omitting it queries the global database.
 
+**FTS fallback seeding**: when seed-entity resolution finds no graph entities, or BFS yields no candidate relations, retrieval falls back to a direct FTS5 BM25 search over `documents.content` instead of returning an empty result. The question is tokenised into an OR-of-tokens MATCH expression (a phrase match almost never fires for a full natural-language question); the top `retrieval.fts_fallback_k` chunks (default 5, `0` disables) are deduplicated by `(source_path, section)` keeping the latest version, rendered with provenance tags under the same token budget, and reported honestly in the coverage footer as `K/M FTS chunks`. The fallback never runs when graph retrieval produced at least one scored triple.
+
 ### 3.7 Context-Budgeted Retrieval (scoring, truncation, compaction)
 
 **Design principle**: the SQLite store holds the full graph and raw evidence; `query` returns the most relevant slice within a caller-declared token budget, not everything reachable. No LLM is involved in the read path — pruning is pure ranking plus budgeting.

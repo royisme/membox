@@ -2,8 +2,8 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-10 (session 4 — M6 async ingestion queue implemented)
-**Current phase**: Phase 7.5 in progress (M1-M3 + M6 done; M4/M5 not started). Phase 8 (AST) deliberately deferred until after 7.5.
+**Last updated**: 2026-06-10 (session 5 — FTS fallback seeding implemented)
+**Current phase**: Phase 7.5 in progress (M1-M3 + M6 + retrieval fallback done; M4/M5 not started). Phase 8 (AST) deliberately deferred until after 7.5.
 
 ---
 
@@ -26,6 +26,15 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 - Implementation judgment calls beyond the spec text: materialization extracted into `MemoryAgent.ingest_content` so worker and sync paths share one pipeline (identical document rows either way); CLI ingest behaviorally changed — old tests asserting inline ingest now pass `--sync`; spawned worker reuses `make_agent` backend detection, so a worker spawned without an API key materializes documents but extracts nothing (same as sync `--no-llm` behavior, observable in `<db>.worker.log`).
 - Note: `scripts/eval_memory.py` already called the synchronous API (`agent.ingest_file`) directly, which is unchanged — determinism preserved without modification.
 
+### Session 5 (2026-06-10)
+- **FTS fallback seeding implemented** (branch `feature/phase-7.5-fts-fallback`) — resolves open question #2. When seed resolution finds no entities OR `scored_query` returns no triples, `compact_query` falls back to direct FTS5 BM25 over `documents.content` (spec §3.6 updated). Design decisions:
+  - **OR-of-tokens MATCH** (`_fts5_or_query`): a phrase match never fires for full natural-language questions; tokens are individually quoted and OR-joined, BM25 ranks multi-token matches higher. Strips FTS5 specials + CJK punctuation.
+  - **Version dedup**: chunks deduplicated by `(source_path, section)` keeping highest `version` — proto-supersession until M4 lands.
+  - **Honest footer preserved**: fallback output ends `(returned 0/0 triples, K/M FTS chunks, ~X/Y tokens…)`; same token-budget knapsack (tag + content cost per chunk). Bare `0/0` footer unchanged when fallback disabled/no match (existing tests untouched).
+  - **Config**: `RetrievalConfig.fts_fallback_k` (default 5, `0` disables). `--project` filter applies inside the FTS query.
+  - New code: `RetrievalOps.fts_fallback_chunks` / `fts_fallback_output` (`retrieval.py`), `MemoryAgent._fts_fallback` (`agent.py`). 21 new tests in `tests/test_fts_fallback.py`; 372 total green, mypy strict + ruff clean.
+- **Offline eval after fallback: 80.8% (21/26)**, was 0.0% offline pre-change (DummyExtractor resolves no seeds, so offline mode exercises the fallback path exclusively — pure-FTS recall is 21/26 on its own). single_hop 12/15, multi_hop 5/7, temporal 4/4 (100% ✓). The real-Ollama rerun (vs. 11.5% baseline, where fallback + graph combine) is still pending — ingest ≈1-2h.
+
 ---
 
 ## Current state
@@ -47,8 +56,8 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Open questions / decisions needed
 
-1. **M6 implementation branch review** — merge `feature/phase-7.5-m6-async-queue`? (The docs-only spec branch was merged to main this session.) Then order is retrieval fallback → extraction quality → M4 → M5.
-2. **Retrieval fallback design (proposed, unconfirmed)**: baseline's biggest killer is seed-resolution failure (~half of misses returned only an empty footer; BM25 never fires because it only scores BFS-reached triples). Proposal: when seeds resolve to nothing (or graph recall is empty), fall back to direct FTS5 search over evidence chunks. Awaiting user confirmation.
+1. **Branch reviews** — merge `feature/phase-7.5-m6-async-queue` (M6, session 4) and `feature/phase-7.5-fts-fallback` (FTS fallback, session 5; branched off the M6 branch, so merging in order keeps history clean). Then order is extraction quality → M4 → M5.
+2. ~~Retrieval fallback design~~ — **implemented session 5** (see above). Remaining sub-question: rerun the real-Ollama eval to quantify combined graph+fallback hit rate vs. the 11.5% baseline.
 3. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Options: stricter prompt + few-shot, retry with smaller sub-chunks, or stronger local model. Not yet decided.
 4. **Ollama throughput**: ingest of 51 chunks ≈ 1-2h (serial: per-chunk generation + ~900 single embedding calls). M6 hides this latency from callers but does not reduce it — batch the embed calls (Ollama API supports list input) as a worker-side optimization, paired with the extraction-quality iteration.
 5. Old branches + `develop` cleanup — delete after user confirms.
@@ -58,8 +67,8 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. User reviews + merges `feature/phase-7.5-m6-async-queue` (M6 implementation — done this session).
-2. Implement FTS fallback seeding (pending confirmation of #2 above); rerun baseline, expect large single-hop/multi-hop recovery.
+1. User reviews + merges `feature/phase-7.5-m6-async-queue` then `feature/phase-7.5-fts-fallback`.
+2. Rerun real-Ollama eval (`uv run python scripts/eval_memory.py --check-gates`) with the fallback in place; offline-mode pure-FTS recall is already 80.8%.
 3. Extraction-quality iteration + batched embeddings; rerun eval.
 4. M4 supersession semantics (schema migration: `relations.superseded_by`), then re-snapshot corpus + update temporal gold answers.
 5. M5 close-the-loop: `membox ingest-file docs/HANDOFF.md` end-to-end; gate: ≥80% hit rate within 2000-token budget (temporal 100%).

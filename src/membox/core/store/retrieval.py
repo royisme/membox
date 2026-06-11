@@ -495,6 +495,145 @@ class RetrievalOps:
 
         return "\n".join(lines)
 
+    def fts_fallback_chunks(
+        self,
+        query: str,
+        limit: int = 5,
+        project_filter: str | None = None,
+    ) -> list[tuple[int, str, str | None, str | None, str | None, str | None]]:
+        """Direct FTS5 BM25 search over document chunks (seed-resolution fallback).
+
+        Used when the query's seed entities resolve to no graph entities, or
+        BFS yields no candidate relations: instead of returning an empty
+        result, the raw evidence chunks are searched directly with an
+        OR-of-tokens FTS5 query so the best-matching chunks still surface.
+
+        Chunks sharing the same ``(source_path, section)`` are deduplicated,
+        keeping only the highest version (latest re-ingest).  Result order is
+        BM25 relevance, best match first.
+
+        Args:
+            query: Raw natural-language question.
+            limit: Maximum number of chunks to return.
+            project_filter: If set, restrict to documents of this project.
+
+        Returns:
+            List of ``(doc_id, content, project, source_path, section,
+            doc_date)`` tuples, best match first.  Empty when FTS5 is
+            unavailable or nothing matches.
+        """
+        if not query.strip() or limit <= 0:
+            return []
+
+        conn = self._cm.connection()  # type: ignore[attr-defined]
+
+        # Check FTS5 table exists (absent before migration 3 on old DBs).
+        has_fts = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts';"
+            ).fetchone()
+        )
+        if not has_fts:
+            return []
+
+        match_expr = _fts5_or_query(query)
+        project_clause = "" if project_filter is None else "AND d.project = ? "
+        params: list[object] = [match_expr]
+        if project_filter is not None:
+            params.append(project_filter)
+        # Over-fetch so version deduplication can still fill `limit` rows.
+        params.append(limit * 4)
+
+        try:
+            rows = conn.execute(
+                "SELECT d.id, d.content, d.project, d.source_path, d.section, "  # noqa: S608
+                "       d.doc_date, d.version "
+                "FROM documents_fts "
+                "JOIN documents d ON d.id = documents_fts.rowid "
+                "WHERE documents_fts MATCH ? "
+                f"{project_clause}"
+                "ORDER BY bm25(documents_fts) "
+                "LIMIT ?",
+                params,
+            ).fetchall()
+        except Exception:
+            return []
+
+        # Dedup re-ingested chunks: keep the highest version per
+        # (source_path, section), preserving best-score-first group order.
+        chosen: dict[object, tuple[int, int, tuple[object, ...]]] = {}
+        order = 0
+        for row in rows:
+            doc_id, _content, _proj, sp, section, _doc_date, version = row
+            key: object = (sp, section) if sp else ("doc", doc_id)
+            ver = int(version) if version is not None else 0
+            if key not in chosen:
+                chosen[key] = (order, ver, tuple(row))
+                order += 1
+            elif ver > chosen[key][1]:
+                chosen[key] = (chosen[key][0], ver, tuple(row))
+
+        result = [
+            (
+                int(r[0]),  # type: ignore[call-overload]
+                str(r[1]),
+                r[2],
+                r[3],
+                r[4],
+                r[5],
+            )
+            for _, _, r in sorted(chosen.values(), key=lambda item: item[0])
+        ]
+        return result[:limit]  # type: ignore[return-value]
+
+    def fts_fallback_output(
+        self,
+        chunks: list[tuple[int, str, str | None, str | None, str | None, str | None]],
+        budget: int,
+    ) -> str:
+        """Render FTS-fallback chunks with token budgeting and a coverage footer.
+
+        Mirrors the :meth:`compact_output` contract: greedy best-effort
+        admission within ``budget`` (a chunk's cost is its provenance tag plus
+        content), and an always-appended honest coverage footer.  The footer
+        keeps the ``returned 0/0 triples`` prefix so callers and tests that
+        key on the standard footer shape keep working, and additionally
+        reports ``K/M FTS chunks``.
+
+        Args:
+            chunks: ``(doc_id, content, project, source_path, section,
+                doc_date)`` tuples from :meth:`fts_fallback_chunks`,
+                best match first.
+            budget: Token budget for chunk content (footer excluded).
+
+        Returns:
+            Multi-line string of provenance-tagged chunks plus footer.
+        """
+        total = len(chunks)
+        remaining = budget
+        admitted = 0
+        lines: list[str] = []
+
+        for _doc_id, content, proj, sp, section, doc_date in chunks:
+            tag = _provenance_tag(proj, sp, section, doc_date)
+            text = str(content).strip()
+            cost = est_tokens(f"[{tag}]") + est_tokens(text)
+            if cost <= remaining:
+                lines.append(f"[{tag}]")
+                lines.append(text)
+                admitted += 1
+                remaining -= cost
+
+        used_tokens = budget - remaining
+        if lines:
+            lines.append("")
+        suffix = "; raise --budget for more)" if admitted < total else ")"
+        lines.append(
+            f"(returned 0/0 triples, {admitted}/{total} FTS chunks, "
+            f"~{used_tokens:,}/{budget:,} tokens{suffix}"
+        )
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers (also importable for tests)
@@ -518,6 +657,28 @@ def _fts5_escape(query: str) -> str:
     if not cleaned:
         return '""'
     return f'"{cleaned}"'
+
+
+def _fts5_or_query(query: str) -> str:
+    """Build an OR-of-tokens FTS5 MATCH expression from a natural-language query.
+
+    A phrase match (as produced by :func:`_fts5_escape`) requires every query
+    token to appear contiguously, which almost never holds for a full
+    question against prose chunks.  For fallback seeding each token is quoted
+    individually and joined with ``OR`` so any matching token surfaces a
+    chunk, and BM25 ranks chunks matching more (and rarer) tokens higher.
+
+    Args:
+        query: Raw user query string.
+
+    Returns:
+        FTS5-safe MATCH expression, e.g. ``"what" OR "storage" OR "backend"``.
+    """
+    cleaned = re.sub(r'["\*\^\(\)\{\}\[\]:,?!。?!、;;\.]', " ", query)
+    tokens = [t for t in cleaned.split() if t]
+    if not tokens:
+        return '""'
+    return " OR ".join(f'"{t}"' for t in tokens)
 
 
 def _best_doc_date(
