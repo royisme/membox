@@ -34,6 +34,8 @@ def list_relations(
     table.add_column("Source", style="green")
     table.add_column("Predicate", style="yellow")
     table.add_column("Target", style="green")
+    table.add_column("Status")
     for rel in relations:
-        table.add_row(str(rel.id), rel.source_name, rel.predicate, rel.target_name)
+        status = f"superseded by {rel.superseded_by}" if rel.superseded_by is not None else ""
+        table.add_row(str(rel.id), rel.source_name, rel.predicate, rel.target_name, status)
     console.print(table)

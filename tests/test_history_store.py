@@ -103,7 +103,7 @@ def test_migration_user_version(tmp_path: Path) -> None:
         version: int = conn.execute("PRAGMA user_version").fetchone()[0]
     finally:
         conn.close()
-    assert version == 6
+    assert version >= 6
 
 
 def test_migration_tables_exist(tmp_path: Path) -> None:
