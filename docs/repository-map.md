@@ -37,6 +37,9 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/agent/01-project-contract.md`
     - `docs/agent/02-architecture-boundaries.md`
     - `docs/agent/03-engineering-rules.md`
+  - `docs/design/`
+    - `docs/design/graph-fts-fusion.md`
+    - `docs/design/retrieval-architecture.md`
   - `docs/code-standards.md`
   - `docs/HANDOFF.md`
   - `docs/repository-map.md`
@@ -123,6 +126,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
   - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
   - `tests/test_fts_fallback.py` — FTS fallback: direct chunk search when seed resolution or graph recall is empty.
+  - `tests/test_fusion.py` — Fusion: three-pass knapsack, allowance boundaries, cross-pool dedup, edge cases.
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.

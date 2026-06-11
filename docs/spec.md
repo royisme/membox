@@ -75,13 +75,15 @@ When graph-only traversal is insufficient (e.g., long natural-language sentences
 - **Graph traversal** — BFS along relation edges (existing `max_hops` mechanism).
 - **FTS5 BM25 keyword search** — Full-text search over `documents.content` using SQLite's built-in FTS5 engine.
 
-Results from both signals are merged before being assembled into the context prompt. The `--project` filter scopes retrieval to a single project; omitting it queries the global database.
+Results from both signals are assembled into one compact context. The `--project` filter scopes retrieval to a single project; omitting it queries the global database.
 
-**FTS fallback seeding**: when seed-entity resolution finds no graph entities, or BFS yields no candidate relations, retrieval falls back to a direct FTS5 BM25 search over `documents.content` instead of returning an empty result. The question is tokenised into an OR-of-tokens MATCH expression (a phrase match almost never fires for a full natural-language question); the top `retrieval.fts_fallback_k` chunks (default 5, `0` disables) are deduplicated by `(source_path, section)` keeping the latest version, rendered with provenance tags under the same token budget, and reported honestly in the coverage footer as `K/M FTS chunks`. The fallback never runs when graph retrieval produced at least one scored triple.
+**Default fusion mode**: `retrieval.fusion_mode="merge"` performs budget-partitioned graph + FTS fusion. The graph pool is produced by `scored_query(...)`; the FTS pool is produced by direct FTS5 BM25 over `documents.content`. The two pools keep separate ranking semantics and are never compared on a shared score scale. Fusion happens during token budgeting with `retrieval.chunk_share` (default `0.4`): triples get the initial graph allowance, chunks get the reserved chunk allowance plus graph leftovers, then unused chunk budget flows back to additional triple lines.
+
+**Fallback compatibility mode**: `retrieval.fusion_mode="fallback"` preserves the old either/or behavior for A/B testing and rollback. When seed-entity resolution finds no graph entities, or BFS yields no candidate relations, retrieval falls back to a direct FTS5 BM25 search over `documents.content` instead of returning an empty result. The question is tokenised into an OR-of-tokens MATCH expression (a phrase match almost never fires for a full natural-language question); the top `retrieval.fts_fallback_k` chunks (default 5, `0` disables) are deduplicated by `(source_path, section)` keeping the latest version, rendered with provenance tags under the same token budget, and reported honestly in the coverage footer as `K/M FTS chunks`. In fallback mode, direct FTS chunks are not shown when graph retrieval produced at least one scored triple.
 
 ### 3.7 Context-Budgeted Retrieval (scoring, truncation, compaction)
 
-**Design principle**: the SQLite store holds the full graph and raw evidence; `query` returns the most relevant slice within a caller-declared token budget, not everything reachable. No LLM is involved in the read path — pruning is pure ranking plus budgeting.
+**Design principle**: the SQLite store holds the full graph and raw evidence; `query` returns the most relevant slice within a caller-declared token budget, not everything reachable. Query seed extraction follows the configured extractor, but scoring, pruning, fusion, and budgeting are pure ranking plus deterministic token accounting.
 
 #### Scoring
 
@@ -94,10 +96,10 @@ score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
 - **`hops(t)`** — `hops(t) = min(depth(subject), depth(object))`, where seed entities have BFS depth 0; thus a relation incident to a seed entity has `hops(t) = 0`. The BFS lineage must be preserved into the result rather than discarded.
 - **`decay`** — per-hop attenuation, default `0.7`, config field `retrieval.hop_decay`.
 - **`sim(t)`** — cosine similarity between the query embedding and the embedding of the triple rendered as plain text (`"subject predicate object"`), normalised from \[−1, 1\] to \[0, 1\] via `(1 + cos) / 2`. The triple embedding is computed **once at ingest time** (when the relation is created or updated) and stored alongside the relation; this requires a relation-embedding column/table added by the M3 schema migration. Query time incurs exactly one embedder call — the query string itself. If no embedder is configured, `sim(t)` is omitted and its weight redistributes to `bm25` (i.e. α effectively becomes 0).
-- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current candidate set. **Important**: SQLite FTS5's `bm25()` function returns lower-is-better (negative) raw values; raw scores must be negated before min-max normalisation, otherwise ranking is inverted. If all candidates share the same raw value (degenerate min-max, zero denominator), define `bm25(t) = 0` for all candidates. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
+- **`bm25(t)`** — the maximum BM25 score (SQLite FTS5, from the M3 hybrid retrieval) over the evidence chunks attached to *t*, min-max normalised to \[0, 1\] within the current triple candidate set. **Important**: SQLite FTS5's `bm25()` function returns lower-is-better (negative) raw values; raw scores must be negated before min-max normalisation, otherwise ranking is inverted. Natural-language queries are converted to OR-of-tokens FTS5 MATCH expressions; phrase matching is too brittle for long questions. If all candidates share the same raw value (degenerate min-max, zero denominator), define `bm25(t) = 0` for all candidates. If a triple has no FTS-matching evidence, `bm25(t) = 0`.
 - **`α`** — vector-vs-lexical mix, default `0.6`, config field `retrieval.alpha`.
 - **Temporal**: superseded relations (M4) are excluded before scoring. No additional recency term in v1; using `doc_date` for confidence decay is listed as a future refinement.
-- All defaults live on `MemboxConfig` in a new `RetrievalConfig` group (`hop_decay`, `alpha`, `budget`, `top_evidence_k`) and are calibration targets for the M3 gold-standard evaluation.
+- All defaults live on `MemboxConfig` in `RetrievalConfig` (`hop_decay`, `alpha`, `budget`, `top_evidence_k`, `fts_fallback_k`, `fusion_mode`, `chunk_share`) and are calibration targets for the Phase 7.5 gold-standard evaluation.
 - **Deterministic tie-breaking**: when composite scores tie (notably the all-zero case where no embedder is configured and no FTS-matching evidence exists), order by `hops(t)` ascending, then by newest evidence (`doc_date` / `extracted_at`) descending. Ranking must be fully deterministic across identical inputs.
 
 #### Token-budget truncation
@@ -111,12 +113,23 @@ score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
 
   Documented as an approximation; consistency matters more than accuracy.
 
-- **Greedy fill**: sort items by score descending; add each item if its estimated cost fits the remaining budget, else skip it and continue down the list (best-effort knapsack, not first-fit-stop). Stop when the list is exhausted or the remaining budget falls below a minimum item size.
-- Items have two granularities with separate costs:
+- **Greedy fill**: within each candidate pool, add each item if its estimated cost fits the remaining budget, else skip it and continue down the list (best-effort knapsack, not first-fit-stop). Stop when the list is exhausted or the remaining budget falls below a minimum item size.
+- Graph items have two granularities with separate costs:
   - The **triple line** itself (cheap).
   - Its **attached evidence snippet** (expensive). An evidence snippet is only eligible for the knapsack if its parent triple was already admitted within budget. Evidence is only ever attached for the top-*K* scored triples (*K* default `3`, config `retrieval.top_evidence_k`). Each evidence snippet is the markdown section chunk it came from (M2 chunking), never the whole document.
+- FTS chunk items are provenance-tagged document section chunks. Their cost is the provenance tag plus chunk content.
 - The coverage footer's own cost (a constant ~20 tokens) is excluded from the budget calculation — it is always appended regardless.
 - Because triples are grouped by subject at render time, actual output may be slightly less than the sum of per-item token estimates (the estimator is conservative); this is acceptable.
+
+#### Budget-partitioned fusion
+
+In merge mode, the compact renderer uses three deterministic passes:
+
+1. **Triple pass** — admit scored graph triple lines and top-K graph evidence within `budget - floor(budget * chunk_share)`.
+2. **Chunk pass** — admit direct FTS chunks within `floor(budget * chunk_share)` plus unused triple-pass budget. Chunks whose `doc_id` was already printed as graph evidence are skipped.
+3. **Triple backfill pass** — if the chunk pass leaves budget unused, admit additional graph triple lines without retrying evidence.
+
+This keeps graph and FTS ranking independent while still sharing the caller's token budget. Oversized items are skipped, so a chunk pool can report `0/L FTS chunks` when no chunk fits the available chunk allowance.
 
 #### Compact output format
 
@@ -133,10 +146,12 @@ score(t) = decay^hops(t) × ( α · sim(t) + (1 − α) · bm25(t) )
   [membox docs/HANDOFF.md ## Current state 2026-06-09]
   ```
 
+- In merge mode, admitted direct FTS chunks are printed under a `Relevant source chunks` section with the same provenance tag format.
+
 - A trailing one-line footer reports coverage honestly:
 
   ```
-  (returned 18/42 triples, ~1,950/2,000 tokens; raise --budget for more)
+  (returned 18/42 triples, 4/5 FTS chunks, ~1,950/2,000 tokens; raise --budget for more)
   ```
 
   Silent truncation is forbidden; the caller must be able to see that more results exist.
