@@ -29,6 +29,19 @@ MIN_TEMPORAL = 4
 
 
 @pytest.fixture(scope="module")
+def requires_corpus() -> None:
+    """Skip tests that need eval/corpus/ if the directory is absent (e.g. in CI).
+
+    eval/corpus/ contains private project handoff documents and is gitignored.
+    The directory is only present on developer machines.
+    """
+    if not CORPUS_DIR.is_dir():
+        pytest.skip(
+            f"eval/corpus/ not found at {CORPUS_DIR} — local-only data (gitignored), skipped on CI"
+        )
+
+
+@pytest.fixture(scope="module")
 def gold_entries() -> list[dict[str, Any]]:
     """Load and return all entries from gold.yaml.
 
@@ -91,13 +104,13 @@ def test_all_categories_are_valid(gold_entries: list[dict[str, Any]]) -> None:
         )
 
 
-def test_source_files_exist(gold_entries: list[dict[str, Any]]) -> None:
+def test_source_files_exist(gold_entries: list[dict[str, Any]], requires_corpus: None) -> None:
     """Every file listed in source must exist in eval/corpus/.
 
     Args:
         gold_entries: Parsed list of QA dicts.
+        requires_corpus: Fixture that skips if corpus dir is absent.
     """
-    assert CORPUS_DIR.is_dir(), f"eval/corpus/ directory not found at {CORPUS_DIR}"
     for entry in gold_entries:
         for filename in entry.get("source", []):
             corpus_file = CORPUS_DIR / filename
@@ -144,9 +157,12 @@ def test_ids_are_unique(gold_entries: list[dict[str, Any]]) -> None:
     )
 
 
-def test_corpus_dir_is_not_empty() -> None:
-    """eval/corpus/ must contain at least one .md file."""
-    assert CORPUS_DIR.is_dir(), f"eval/corpus/ not found at {CORPUS_DIR}"
+def test_corpus_dir_is_not_empty(requires_corpus: None) -> None:
+    """eval/corpus/ must contain at least one .md file.
+
+    Args:
+        requires_corpus: Fixture that skips if corpus dir is absent.
+    """
     md_files = list(CORPUS_DIR.glob("*.md"))
     assert len(md_files) >= 1, (
         f"eval/corpus/ has no .md files (found: {list(CORPUS_DIR.iterdir())})"
