@@ -165,6 +165,7 @@ class TestAgentFallbackIntegration:
         assert "FTS chunks" in out
 
     def test_graph_hit_does_not_fall_back(self, tmp_path: Path) -> None:
+        # Guards the "fallback" control flow: graph non-empty → no FTS chunks shown.
         agent = _make_agent(tmp_path, _SeedExtractor(["Membox"]))
         graph = ExtractedGraph(
             entities=[
@@ -174,19 +175,23 @@ class TestAgentFallbackIntegration:
             relations=[ExtractedRelation(source="Membox", target="SQLite", predicate="uses")],
         )
         agent.ingest_extracted("Membox uses SQLite.", graph)
-        out = agent.compact_query("what does Membox use")
+        cfg = RetrievalConfig(fusion_mode="fallback")
+        out = agent.compact_query("what does Membox use", config=cfg)
         assert "Membox" in out
         assert "FTS chunks" not in out
 
     def test_empty_db_returns_bare_footer(self, tmp_path: Path) -> None:
+        # Guards the "fallback" bare-footer path (no seeds, no FTS matches).
         agent = _make_agent(tmp_path)
-        out = agent.compact_query("anything")
+        cfg = RetrievalConfig(fusion_mode="fallback")
+        out = agent.compact_query("anything", config=cfg)
         assert "(returned 0/0 triples, ~0/0 tokens)" in out
 
     def test_fallback_disabled_via_config(self, tmp_path: Path) -> None:
+        # Guards the "fallback" mode with fts_fallback_k=0 (FTS channel off).
         agent = _make_agent(tmp_path)
         agent.ingest_extracted("SQLite is the storage backend.", _EMPTY_GRAPH)
-        cfg = RetrievalConfig(fts_fallback_k=0)
+        cfg = RetrievalConfig(fts_fallback_k=0, fusion_mode="fallback")
         out = agent.compact_query("what storage backend is used", config=cfg)
         assert "SQLite" not in out
         assert "(returned 0/0 triples, ~0/0 tokens)" in out

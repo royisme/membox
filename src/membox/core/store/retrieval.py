@@ -637,6 +637,199 @@ class RetrievalOps:
         )
         return "\n".join(lines)
 
+    def fused_output(
+        self,
+        scored: list[dict[str, object]],
+        chunks: list[tuple[int, str, str | None, str | None, str | None, str | None]],
+        budget: int,
+        chunk_share: float = 0.4,
+        top_evidence_k: int = 3,
+    ) -> str:
+        """Budget-partitioned graph+FTS fusion output (spec §6 three-pass knapsack).
+
+        Divides the token budget between the triple pool (pass 1) and the chunk
+        pool (pass 2), with leftover rolling forward and a triple backfill pass
+        (pass 3) consuming any remaining budget.
+
+        Pass 1 (triples): greedy skip-and-continue over ``scored`` (already
+        sorted by :meth:`scored_query`).  Allowance = ``budget - chunk_reserve``
+        where ``chunk_reserve = floor(budget * chunk_share)``.  Evidence
+        snippets are attached for the top-*top_evidence_k* admitted triples,
+        costs charged against this pass's allowance.
+
+        Pass 2 (chunks): allowance = ``chunk_reserve`` + leftover from pass 1.
+        Iterates ``chunks`` in given order (best-first from
+        :meth:`fts_fallback_chunks`).  Cross-pool dedup: a chunk whose
+        ``doc_id`` was emitted as evidence in an admitted triple is skipped.
+
+        Pass 3 (triple backfill): remaining budget goes to un-admitted triples
+        (triple lines only; evidence is not re-tried in backfill).
+
+        The coverage footer is always appended and excluded from the budget.
+
+        Args:
+            scored: Sorted scored-triple dicts from :meth:`scored_query`.
+            chunks: ``(doc_id, content, project, source_path, section,
+                doc_date)`` tuples from :meth:`fts_fallback_chunks`,
+                best match first.
+            budget: Total token budget for all output (footer excluded).
+            chunk_share: Fraction of ``budget`` reserved for chunks in pass 2.
+                Default ``0.4``.
+            top_evidence_k: Maximum triples eligible for evidence snippets.
+                Default ``3``.
+
+        Returns:
+            Multi-line fused output: subject-grouped triples section, then
+            ``Relevant source chunks`` chunk section, then coverage footer.
+        """
+        import math
+
+        total_triples = len(scored)
+        total_chunks = len(chunks)
+
+        chunk_reserve = math.floor(budget * chunk_share)
+        triple_allowance = budget - chunk_reserve
+
+        # ---- Pass 1: triples (with evidence for top-K) -------------------
+        admitted_rids: list[int] = []
+        remaining_triple = triple_allowance
+
+        # Identify top-K relation ids for evidence eligibility.
+        top_k_rids = {
+            int(scored[i]["relation_id"])  # type: ignore[call-overload]
+            for i in range(min(top_evidence_k, len(scored)))
+        }
+
+        evidence_admitted: dict[
+            int, list[tuple[int, str, str | None, str | None, str | None, str | None]]
+        ] = {}
+        # Track doc_ids emitted as evidence snippets for cross-pool dedup.
+        evidence_doc_ids: set[int] = set()
+
+        for item in scored:
+            rid = int(item["relation_id"])  # type: ignore[call-overload]
+            subj = str(item["subject"])
+            pred = str(item["predicate"])
+            obj = str(item["object"])
+            line = f"{subj}: {pred} {obj}"
+            cost = est_tokens(line)
+            if cost <= remaining_triple:
+                admitted_rids.append(rid)
+                remaining_triple -= cost
+
+                # Evidence for top-K admitted triples.
+                if rid in top_k_rids:
+                    evs: list[tuple[int, str, str | None, str | None, str | None, str | None]] = (
+                        list(item["evidence"])
+                    )  # type: ignore[call-overload]
+                    admitted_snippets: list[
+                        tuple[int, str, str | None, str | None, str | None, str | None]
+                    ] = []
+                    for ev in evs:
+                        doc_id_ev, content_ev, _proj, _sp, _section, _date = ev
+                        ev_cost = est_tokens(str(content_ev))
+                        if ev_cost <= remaining_triple:
+                            admitted_snippets.append(ev)
+                            evidence_doc_ids.add(int(doc_id_ev))
+                            remaining_triple -= ev_cost
+                    if admitted_snippets:
+                        evidence_admitted[rid] = admitted_snippets
+
+        pass1_leftover = remaining_triple
+
+        # ---- Pass 2: chunks -----------------------------------------------
+        # Allowance = chunk_reserve + leftover from pass 1.
+        chunk_allowance = chunk_reserve + pass1_leftover
+        admitted_chunks: list[tuple[int, str, str | None, str | None, str | None, str | None]] = []
+        remaining_chunk = chunk_allowance
+
+        for chunk in chunks:
+            doc_id_c = int(chunk[0])
+            # Cross-pool dedup: skip if this doc was already emitted as evidence.
+            if doc_id_c in evidence_doc_ids:
+                continue
+            content_c = str(chunk[1]).strip()
+            proj_c, sp_c, section_c, date_c = chunk[2], chunk[3], chunk[4], chunk[5]
+            tag_c = _provenance_tag(proj_c, sp_c, section_c, date_c)
+            cost_c = est_tokens(f"[{tag_c}]") + est_tokens(content_c)
+            if cost_c <= remaining_chunk:
+                admitted_chunks.append(chunk)
+                remaining_chunk -= cost_c
+
+        pass2_leftover = remaining_chunk
+
+        # ---- Pass 3: triple backfill (lines only, no evidence) ------------
+        admitted_set = set(admitted_rids)
+        backfill_rids: list[int] = []
+        remaining_backfill = pass2_leftover
+
+        for item in scored:
+            rid = int(item["relation_id"])  # type: ignore[call-overload]
+            if rid in admitted_set:
+                continue
+            subj = str(item["subject"])
+            pred = str(item["predicate"])
+            obj = str(item["object"])
+            line = f"{subj}: {pred} {obj}"
+            cost = est_tokens(line)
+            if cost <= remaining_backfill:
+                backfill_rids.append(rid)
+                remaining_backfill -= cost
+
+        # Merge admitted triples: pass-1 admissions + pass-3 backfill.
+        all_admitted_rids = admitted_rids + backfill_rids
+
+        # ---- Render -------------------------------------------------------
+        # Triples section: subject-grouped, preserving admission order.
+        subj_groups: OrderedDict[str, list[tuple[str, str, int]]] = OrderedDict()
+        for rid in all_admitted_rids:
+            item = next(x for x in scored if int(x["relation_id"]) == rid)  # type: ignore[call-overload]
+            subj = str(item["subject"])
+            pred = str(item["predicate"])
+            obj = str(item["object"])
+            subj_groups.setdefault(subj, []).append((pred, obj, rid))
+
+        lines: list[str] = []
+        for subj, preds in subj_groups.items():
+            parts = [f"{pred} {obj}" for pred, obj, _ in preds]
+            lines.append(f"{subj}: {' | '.join(parts)}")
+
+        # Evidence block (pass-1 top-K evidence only).
+        if evidence_admitted:
+            lines.append("")
+            for evs_list in evidence_admitted.values():
+                for _doc_id, content, proj, sp, section, doc_date in evs_list:
+                    tag = _provenance_tag(proj, sp, section, doc_date)
+                    lines.append(f"[{tag}]")
+                    lines.append(str(content).strip())
+
+        # Chunk section.
+        if admitted_chunks:
+            if lines:
+                lines.append("")
+            lines.append("Relevant source chunks")
+            for chunk in admitted_chunks:
+                _doc_id_c, content_c, proj_c, sp_c, section_c, date_c = chunk
+                tag_c = _provenance_tag(proj_c, sp_c, section_c, date_c)
+                lines.append(f"[{tag_c}]")
+                lines.append(str(content_c).strip())
+
+        # Coverage footer — always appended.
+        admitted_triple_count = len(all_admitted_rids)
+        admitted_chunk_count = len(admitted_chunks)
+        used_tokens = budget - remaining_backfill
+        lines.append("")
+        triple_truncated = admitted_triple_count < total_triples
+        chunk_truncated = admitted_chunk_count < total_chunks
+        suffix = "; raise --budget for more)" if (triple_truncated or chunk_truncated) else ")"
+        lines.append(
+            f"(returned {admitted_triple_count}/{total_triples} triples, "
+            f"{admitted_chunk_count}/{total_chunks} FTS chunks, "
+            f"~{used_tokens:,}/{budget:,} tokens{suffix}"
+        )
+
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers (also importable for tests)

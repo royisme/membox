@@ -418,32 +418,72 @@ class MemoryAgent:
             if eid is not None:
                 seed_ids.append(eid)
 
-        if not seed_ids:
-            return self._append_pending_note(
-                self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+        if ret_cfg.fusion_mode == "fallback":
+            # Original either/or control flow: preserved for A/B comparison and rollback.
+            if not seed_ids:
+                return self._append_pending_note(
+                    self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+                )
+
+            query_emb_fb: list[float] | None = None
+            if self._embedder is not None:
+                query_emb_fb = self._embedder.embed(question)
+
+            scored_fb = self.store.scored_query(
+                seed_ids=seed_ids,
+                max_hops=max_hops,
+                query=question,
+                query_embedding=query_emb_fb,
+                config=ret_cfg,
+                project_filter=project_filter,
             )
 
+            if not scored_fb:
+                return self._append_pending_note(
+                    self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+                )
+
+            output_fb = self.store.compact_output(
+                scored=scored_fb,
+                budget=effective_budget,
+                top_evidence_k=ret_cfg.top_evidence_k,
+            )
+            return self._append_pending_note(output_fb)
+
+        # --- fusion_mode == "merge": budget-partitioned graph+FTS fusion ---
+        # Seed resolution (same as before).
         query_emb: list[float] | None = None
         if self._embedder is not None:
             query_emb = self._embedder.embed(question)
 
-        scored = self.store.scored_query(
-            seed_ids=seed_ids,
-            max_hops=max_hops,
-            query=question,
-            query_embedding=query_emb,
-            config=ret_cfg,
-            project_filter=project_filter,
-        )
-
-        if not scored:
-            return self._append_pending_note(
-                self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+        # Triple pool: BFS + scoring (empty when seed_ids is empty).
+        if seed_ids:
+            scored = self.store.scored_query(
+                seed_ids=seed_ids,
+                max_hops=max_hops,
+                query=question,
+                query_embedding=query_emb,
+                config=ret_cfg,
+                project_filter=project_filter,
             )
+        else:
+            scored = []
 
-        output = self.store.compact_output(
+        # Chunk pool: always fetch unless fts_fallback_k <= 0.
+        if ret_cfg.fts_fallback_k > 0:
+            chunks = self.store.fts_fallback_chunks(
+                question,
+                limit=ret_cfg.fts_fallback_k,
+                project_filter=project_filter,
+            )
+        else:
+            chunks = []
+
+        output = self.store.fused_output(
             scored=scored,
+            chunks=chunks,
             budget=effective_budget,
+            chunk_share=ret_cfg.chunk_share,
             top_evidence_k=ret_cfg.top_evidence_k,
         )
         return self._append_pending_note(output)
