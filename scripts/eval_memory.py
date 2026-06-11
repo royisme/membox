@@ -15,6 +15,13 @@ Default mode (Ollama)
     question hit/miss and output token estimate.  Exit-nonzero gate is only
     enabled with ``--check-gates`` (hit rate ≥ 0.80 required).
 
+``--provider gemini``
+    Same pipeline against the Gemini API's OpenAI-compatible endpoint —
+    extraction ``gemini-3-flash-preview``, embedding ``gemini-embedding-001``
+    (1536-dim), much faster than local Ollama.  Requires ``GEMINI_API_KEY``
+    or ``GOOGLE_API_KEY``.  Model/dim/threshold overridable via the same
+    ``MEMBOX_EVAL_*`` env vars.
+
 Usage
 -----
     # CI smoke test (no Ollama):
@@ -22,6 +29,9 @@ Usage
 
     # Real evaluation (Ollama must be running):
     uv run python scripts/eval_memory.py
+
+    # Real evaluation via Gemini online (fast):
+    uv run python scripts/eval_memory.py --provider gemini
 
     # With pass/fail gate:
     uv run python scripts/eval_memory.py --check-gates
@@ -45,6 +55,31 @@ from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+
+def _load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE lines from a .env file into os.environ (no override).
+
+    Minimal loader so ``--provider gemini`` picks up ``GEMINI_API_KEY`` from
+    the repo-root ``.env`` (gitignored) without adding a dotenv dependency.
+
+    Args:
+        path: Path to the .env file; silently skipped if absent.
+    """
+    if not path.is_file():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv(_REPO_ROOT / ".env")
 
 import yaml  # noqa: E402 — after sys.path adjustment
 
@@ -216,12 +251,18 @@ def run_evaluation(
 # ---------------------------------------------------------------------------
 
 
-def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> MemoryAgent:
     """Build a MemoryAgent for the evaluation run.
 
     Args:
         offline: If True, use DummyExtractor + SemanticDummyEmbedder.
         db_path: SQLite database path.
+        provider: ``"ollama"`` (local, default) or ``"gemini"`` (Gemini API
+            via its OpenAI-compatible endpoint; needs ``GEMINI_API_KEY`` or
+            ``GOOGLE_API_KEY``).
 
     Returns:
         Configured MemoryAgent.
@@ -237,7 +278,7 @@ def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
             db_path=db_path,
         )
 
-    # Real Ollama mode.
+    # Real provider mode (Ollama local or Gemini online).
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -248,15 +289,28 @@ def make_eval_agent(offline: bool, db_path: str) -> MemoryAgent:
     from membox.services.embedding import EmbeddingService
     from membox.services.extraction import ExtractionService
 
-    base_url = "http://localhost:11434/v1"
-    extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemma-4-E2B:latest")
-    embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "qwen3-embedding:latest")
-    embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1024"))
-    # Calibrated for qwen3-embedding on entity-name pairs (2026-06-10):
-    # same-entity cosine >= 0.763, different-entity <= 0.680 -> midpoint 0.72.
-    disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.72"))
+    if provider == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            msg = "GEMINI_API_KEY (or GOOGLE_API_KEY) must be set for --provider gemini"
+            raise SystemExit(msg)
+        base_url = _GEMINI_BASE_URL
+        extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemini-3-flash-preview")
+        embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "gemini-embedding-001")
+        embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1536"))
+        # Strong online embeddings separate well; OpenAI-grade default.
+        disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.85"))
+    else:
+        api_key = "ollama"
+        base_url = "http://localhost:11434/v1"
+        extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemma-4-E2B:latest")
+        embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "qwen3-embedding:latest")
+        embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1024"))
+        # Calibrated for qwen3-embedding on entity-name pairs (2026-06-10):
+        # same-entity cosine >= 0.763, different-entity <= 0.680 -> midpoint 0.72.
+        disambiguation_threshold = float(os.environ.get("MEMBOX_EVAL_DISAMBIG_THRESHOLD", "0.72"))
 
-    client = OpenAI(base_url=base_url, api_key="ollama")
+    client = OpenAI(base_url=base_url, api_key=api_key)
     extractor = ExtractionService(
         OpenAIChatClient(client, extraction_model, max_completion_tokens=2048)
     )  # type: ignore[assignment]
@@ -289,6 +343,15 @@ def main() -> int:
         "--offline",
         action="store_true",
         help="Use DummyExtractor + SemanticDummyEmbedder; skip hit-rate gate.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["ollama", "gemini"],
+        default="ollama",
+        help=(
+            "Real-mode provider: 'ollama' (local, default) or 'gemini' "
+            "(online OpenAI-compatible endpoint; needs GEMINI_API_KEY/GOOGLE_API_KEY)."
+        ),
     )
     parser.add_argument(
         "--check-gates",
@@ -337,14 +400,14 @@ def main() -> int:
     # Use a temp DB per run unless --db is specified.
     if args.db:
         db_path = args.db
-        agent = make_eval_agent(offline=args.offline, db_path=db_path)
+        agent = make_eval_agent(offline=args.offline, db_path=db_path, provider=args.provider)
         print(f"Ingesting corpus from {corpus_dir} …")
         total_chunks = ingest_corpus(agent, corpus_dir)
         print(f"Ingested {total_chunks} chunks.\n")
     else:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "eval.db")
-            agent = make_eval_agent(offline=args.offline, db_path=db_path)
+            agent = make_eval_agent(offline=args.offline, db_path=db_path, provider=args.provider)
             print(f"Ingesting corpus from {corpus_dir} …")
             total_chunks = ingest_corpus(agent, corpus_dir)
             print(f"Ingested {total_chunks} chunks.\n")
