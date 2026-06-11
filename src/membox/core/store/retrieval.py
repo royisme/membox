@@ -1060,8 +1060,26 @@ def _fts5_query_from_terms(terms: list[str]) -> str:
 
 
 def _cjk_content_score(content: str, terms: list[str]) -> int:
-    """Score a CJK candidate document by query-term coverage."""
-    return sum(len(term) for term in terms if term in content)
+    """Score a CJK candidate document by weighted distinct-term coverage.
+
+    Only *maximal* matched terms count: a matched term that is a substring of
+    a longer matched term is skipped, so a document repeating one short
+    fragment of the query (e.g. ``命格``) cannot outrank a document covering
+    more distinct query concepts.  Longer terms weigh more (their length).
+
+    Args:
+        content: Candidate document content.
+        terms: Anchor n-grams from :func:`_cjk_anchor_terms` (unique).
+
+    Returns:
+        Sum of lengths of maximal matched terms (0 when nothing matches).
+    """
+    matched = [term for term in terms if term in content]
+    return sum(
+        len(term)
+        for term in matched
+        if not any(term != other and term in other for other in matched)
+    )
 
 
 def _cjk_excerpt(query: str, content: str) -> str:
@@ -1089,13 +1107,26 @@ def _cjk_excerpt(query: str, content: str) -> str:
         return text
 
     selected: list[tuple[int, int]] = []
-    for _score, start, end, _pos in sorted(candidates, key=lambda item: (-item[0], item[1])):
+    covered: set[str] = set()
+    best_score = 0
+    for score, start, end, _pos in sorted(candidates, key=lambda item: (-item[0], item[1])):
         overlaps = any(
             not (end <= sel_start or start >= sel_end) for sel_start, sel_end in selected
         )
         if overlaps:
             continue
+        # Marginal-gain gate: an extra window must either contribute an anchor
+        # term not already covered by the selected windows, or carry at least
+        # half the anchor weight of the best window.  Weak redundant windows
+        # are dropped so excerpts stay compact (downstream admission is
+        # token-budget-constrained) instead of padding to
+        # _CJK_EXCERPT_WINDOWS with low-signal context.
+        window_terms = {term for term in anchors if term in text[start:end]}
+        if selected and window_terms <= covered and score * 2 < best_score:
+            continue
         selected.append((start, end))
+        covered |= window_terms
+        best_score = max(best_score, score)
         if len(selected) >= _CJK_EXCERPT_WINDOWS:
             break
 

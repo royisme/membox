@@ -38,6 +38,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/agent/02-architecture-boundaries.md`
     - `docs/agent/03-engineering-rules.md`
   - `docs/design/`
+    - `docs/design/agent-memory-lifecycle.md`
     - `docs/design/cjk-trigram-fts.md`
     - `docs/design/graph-fts-fusion.md`
     - `docs/design/retrieval-architecture.md`

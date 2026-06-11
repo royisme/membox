@@ -55,6 +55,18 @@ class TestFts5OrQuery:
     def test_cjk_trigram_terms_for_sidecar(self) -> None:
         assert _cjk_trigram_terms("苏轼八字") == ["苏轼八", "轼八字"]
 
+    def test_cjk_content_score_counts_maximal_terms_only(self) -> None:
+        from membox.core.store.retrieval import _cjk_anchor_terms, _cjk_content_score
+
+        anchors = _cjk_anchor_terms("苏轼八字案例")
+        # Document covering the full phrase scores its maximal terms only:
+        # the 4-gram matches subsume every contained 2/3-gram.
+        full = _cjk_content_score("文中提到苏轼八字案例上线。", anchors)
+        # Document repeating one short fragment scores just that fragment once.
+        frag = _cjk_content_score("案例很多, 案例不少, 还是案例。", anchors)
+        assert full > frag
+        assert frag == _cjk_content_score("一个案例。", anchors)
+
 
 class TestFallbackChunks:
     """KnowledgeStore.fts_fallback_chunks behaviour."""
@@ -151,6 +163,22 @@ class TestFallbackChunks:
         out = store.fts_fallback_output(chunks, budget=2000)
         assert "癸水七杀格" in out
         assert "1/1 FTS chunks" in out
+
+    def test_cjk_excerpt_drops_weak_redundant_window(self, tmp_path: Path) -> None:
+        from membox.core.store.retrieval import _cjk_excerpt, est_tokens
+
+        filler = "背景资料。" * 300
+        # All query concepts cluster in one region; a lone weak repeat of one
+        # short fragment (命格) sits far away and adds no new anchor terms.
+        content = (
+            f"{filler}\n苏轼八字案例的命格名是癸水七杀格。\n{filler}\n命格一词再次出现。\n{filler}"
+        )
+        excerpt = _cjk_excerpt("苏轼八字案例的命格名", content)
+        assert "[excerpt]" in excerpt
+        assert "癸水七杀格" in excerpt
+        # The weak redundant window is dropped, keeping the excerpt compact.
+        assert "再次出现" not in excerpt
+        assert est_tokens(excerpt) < est_tokens(content)
 
     def test_cjk_focus_rerank_gets_answer_past_distractors(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "s.db"))
