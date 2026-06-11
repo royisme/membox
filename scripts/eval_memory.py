@@ -315,7 +315,7 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
             msg = "GEMINI_API_KEY (or GOOGLE_API_KEY) must be set for --provider gemini"
             raise SystemExit(msg)
         base_url = _GEMINI_BASE_URL
-        extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemini-3-flash-preview")
+        extraction_model = os.environ.get("MEMBOX_EVAL_EXTRACTION_MODEL", "gemini-3.1-flash-lite")
         embedding_model = os.environ.get("MEMBOX_EVAL_EMBEDDING_MODEL", "gemini-embedding-001")
         embed_dim = int(os.environ.get("MEMBOX_EVAL_EMBED_DIM", "1536"))
         # Strong online embeddings separate well; OpenAI-grade default.
