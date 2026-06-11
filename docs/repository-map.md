@@ -17,6 +17,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `.crew/state/`
     - `.crew/state/metrics/`
       - `.crew/state/metrics/2026-06-10.jsonl`
+      - `.crew/state/metrics/2026-06-11.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
