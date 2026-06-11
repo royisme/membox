@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 # est_tokens is defined in core.tokens and re-exported here for backward
 # compatibility: callers that import it from this module continue to work.
@@ -719,9 +719,10 @@ class RetrievalOps:
 
                 # Evidence for top-K admitted triples.
                 if rid in top_k_rids:
-                    evs: list[tuple[int, str, str | None, str | None, str | None, str | None]] = (
-                        list(item["evidence"])
-                    )  # type: ignore[call-overload]
+                    evs = cast(
+                        "list[tuple[int, str, str | None, str | None, str | None, str | None]]",
+                        item["evidence"],
+                    )
                     admitted_snippets: list[
                         tuple[int, str, str | None, str | None, str | None, str | None]
                     ] = []
