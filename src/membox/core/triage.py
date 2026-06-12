@@ -14,8 +14,14 @@ from dataclasses import dataclass, field
 
 from membox.model.schema import MEMORY_LABELS, MemoryTemporalType, MemoryUnitType, MemoryUserIntent
 
-GATE_VERSION = "heuristic-v1"
-"""Version string persisted with every deterministic triage decision."""
+GATE_VERSION = "heuristic-v2"
+"""Version string persisted with every deterministic triage decision.
+
+v2 (tuned against the C1 lifecycle fixtures): declared-fact prefixes extract
+when the topic is durable; ``更正`` is a correction signal; ``verify`` is a
+procedure signal; ``记住`` types as decision; failure context suppresses
+``always``/``never``-based preference typing so procedures win.
+"""
 
 REDACTION_MARKER = "[REDACTED]"
 """Replacement text for every secret match."""
@@ -83,6 +89,7 @@ _DURABLE_CHANGE = (
     "cli",
     "storage",
     "retrieval",
+    "fts",
     "validation gate",
     "架构",
     "迁移",
@@ -90,9 +97,11 @@ _DURABLE_CHANGE = (
     "检索",
 )
 _FIX_SIGNALS = ("error", "failed", "failure", "bug", "fixed", "resolved", "修复", "报错")
-_PROCEDURE_SIGNALS = ("step", "first", "then", "run `", "command", "步骤", "先", "然后")
-_CORRECTION_SIGNALS = ("correction", "actually", "instead", "不是", "纠正", "改成")
+_PROCEDURE_SIGNALS = ("step", "first", "then", "verify", "run `", "command", "步骤", "先", "然后")
+_CORRECTION_SIGNALS = ("correction", "actually", "instead", "不是", "纠正", "改成", "更正")
 _PLAN_SIGNALS = ("plan", "todo", "next", "roadmap", "计划", "下一步")
+# Both fullwidth and ASCII colon variants of 事实 are intentional (CJK input).
+_FACT_SIGNALS = ("fact:", "fact snapshot", "updated fact", "事实：", "事实:")  # noqa: RUF001
 
 _LABEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "architecture": ("architecture", "schema", "migration", "架构", "迁移"),
@@ -162,6 +171,7 @@ def triage_trace(
     manual = user_intent == MemoryUserIntent.MANUAL
     explicit = _has_any(lowered, _EXPLICIT_MEMORY)
     durable = _has_any(lowered, _DURABLE_CHANGE)
+    declared_fact = _has_any(lowered, _FACT_SIGNALS)
     fix = _has_any(lowered, _FIX_SIGNALS) and _has_any(
         lowered, ("fixed", "resolved", "pass", "green", "修复", "解决")
     )
@@ -177,10 +187,18 @@ def triage_trace(
         importance, confidence, reason = 0.65, 0.65, "failure_fix_or_procedure"
     elif durable and explicit:
         importance, confidence, reason = 0.65, 0.60, "durable_change_with_intent"
+    elif durable and declared_fact:
+        importance, confidence, reason = 0.65, 0.60, "declared_durable_fact"
     else:
         importance, confidence, reason = 0.35, 0.50, "weak_context_only"
 
-    unit_type = _infer_unit_type(lowered, correction=correction, fix=fix, procedure=procedure)
+    unit_type = _infer_unit_type(
+        lowered,
+        correction=correction,
+        fix=fix,
+        procedure=procedure,
+        declared_fact=declared_fact,
+    )
     labels = _infer_labels(lowered)
     should_extract = reason != "weak_context_only"
     hint = _first_line(window)
@@ -214,19 +232,28 @@ def _infer_unit_type(
     correction: bool,
     fix: bool,
     procedure: bool,
+    declared_fact: bool,
 ) -> MemoryUnitType:
-    if "preference" in lowered or "always" in lowered or "never" in lowered:
+    # Failure context first: "always verify X before Y" stated next to an
+    # error/failure is a procedure (or a learning), not a standing preference —
+    # the "always" there is part of the remedy, not a taste statement.
+    if _has_any(lowered, _FIX_SIGNALS) and (procedure or fix):
+        return MemoryUnitType.PROCEDURE if procedure else MemoryUnitType.LEARNING
+    # A correction asserts the corrected state as the new authoritative ruling.
+    if correction:
+        return MemoryUnitType.DECISION
+    if "preference" in lowered or "always" in lowered or "never" in lowered or "以后" in lowered:
         return MemoryUnitType.PREFERENCE
-    if "decision" in lowered or "we decided" in lowered or "决定" in lowered:
+    if "decision" in lowered or "we decided" in lowered or "决定" in lowered or "记住" in lowered:
         return MemoryUnitType.DECISION
     if procedure:
         return MemoryUnitType.PROCEDURE
     if fix:
         return MemoryUnitType.LEARNING
+    if declared_fact:
+        return MemoryUnitType.FACT
     if _has_any(lowered, _PLAN_SIGNALS):
         return MemoryUnitType.PLAN
-    if correction:
-        return MemoryUnitType.FACT
     if _has_any(lowered, _DURABLE_CHANGE):
         return MemoryUnitType.FACT
     return MemoryUnitType.CONTEXT

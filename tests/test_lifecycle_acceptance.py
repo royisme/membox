@@ -7,10 +7,10 @@ Runs the C1 fixture corpus end-to-end and records four metrics:
 - **type accuracy**   - predicted unit_type matches gold expectation
 - **duplicate rate**  - units after second apply equals units after first apply
 
-The harness asserts exact agreement (all metrics == 1.0 / 0.0) for metrics that
-currently pass.  Where the gate disagrees with the gold, the assertion is left as
-a documented ``xfail`` with an explanation; the gate and ``expectations.yaml`` are
-not modified.
+The harness asserts exact agreement (all metrics == 1.0 / 0.0).  The four
+heuristic-v1 disagreements (c4, c1, c5, c7) were resolved by the heuristic-v2
+keyword tuning and are kept below as plain regression tests; if the gate ever
+regresses, fix the gate — do not edit ``expectations.yaml`` to make it pass.
 
 Multi-source entries (c3, c4, c5, c6, c7): the harness treats each source ref
 independently.  For *precision/recall*, an entry is considered ``should_extract``
@@ -25,7 +25,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -154,11 +153,12 @@ def _compute_metrics(
 
 
 def test_c5_gate_acceptance_precision_and_dup_rate(tmp_path: Path) -> None:
-    """Gate achieves perfect precision and zero duplicate rate today.
+    """Gate achieves exact agreement with the C1 gold expectations.
 
-    Recall and type_accuracy have known gaps (c4, c1, c5, c7) that are
-    asserted individually as xfail tests below.  The four metrics are
-    always printed so CI output records the current state.
+    heuristic-v1 had four documented disagreements (c4, c1, c5, c7);
+    heuristic-v2's keyword tuning resolved them, so all four metrics are
+    asserted at their targets.  The metrics are always printed so CI
+    output records the current state.
     """
     store = _build_store(tmp_path)
     precision, recall, type_accuracy, results = _compute_metrics(store)
@@ -238,6 +238,14 @@ def test_c5_gate_acceptance_precision_and_dup_rate(tmp_path: Path) -> None:
         f"Precision {precision:.4f} < 1.0: gate produced FP on entries "
         f"{[eid for eid, r in results.items() if r['gate_extract'] and not r['gold_extract']]}"
     )
+    assert recall == 1.0, (
+        f"Recall {recall:.4f} < 1.0: gate missed entries "
+        f"{[eid for eid, r in results.items() if r['gold_extract'] and not r['gate_extract']]}"
+    )
+    assert type_accuracy == 1.0, (
+        f"Type accuracy {type_accuracy:.4f} < 1.0: mismatched entries "
+        f"{[eid for eid, r in results.items() if r['gold_extract'] and r['gate_type'] != r['gold_type']]}"
+    )
     assert dup_rate == 0.0, (
         f"Duplicate rate {dup_rate:.4f} != 0.0: "
         f"{units_after_second - units_after_first} extra units after second apply"
@@ -245,118 +253,61 @@ def test_c5_gate_acceptance_precision_and_dup_rate(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-entry xfail stubs for known gate disagreements
+# Per-entry regression tests for the heuristic-v1 disagreements fixed in v2
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "c4_superseded_fact: both source messages ('Fact: retrieval is graph-only' and "
-        "'Fact: retrieval uses graph plus FTS fusion') score as weak_context_only because "
-        "neither contains durable-change or explicit-memory signals.  Gold expects "
-        "triage_should_extract=True.  Gate gap: the 'Fact:' prefix alone is not a "
-        "heuristic trigger; requires either an explicit 'remember' or durable-change "
-        "keyword to fire.  Fix: either add 'fact:' as a durable trigger or strengthen "
-        "the fixture text.  Do NOT weaken the expectation."
-    ),
-)
-def test_c4_superseded_fact_gate_gap(tmp_path: Path) -> None:
-    """c4: gate misses both source refs (FN) — triage recall gap.
-
-    Blocked by the weak_context_only reason on both c4 fixture messages.
-    """
+def test_c4_declared_fact_extracts(tmp_path: Path) -> None:
+    """c4: declared facts about durable topics must extract (v1 missed both refs)."""
     store = _build_store(tmp_path)
     c4_entry = next(e for e in _load_expectations() if e["id"] == "c4_superseded_fact")
-    expected = c4_entry["expected"]
-    any_extract = False
-    for ref in expected["source_refs"]:
+    for ref in c4_entry["expected"]["source_refs"]:
         row = store.get_trace_text(str(ref["trace_kind"]), str(ref["trace_id"]))
         assert row is not None
         d = triage_trace(row["text"], role=row["role"])
-        if d.should_extract:
-            any_extract = True
-    # This assertion is expected to FAIL (xfail): the gate currently returns
-    # should_extract=False for both c4 refs.
-    assert any_extract is True, "c4 gate gap: no source ref passes should_extract"
+        assert d.should_extract is True, f"c4 {ref['trace_id']}: rejected (reason={d.reason})"
+        assert d.unit_type == MemoryUnitType.FACT, (
+            f"c4 {ref['trace_id']}: got {d.unit_type.value}, expected fact"
+        )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "c1_explicit_rules: gate returns unit_type=procedure, gold expects preference.  "
-        "The fixture text uses 'always … before' which triggers procedure signals "
-        "before preference signals in _infer_unit_type.  Fix: reorder inference or "
-        "add a stronger preference keyword to the fixture.  Do NOT change expectations.yaml."
-    ),
-)
-def test_c1_explicit_rules_type_mismatch(tmp_path: Path) -> None:
-    """c1: gate infers unit_type=procedure; gold expects preference — type accuracy gap."""
+def test_c1_explicit_rule_types_as_preference(tmp_path: Path) -> None:
+    """c1: an explicit user rule types as preference (v1 returned procedure)."""
     store = _build_store(tmp_path)
     c1_entry = next(e for e in _load_expectations() if e["id"] == "c1_explicit_rules")
     ref = c1_entry["expected"]["source_refs"][0]
     row = store.get_trace_text(str(ref["trace_kind"]), str(ref["trace_id"]))
     assert row is not None
     d = triage_trace(row["text"], role=row["role"])
-    # This assertion is expected to FAIL (xfail): gate returns procedure not preference.
+    assert d.should_extract is True
     assert d.unit_type == MemoryUnitType.PREFERENCE, (
-        f"c1 type gap: got {d.unit_type.value}, expected preference"
+        f"c1: got {d.unit_type.value}, expected preference"
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "c5_repeated_failure_learning: primary source ref (msg:m1) has type=preference "
-        "because 'always' fires before procedure/fix signals.  Gold expects procedure.  "
-        "The event ref (evt) scores weak_context_only.  Fix: reorder inference in "
-        "_infer_unit_type so that fix/procedure signals beat 'always'-based preference "
-        "when failure context is also present.  Do NOT change expectations.yaml."
-    ),
-)
-def test_c5_type_mismatch(tmp_path: Path) -> None:
-    """c5: gate infers preference for the message ref; gold expects procedure — type accuracy gap."""
+def test_c5_failure_remedy_types_as_procedure(tmp_path: Path) -> None:
+    """c5: 'always verify X' beside a failure types as procedure, not preference."""
     store = _build_store(tmp_path)
     c5_entry = next(e for e in _load_expectations() if e["id"] == "c5_repeated_failure_learning")
-    # The message source ref is the one that passes; check its type.
     msg_ref = next(r for r in c5_entry["expected"]["source_refs"] if r["trace_kind"] == "message")
     row = store.get_trace_text(str(msg_ref["trace_kind"]), str(msg_ref["trace_id"]))
     assert row is not None
     d = triage_trace(row["text"], role=row["role"])
-    assert d.should_extract is True  # gate does say extract=True
-    # This assertion is expected to FAIL (xfail): gate returns preference not procedure.
+    assert d.should_extract is True
     assert d.unit_type == MemoryUnitType.PROCEDURE, (
-        f"c5 type gap: got {d.unit_type.value}, expected procedure"
+        f"c5: got {d.unit_type.value}, expected procedure"
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "c7_user_correction: correction-old message triggers should_extract=True with "
-        "type=context (not decision), and correction-new message returns "
-        "should_extract=False (weak_context_only).  Gold expects triage_should_extract=True "
-        "and unit_type=decision.  Two gaps: (1) '更正:' (correction) keyword is not a "
-        "durable-change signal so the new message does not pass; (2) old message is typed "
-        "as context, not decision.  Fix: add '更正' to correction/durable signals and "
-        "improve _infer_unit_type for correction context.  Do NOT change expectations.yaml."
-    ),
-)
-def test_c7_user_correction_type_mismatch(tmp_path: Path) -> None:
-    """c7: gate infers context (old) / rejects new — type and classification gap."""
+def test_c7_correction_extracts_as_decision(tmp_path: Path) -> None:
+    """c7: a 更正/correction message extracts and types as decision (v1 rejected it)."""
     store = _build_store(tmp_path)
     c7_entry = next(e for e in _load_expectations() if e["id"] == "c7_user_correction")
-    # Check the new correction source ref (should be should_extract=True, type=decision)
     new_ref = next(
         r for r in c7_entry["expected"]["source_refs"] if "correction-new" in str(r["trace_id"])
     )
     row = store.get_trace_text(str(new_ref["trace_kind"]), str(new_ref["trace_id"]))
     assert row is not None
     d = triage_trace(row["text"], role=row["role"])
-    # This assertion is expected to FAIL (xfail): gate returns should_extract=False.
-    assert d.should_extract is True, (
-        f"c7 new-correction gate gap: should_extract=False (reason={d.reason})"
-    )
-    assert d.unit_type == MemoryUnitType.DECISION, (
-        f"c7 type gap: got {d.unit_type.value}, expected decision"
-    )
+    assert d.should_extract is True, f"c7: should_extract=False (reason={d.reason})"
+    assert d.unit_type == MemoryUnitType.DECISION, f"c7: got {d.unit_type.value}, expected decision"
