@@ -275,7 +275,71 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 
 ---
 
+## Stabilization Track — v0.1.0 Release (current focus)
+
+> Owner decision 2026-06-12: Phases A–F of the Lifecycle Track are complete (merged via PR #5). The next milestone is stabilization and release of the current feature set. Phase 8 (tree-sitter AST) is deferred until after v0.1.0.
+
+| Step | Description | Status |
+|------|-------------|--------|
+| S1 | Dogfooding | 🔲 |
+| S2 | Robustness | 🔲 |
+| S3 | Deferred review items (PR #5 / plan_06) | 🔲 |
+| S4 | Performance sanity | 🔲 |
+| S5 | Release | 🔲 |
+
+### S1 — Dogfooding
+
+End-to-end run of the full Lifecycle Track pipeline on membox's own dev sessions:
+
+- [ ] `membox history import` on real `~/.codex/sessions` (or Claude history) for the membox project
+- [ ] `membox process` — drain the async queue
+- [ ] `membox memory triage --apply` — classify new traces
+- [ ] `membox memory extract --apply` — extract memory units
+- [ ] `membox memory consolidate --apply` — promote crystals, supersede stale units
+- [ ] `membox distill` — generate a distilled Markdown export
+- [ ] `membox query --include-memory "..."` — confirm memory surfaces in answers
+- [ ] File defects / gaps discovered during the run as GitHub issues
+
+### S2 — Robustness
+
+Harden the import and processing pipeline against real-world edge cases:
+
+- [ ] Corrupt or partial JSONL lines — graceful skip with `failures` log entry, no worker crash
+- [ ] Idempotent re-import — re-running `history import` on already-imported sessions produces no duplicate rows
+- [ ] Interrupted worker recovery — a killed `membox process` leaves no stale `processing` rows after the next worker start
+- [ ] Empty or missing session roots — `membox history import` with an absent `--root` reports the path and exits cleanly, not a traceback
+
+### S3 — Deferred Review Items (PR #5 / plan_06)
+
+Fold in the items deferred during plan_06 code review:
+
+- [ ] Consolidate CLI N+1 source counts — batch `count_independent_sources_for_units` calls in `membox memory consolidate` output (same pattern as Phase E's `count_independent_sources_for_units` fix)
+- [ ] Atomic apply batching — wrap the per-transition apply loop in a single transaction with abort reporting (current: per-transition commits; lease + status log mitigate but a mid-apply crash leaves partial state)
+- [ ] FTS-based conflict candidate pairing — replace the in-memory pairwise scan in the conflict detector with an FTS5 candidate query to bound quadratic blowup on large unit sets
+- [ ] LLM conflict comparator — injectable `ConflictComparator` Protocol backed by an LLM call; replaces the deterministic word-list signal for high-confidence conflict detection (real-trace recall currently uncalibrated)
+- [ ] Gate v4 — `--help-dump` event family: add a heuristic rule to suppress bare `--help` output events from triage extraction (accepted residual risk in plan_04 D0; gate bump re-triages existing pending rows)
+
+### S4 — Performance Sanity
+
+Baseline timing on a representative real history:
+
+- [ ] Import + process a large real session history (≥ 50 sessions / ≥ 500 messages) and record wall-clock time
+- [ ] Document baseline in `eval/results/perf-baseline-v0.1.0.md`: import time, process time, queue drain time, entity/relation counts
+- [ ] Identify and file any regressions vs plan_03 ingest-perf benchmarks (embed cache, batch embedder, `MEMBOX_INGEST_CONCURRENCY`)
+
+### S5 — Release
+
+- [ ] README quickstart covering the history-pull → process → distill → query workflow (end-to-end in ~10 commands)
+- [ ] Changelog: `uv run python scripts/generate_changelog.py --version 0.1.0`
+- [ ] Version bump: `uv run python scripts/bump_version.py 0.1.0`
+- [ ] Tag `v0.1.0` and push; confirm CI green on main
+- [ ] Close or re-milestone any open GitHub issues that are out of scope for v0.1.0
+
+---
+
 ## Phase 8 — Codebase Structural Analysis (tree-sitter)
+
+> **Deferred** (owner decision 2026-06-12): Phase 8 is deferred to the next milestone. Stabilization and v0.1.0 release of the current feature set take priority. The Stabilization Track below is the active focus.
 
 > **Note**: Phase 8 is deliberately sequenced after Phase 7.5. The supersession semantics and hybrid retrieval introduced in 7.5 are load-bearing for the temporal recall patterns that codebase analysis will exercise.
 
@@ -298,7 +362,7 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
   - [x] Installation instructions
   - [x] Command reference
   - [x] Usage examples
-- [ ] Manual validation: agent reads the skill and successfully invokes the CLI commands
+- [x] Manual validation: agent reads the skill and successfully invokes the CLI commands — delivered PR #5 (2026-06-12)
 
 **Validation**: Inject the skill into agent context; the agent can independently perform ingest + query.
 
@@ -330,12 +394,14 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
          └→ Phase 7.5 Memory Quality Validation
               │  (M1+M2+M3 complete → M6 async queue → M4 supersession → M5 close-the-loop)
               │
-              └→ Lifecycle Track A–E ✅ → F ✅ (spec_02)
+              └→ Lifecycle Track A–F ✅ (spec_02)
                    │
-                   ├→ Phase 8 tree-sitter (Can be done in parallel)
-                   ├→ Phase 9 Skill Files (Can be done in parallel)
+                   └→ Stabilization Track S1–S5 ← current focus
                         │
-                        └→ Phase 10 Release
+                        ├→ Phase 8 tree-sitter (deferred — next milestone)
+                        ├→ Phase 9 Skill Files ✅ (merged PR #5)
+                             │
+                             └→ Phase 10 Release
 ```
 
 **Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.
