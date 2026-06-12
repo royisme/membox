@@ -110,17 +110,49 @@ def build_distill_plan(
     assets: list[AssetRecord] | None = None,
     independent_source_counter: Callable[[list[int]], int] | None = None,
 ) -> DistillPlan:
-    """Build a deterministic read-only Phase F distillation report."""
+    """Build a deterministic read-only Phase F distillation report.
+
+    For multi-unit groups (two or more units sharing the same workflow cluster),
+    *independent_source_counter* is required to avoid double-counting sessions
+    that appear in more than one unit's sources.  Callers that cannot supply a
+    counter must ensure every group contains at most one unit; passing a group
+    of ``len > 1`` without a counter raises ``ValueError``.
+
+    Single-unit groups may fall back to the per-unit value in
+    *independent_source_counts* when no counter is provided.
+
+    Args:
+        units: All eligible ``MemoryUnitRecord`` rows to consider.
+        independent_source_counts: Per-unit independent-session counts keyed by
+            unit id (used only for single-unit groups when no counter is given).
+        assets: Optional filesystem asset inventory for coverage reporting.
+        independent_source_counter: Callable that accepts a list of unit ids and
+            returns the deduplicated independent-session count for that group.
+            Required whenever a group contains more than one unit.
+
+    Returns:
+        A :class:`DistillPlan` with zero or more distillation candidates.
+
+    Raises:
+        ValueError: If a multi-unit group is encountered and
+            *independent_source_counter* is ``None``.
+    """
     eligible = [unit for unit in units if unit.id is not None]
     groups = _group_units(eligible)
     candidates: list[DistillCandidate] = []
     for group in groups:
         unit_ids = [unit.id for unit in group if unit.id is not None]
-        evidence_sessions = (
-            independent_source_counter(unit_ids)
-            if independent_source_counter is not None
-            else sum(independent_source_counts.get(unit_id, 0) for unit_id in unit_ids)
-        )
+        if independent_source_counter is not None:
+            evidence_sessions = independent_source_counter(unit_ids)
+        elif len(group) == 1:
+            evidence_sessions = independent_source_counts.get(unit_ids[0], 0)
+        else:
+            msg = (
+                f"independent_source_counter is required for multi-unit groups "
+                f"(group size={len(group)}, unit_ids={unit_ids}). "
+                "Summing per-unit counts double-counts sessions shared across units."
+            )
+            raise ValueError(msg)
         explicit = any(has_explicit_user_confirmation(unit) for unit in group)
         if evidence_sessions < DISTILL_MIN_INDEPENDENT_EVIDENCE and not explicit:
             continue

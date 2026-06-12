@@ -522,3 +522,31 @@ def test_distill_cli_with_since_window(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "window: since 30d" in result.output
     assert "no distill candidates found" in result.output
+
+
+def test_distill_cli_rejects_invalid_since_value(tmp_path: Path) -> None:
+    """An unrecognised --since value raises BadParameter and exits non-zero."""
+    db = str(tmp_path / "memory.db")
+    root = tmp_path / "project"
+    root.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "distill",
+            "--db",
+            db,
+            "--project",
+            "membox",
+            "--root",
+            str(root),
+            "--since",
+            "not-a-date",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Invalid --since value" in result.output or (
+        result.exception is not None and "Invalid --since value" in str(result.exception)
+    )

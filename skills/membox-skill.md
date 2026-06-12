@@ -25,7 +25,7 @@ globally with `uv tool install .`.
 
 ## Core Concepts
 
-```
+```text
 Trace → Unit → Crystal
 ```
 
@@ -152,7 +152,7 @@ the lifecycle pipeline:
 
 ```bash
 # 1. Pull the session history
-membox history pull --adapt pi
+membox history pull --adapt pi --project myrepo
 
 # 2. Triage — decide what is worth keeping
 membox memory triage --project myrepo --apply

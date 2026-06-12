@@ -18,7 +18,7 @@ from membox.core.distill import (
 from membox.core.store import KnowledgeStore
 
 _DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
-_DURATION_RE = re.compile(r"^(\d+)d$")
+_DURATION_RE = re.compile(r"^(\d+)([dwh])$")
 
 
 def distill(
@@ -46,7 +46,7 @@ def distill(
         typer.echo(f"Error: --root does not exist: {scanned_root}", err=True)
         raise typer.Exit(1)
 
-    effective_project = project or _infer_project(Path.cwd() / "_")
+    effective_project = project or _infer_project(scanned_root / "_")
     since_lower_bound = _since_lower_bound(since)
     store = KnowledgeStore(db)
     units = store.list_units_for_distill(
@@ -99,14 +99,41 @@ def _print_candidate(candidate: DistillCandidate) -> None:
 
 
 def _since_lower_bound(value: str | None) -> str | None:
-    """Convert a CLI window value into a SQLite-comparable timestamp."""
+    """Convert a CLI window value into a SQLite-comparable timestamp.
+
+    Args:
+        value: A duration string such as ``30d``, ``4w``, or ``12h``, or an
+            ISO-8601 timestamp string, or ``None`` to return no lower bound.
+
+    Returns:
+        An ISO-8601 timestamp string suitable for SQL comparison, or ``None``.
+
+    Raises:
+        typer.BadParameter: If *value* is not a recognised duration or a valid
+            ISO-8601 timestamp.
+    """
     if value is None:
         return None
     match = _DURATION_RE.match(value)
-    if match is None:
-        return value
-    days = int(match.group(1))
-    return (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+    if match is not None:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        if unit == "d":
+            delta = timedelta(days=amount)
+        elif unit == "w":
+            delta = timedelta(weeks=amount)
+        else:  # "h"
+            delta = timedelta(hours=amount)
+        return (datetime.now(UTC) - delta).isoformat(timespec="seconds")
+    try:
+        datetime.fromisoformat(value)
+    except ValueError as exc:
+        msg = (
+            f"Invalid --since value {value!r}. "
+            "Accepted formats: Nd (days), Nw (weeks), Nh (hours), or an ISO-8601 timestamp."
+        )
+        raise typer.BadParameter(msg, param_hint="'--since'") from exc
+    return value
 
 
 def _window_label(value: str | None) -> str:
