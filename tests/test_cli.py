@@ -8,6 +8,14 @@ from typing import TYPE_CHECKING, Any
 from typer.testing import CliRunner
 
 from membox.cli import app
+from membox.core.store import KnowledgeStore
+from membox.model.schema import (
+    MemorySourceKind,
+    MemoryUnitRecord,
+    MemoryUnitSource,
+    MemoryUnitStatus,
+    MemoryUnitType,
+)
 from membox.services.embedding import OpenAIEmbedder
 from membox.services.extraction import DummyExtractor, OpenAIExtractor, create_default_extractor
 
@@ -349,6 +357,50 @@ class TestCliQueryAndListing:
         result = runner.invoke(app, ["query", "what is membox?", "--db", str(db)])
         assert result.exit_code == 0
         assert "no-op extractor" in result.stderr
+
+    def test_query_include_memory_uses_project_scope(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`membox query --include-memory` prints scoped memory rows."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        store = KnowledgeStore(str(db))
+        store.create_memory_unit(
+            MemoryUnitRecord(
+                project="membox",
+                unit_type=MemoryUnitType.DECISION,
+                status=MemoryUnitStatus.ACTIVE_UNIT,
+                title="CLI memory fusion",
+                content="Query include-memory prints scoped memory rows.",
+                importance_score=0.8,
+                confidence_score=0.8,
+                labels=["retrieval"],
+                sources=[
+                    MemoryUnitSource(
+                        source_kind=MemorySourceKind.MANUAL,
+                        source_ref="manual:cli-memory",
+                        quote="CLI memory fusion",
+                    )
+                ],
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "query",
+                "CLI memory fusion",
+                "--db",
+                str(db),
+                "--project",
+                "membox",
+                "--include-memory",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Relevant memory" in result.output
+        assert "CLI memory fusion" in result.output
 
     def test_list_entities_empty_db_renders_table_header(self, tmp_path: Path) -> None:
         db = tmp_path / "memory.db"

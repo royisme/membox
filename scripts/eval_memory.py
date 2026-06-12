@@ -51,6 +51,9 @@ Usage
 
     # With pass/fail gate:
     uv run python scripts/eval_memory.py --check-gates
+
+    # Exact-count regression gate (works in offline mode):
+    uv run python scripts/eval_memory.py --offline --budget 4000 --expect-hits 24
 """
 
 from __future__ import annotations
@@ -211,6 +214,7 @@ def run_evaluation(
     budget: int,
     check_gates: bool = False,
     offline: bool = False,
+    expect_hits: int | None = None,
 ) -> int:
     """Run all gold questions and print per-question results + summary.
 
@@ -220,6 +224,7 @@ def run_evaluation(
         budget: Token budget passed to compact_query.
         check_gates: If True, exit nonzero when hit rate < 0.8.
         offline: If True, skip hit-rate gate even with --check-gates.
+        expect_hits: Exact hit count required; enforced in every mode.
 
     Returns:
         Exit code (0 for success, 1 if gate fails).
@@ -263,12 +268,19 @@ def run_evaluation(
         sum(all_token_estimates) / len(all_token_estimates) if all_token_estimates else 0.0
     )
 
-    print(f"Overall hit rate: {sum(all_hits)}/{len(all_hits)} = {overall_rate:.1%}")
+    hit_count = sum(all_hits)
+    print(f"Overall hit rate: {hit_count}/{len(all_hits)} = {overall_rate:.1%}")
     for cat, hits in sorted(results_by_cat.items()):
         rate = sum(hits) / len(hits) if hits else 0.0
         print(f"  {cat}: {sum(hits)}/{len(hits)} = {rate:.1%}")
     print(f"Mean output tokens: {mean_tokens:.0f}")
 
+    if expect_hits is not None and hit_count != expect_hits:
+        print(
+            f"\nGATE FAILED: hit count {hit_count}/{len(all_hits)} != expected {expect_hits}",
+            file=sys.stderr,
+        )
+        return 1
     if check_gates and not offline and overall_rate < 0.8:
         print(f"\nGATE FAILED: hit rate {overall_rate:.1%} < 80%", file=sys.stderr)
         return 1
@@ -446,6 +458,15 @@ def main() -> int:
         help="Exit nonzero if hit rate < 80%% (only meaningful in default Ollama mode).",
     )
     parser.add_argument(
+        "--expect-hits",
+        type=int,
+        default=None,
+        help=(
+            "Exit nonzero unless the exact hit count equals N. This is enforced "
+            "in offline mode too and is intended for regression gates."
+        ),
+    )
+    parser.add_argument(
         "--budget",
         type=int,
         default=2000,
@@ -517,6 +538,7 @@ def main() -> int:
                 budget=args.budget,
                 check_gates=args.check_gates,
                 offline=args.offline,
+                expect_hits=args.expect_hits,
             )
 
     filtered_gold = _filter_gold(gold, ingested_files, args.max_files)
@@ -526,6 +548,7 @@ def main() -> int:
         budget=args.budget,
         check_gates=args.check_gates,
         offline=args.offline,
+        expect_hits=args.expect_hits,
     )
 
 

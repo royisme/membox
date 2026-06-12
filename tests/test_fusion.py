@@ -11,11 +11,22 @@ from membox.config import RetrievalConfig
 from membox.core.agent import MemoryAgent
 from membox.core.store import KnowledgeStore
 from membox.core.store.retrieval import est_tokens
-from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
+from membox.model.schema import (
+    ExtractedEntity,
+    ExtractedGraph,
+    ExtractedRelation,
+    MemorySourceKind,
+    MemoryUnitRecord,
+    MemoryUnitSource,
+    MemoryUnitStatus,
+    MemoryUnitType,
+)
 from membox.services.extraction import DummyExtractor
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from membox.core.store.memory_units import MemoryQueryHit
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +81,30 @@ def _scored_item(
         "evidence": evidence or [],
         "_best_date": "",
     }
+
+
+def _memory_unit(
+    title: str, status: MemoryUnitStatus = MemoryUnitStatus.ACTIVE_UNIT
+) -> MemoryUnitRecord:
+    """Build a query-side memory unit for fusion tests."""
+    return MemoryUnitRecord(
+        project="membox",
+        unit_type=MemoryUnitType.DECISION,
+        status=status,
+        title=title,
+        content="Phase E query memory fusion recalls relevant project decisions.",
+        importance_score=0.8,
+        confidence_score=0.8,
+        labels=["retrieval"],
+        sources=[
+            MemoryUnitSource(
+                source_kind=MemorySourceKind.HISTORY_MESSAGE,
+                source_ref=f"msg-{title}",
+                source_message_id=f"msg-{title}",
+                quote="Phase E query memory",
+            )
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +251,114 @@ class TestCrossPoolDedup:
             top_evidence_k=1,
         )
         assert "distinct chunk content" in out
+
+
+class TestMemoryFusion:
+    """Opt-in query memory fusion leaves default output untouched."""
+
+    def test_include_memory_adds_memory_section_and_footer(self, tmp_path: Path) -> None:
+        """--include-memory admits matching units under memory coverage."""
+        agent = _make_agent(tmp_path)
+        unit_id = agent.store.create_memory_unit(
+            _memory_unit("Phase E memory", MemoryUnitStatus.CRYSTAL)
+        )
+
+        out = agent.compact_query(
+            "Phase E query memory",
+            budget=200,
+            include_memory=True,
+            memory_project="membox",
+        )
+
+        assert "Relevant memory" in out
+        assert "[crystal] decision: Phase E memory" in out
+        assert "1/1 crystals" in out
+        assert "0/0 units" in out
+        recalled = agent.store.get_memory_unit(unit_id)
+        assert recalled is not None
+        assert recalled.recall_count == 1
+        assert recalled.last_recalled_at is not None
+
+    def test_memory_off_output_is_identical(self, tmp_path: Path) -> None:
+        """Adding memory rows does not alter default compact_query output."""
+        agent = _make_agent(tmp_path)
+        before = agent.compact_query("Phase E query memory", budget=200)
+        unit_id = agent.store.create_memory_unit(
+            _memory_unit("Phase E memory", MemoryUnitStatus.CRYSTAL)
+        )
+        after = agent.compact_query("Phase E query memory", budget=200)
+
+        assert after == before
+        recalled = agent.store.get_memory_unit(unit_id)
+        assert recalled is not None
+        assert recalled.recall_count == 0
+        assert recalled.last_recalled_at is None
+
+    def test_include_memory_does_not_crowd_out_source_chunk(self, tmp_path: Path) -> None:
+        """Memory share cannot evict answer-bearing FTS source evidence."""
+        agent = _make_agent(tmp_path)
+        agent.store.insert_document(
+            "The answer-bearing source chunk says SQLite is the storage backend.",
+            project="membox",
+            source_path="docs/source.md",
+            section="Answer",
+        )
+        agent.store.create_memory_unit(_memory_unit("Phase E memory", MemoryUnitStatus.CRYSTAL))
+
+        out = agent.compact_query(
+            "answer-bearing source chunk SQLite storage backend Phase E memory",
+            budget=240,
+            project_filter="membox",
+            include_memory=True,
+            memory_project="membox",
+        )
+
+        assert "Relevant memory" in out
+        assert "The answer-bearing source chunk says SQLite is the storage backend." in out
+
+    def test_memory_admission_is_rank_prefix(self, tmp_path: Path) -> None:
+        """Admission stops at the first non-fitting hit; lower ranks never leapfrog."""
+        agent = _make_agent(tmp_path)
+
+        def hit(unit_id: int, title: str, content: str) -> MemoryQueryHit:
+            return {
+                "id": unit_id,
+                "project": "membox",
+                "unit_type": "decision",
+                "status": "active_unit",
+                "title": title,
+                "content": content,
+                "context": "",
+                "importance_score": 0.8,
+                "confidence_score": 0.8,
+                "updated_at": None,
+                "recall_count": 0,
+                "last_recalled_at": None,
+                "relevance_score": 1.0,
+                "stored_score": 0.64,
+                "recency_score": 1.0,
+                "score": 0.64,
+            }
+
+        hits = [
+            hit(1, "Top short", "fits"),
+            hit(2, "Second long", "x" * 400),
+            hit(3, "Third short", "fits"),
+        ]
+        # Budget fits hits 1 and 3 together but not hit 2: best-fit admission
+        # would leapfrog hit 3 past hit 2; rank-prefix must stop at hit 2.
+        budget = est_tokens("[unit] decision: Top short - fits") + est_tokens(
+            "[unit] decision: Third short - fits"
+        )
+
+        lines, _used, _ac, _tc, admitted_units, _tu, admitted_ids = agent._render_memory_hits(
+            hits, budget
+        )
+
+        assert admitted_ids == [1]
+        assert admitted_units == 1
+        assert len(lines) == 1
+        assert "Top short" in lines[0]
 
 
 # ---------------------------------------------------------------------------

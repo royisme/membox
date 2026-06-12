@@ -876,3 +876,53 @@ class TestEvalOffline:
         # Should not raise; hit rate not checked in offline mode.
         exit_code = mod.run_evaluation(agent, gold, budget=2000, check_gates=False, offline=True)
         assert exit_code == 0
+
+    @pytest.mark.slow
+    def test_offline_eval_exact_hit_gate(self, tmp_path: Path) -> None:
+        """--expect-hits enforces exact hit counts even in offline mode."""
+        import importlib.util
+
+        script_path = Path(__file__).parent.parent / "scripts" / "eval_memory.py"
+        spec = importlib.util.spec_from_file_location("eval_memory", script_path)
+        assert spec is not None
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+
+        corpus_dir = Path(__file__).parent.parent / "eval" / "corpus"
+        gold_path = Path(__file__).parent.parent / "eval" / "gold.yaml"
+        if not corpus_dir.is_dir() or not gold_path.exists():
+            pytest.skip("eval corpus or gold.yaml not found")
+
+        import yaml
+
+        with open(gold_path) as f:
+            gold = yaml.safe_load(f) or []
+
+        db_path = str(tmp_path / "eval_exact_gate.db")
+        agent = mod.make_eval_agent(offline=True, db_path=db_path)
+        chunks, _ingested = mod.ingest_corpus(agent, corpus_dir)
+        assert chunks > 0
+
+        assert (
+            mod.run_evaluation(
+                agent,
+                gold,
+                budget=4000,
+                check_gates=False,
+                offline=True,
+                expect_hits=24,
+            )
+            == 0
+        )
+        assert (
+            mod.run_evaluation(
+                agent,
+                gold,
+                budget=4000,
+                check_gates=False,
+                offline=True,
+                expect_hits=26,
+            )
+            == 1
+        )

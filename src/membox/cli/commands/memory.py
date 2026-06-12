@@ -172,9 +172,9 @@ def memory_consolidate(
         since=since,
         limit=limit,
     )
-    counts = {
-        unit.id: store.count_independent_sources(unit.id) for unit in units if unit.id is not None
-    }
+    counts = store.count_independent_sources_for_units(
+        [unit.id for unit in units if unit.id is not None]
+    )
     plan = build_consolidation_plan(units, counts)
     _print_consolidation_plan(plan, dry_run=dry_run)
     if dry_run:

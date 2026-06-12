@@ -136,6 +136,7 @@ def test_independent_source_count_uses_distinct_sessions(tmp_path: Path) -> None
     updated = store.get_memory_unit(unit_id)
     assert updated is not None
     assert updated.confidence_score == pytest.approx(0.80)
+    assert store.count_independent_sources_for_units([unit_id]) == {unit_id: 2}
 
 
 def test_consolidate_dry_run_does_not_write_or_take_lease(tmp_path: Path) -> None:

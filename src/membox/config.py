@@ -161,6 +161,9 @@ class RetrievalConfig(BaseModel):
             for triples in pass 1; any leftover rolls over to pass 2 chunks,
             and any chunk leftover rolls back to triple backfill in pass 3.
             Default ``0.4``.
+        memory_share: Fraction of the token budget reserved for opt-in
+            query-side memory recall when ``--include-memory`` is used.
+            Default ``0.15`` per spec_02 Phase E.
     """
 
     hop_decay: float = 0.7
@@ -171,6 +174,7 @@ class RetrievalConfig(BaseModel):
     fts_fallback_k: int = 10
     fusion_mode: str = "merge"
     chunk_share: float = 0.4
+    memory_share: float = 0.15
 
 
 class HistoryConfig(BaseModel):

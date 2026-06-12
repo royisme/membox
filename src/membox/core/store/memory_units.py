@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
 from membox.core.consolidate import evolved_confidence
@@ -29,6 +30,11 @@ if TYPE_CHECKING:
     from membox.core.store.connection import ConnectionManager
 
 _TERMINAL_DEDUP_STATUSES = {MemoryUnitStatus.RETRACTED.value}
+MEMORY_CRYSTAL_BOOST = 1.5
+"""Owner-calibrated score multiplier for crystals in query-side memory recall."""
+
+MEMORY_RECENCY_DAYS = 30.0
+"""Owner-calibrated half-life-like window for updated_at recency scoring."""
 
 
 class MemoryUnitHit(TypedDict):
@@ -41,6 +47,20 @@ class MemoryUnitHit(TypedDict):
     title: str
     content: str
     context: str
+
+
+class MemoryQueryHit(MemoryUnitHit):
+    """One ranked memory hit eligible for query-side memory fusion."""
+
+    importance_score: float
+    confidence_score: float
+    updated_at: str | None
+    recall_count: int
+    last_recalled_at: str | None
+    relevance_score: float
+    stored_score: float
+    recency_score: float
+    score: float
 
 
 class TraceForTriage(TypedDict):
@@ -437,6 +457,49 @@ class MemoryUnitOps:
         """Count distinct independent sources for crystal promotion."""
         return len(self._independent_source_keys(unit_id))
 
+    def count_independent_sources_for_units(self, unit_ids: list[int]) -> dict[int, int]:
+        """Count independent sources for many memory units in one query."""
+        if not unit_ids:
+            return {}
+        unique_ids = sorted(set(unit_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = (
+            self._cm.connection()
+            .execute(
+                f"""
+            SELECT mus.unit_id, mus.source_kind, mus.source_ref,
+                   hm.session_id AS message_session_id,
+                   he.session_id AS event_session_id
+            FROM memory_unit_sources mus
+            LEFT JOIN history_messages hm
+              ON mus.source_kind=? AND hm.id=mus.source_ref
+            LEFT JOIN history_events he
+              ON mus.source_kind=? AND he.id=mus.source_ref
+            WHERE mus.unit_id IN ({placeholders})
+            """,
+                [
+                    MemorySourceKind.HISTORY_MESSAGE.value,
+                    MemorySourceKind.HISTORY_EVENT.value,
+                    *unique_ids,
+                ],
+            )
+            .fetchall()
+        )
+        keys_by_unit = {unit_id: set[str]() for unit_id in unique_ids}
+        for row in rows:
+            unit_id = int(str(row[0]))
+            source_kind = str(row[1])
+            source_ref = str(row[2])
+            if source_kind == MemorySourceKind.HISTORY_MESSAGE.value:
+                session = str(row[3]) if row[3] is not None else _trace_session_key(source_ref)
+                keys_by_unit[unit_id].add(f"session:{session}")
+            elif source_kind == MemorySourceKind.HISTORY_EVENT.value:
+                session = str(row[4]) if row[4] is not None else _trace_session_key(source_ref)
+                keys_by_unit[unit_id].add(f"session:{session}")
+            else:
+                keys_by_unit[unit_id].add(f"{source_kind}:{source_ref}")
+        return {unit_id: len(keys) for unit_id, keys in keys_by_unit.items()}
+
     def attach_memory_unit_source(
         self,
         unit_id: int,
@@ -592,6 +655,115 @@ class MemoryUnitOps:
             for row in rows
         ]
 
+    def search_memory_units_for_query(
+        self,
+        project: str | None,
+        query_terms: str,
+        *,
+        limit: int = 20,
+    ) -> list[MemoryQueryHit]:
+        """Return ranked active units/crystals for opt-in query memory fusion.
+
+        The read path is deterministic and offline: FTS relevance is multiplied
+        by stored importance/confidence, updated_at recency, and a crystal boost.
+        Superseded, retracted, archived, and raw unit_candidate rows are excluded.
+        """
+        if not query_terms.strip() or limit <= 0:
+            return []
+        conn = self._cm.connection()
+        fts_name, match_expr = _memory_fts_table_and_query(query_terms)
+        if match_expr == '""':
+            return []
+        clauses = [
+            f"{fts_name} MATCH ?",
+            "mu.status IN (?, ?, ?)",
+            "mu.superseded_by IS NULL",
+        ]
+        params: list[object] = [
+            match_expr,
+            MemoryUnitStatus.ACTIVE_UNIT.value,
+            MemoryUnitStatus.CRYSTAL_CANDIDATE.value,
+            MemoryUnitStatus.CRYSTAL.value,
+        ]
+        if project is not None:
+            clauses.append("mu.project=?")
+            params.append(project)
+        params.append(limit * 4)
+        rows = conn.execute(
+            f"""
+            SELECT mu.id, mu.project, mu.unit_type, mu.status, mu.title, mu.content,
+                   mu.context, mu.importance_score, mu.confidence_score, mu.updated_at,
+                   mu.recall_count, mu.last_recalled_at, bm25({fts_name}) AS rank
+            FROM {fts_name}
+            JOIN memory_units mu ON mu.id={fts_name}.rowid
+            WHERE {" AND ".join(clauses)}
+            ORDER BY rank
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        if not rows:
+            return []
+        ranks = [float(row[12]) for row in rows]
+        best = min(ranks)
+        worst = max(ranks)
+        hits: list[MemoryQueryHit] = []
+        for row in rows:
+            status = str(row[3])
+            relevance = _normalized_bm25(float(row[12]), best, worst)
+            importance = float(str(row[7]))
+            confidence = float(str(row[8]))
+            stored = max(0.0, importance) * max(0.0, confidence)
+            recency = _memory_recency_factor(None if row[9] is None else str(row[9]))
+            tier = MEMORY_CRYSTAL_BOOST if status == MemoryUnitStatus.CRYSTAL.value else 1.0
+            score = relevance * stored * recency * tier
+            hits.append(
+                {
+                    "id": int(row[0]),
+                    "project": str(row[1]),
+                    "unit_type": str(row[2]),
+                    "status": status,
+                    "title": str(row[4]),
+                    "content": str(row[5]),
+                    "context": str(row[6]),
+                    "importance_score": importance,
+                    "confidence_score": confidence,
+                    "updated_at": None if row[9] is None else str(row[9]),
+                    "recall_count": int(str(row[10])),
+                    "last_recalled_at": None if row[11] is None else str(row[11]),
+                    "relevance_score": relevance,
+                    "stored_score": stored,
+                    "recency_score": recency,
+                    "score": score,
+                }
+            )
+        return sorted(
+            hits,
+            key=lambda hit: (
+                -hit["score"],
+                hit["status"] != MemoryUnitStatus.CRYSTAL.value,
+                hit["id"],
+            ),
+        )[:limit]
+
+    def mark_memory_units_recalled(self, unit_ids: list[int]) -> None:
+        """Bump recall bookkeeping for admitted query-side memories."""
+        if not unit_ids:
+            return
+        unique_ids = sorted(set(unit_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        with self._cm.transaction() as c:
+            c.execute(
+                f"""
+                UPDATE memory_units
+                SET recall_count=recall_count + 1,
+                    last_recalled_at=datetime('now'),
+                    updated_at=updated_at
+                WHERE id IN ({placeholders})
+                """,
+                unique_ids,
+            )
+
     def acquire_lifecycle_lease(self, project: str) -> bool:
         """Acquire the lifecycle lease for one project."""
         from membox.core.store.queue import (
@@ -724,6 +896,44 @@ def _trace_session_key(source_ref: str) -> str:
         if marker in source_ref:
             return source_ref.split(marker, maxsplit=1)[0]
     return source_ref
+
+
+def _memory_fts_table_and_query(query: str) -> tuple[str, str]:
+    """Choose memory-unit FTS sidecar and MATCH expression for a query."""
+    if _contains_cjk(query):
+        terms = _cjk_trigram_terms(query)
+        if terms:
+            return "memory_units_fts_trigram", _fts5_query_from_terms(terms)
+    return "memory_units_fts", _fts5_or_query(query)
+
+
+def _normalized_bm25(rank: float, best: float, worst: float) -> float:
+    """Normalize SQLite FTS5 bm25 rank to 0..1 where 1 is most relevant."""
+    if best == worst:
+        return 1.0
+    return max(0.0, min(1.0, (worst - rank) / (worst - best)))
+
+
+def _memory_recency_factor(updated_at: str | None) -> float:
+    """Return a bounded recency factor based on age since updated_at."""
+    if updated_at is None:
+        return 1.0
+    parsed = _parse_sqlite_datetime(updated_at)
+    if parsed is None:
+        return 1.0
+    age_days = max(0.0, (datetime.now(UTC) - parsed).total_seconds() / 86_400)
+    return 1.0 / (1.0 + (age_days / MEMORY_RECENCY_DAYS))
+
+
+def _parse_sqlite_datetime(value: str) -> datetime | None:
+    """Parse SQLite datetime strings as UTC."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _triage_from_row(row: tuple[object, ...]) -> HistoryTriageRecord:

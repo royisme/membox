@@ -154,6 +154,46 @@ def test_memory_unit_fts_search(tmp_path: Path) -> None:
     assert [hit["id"] for hit in hits] == [unit_id]
 
 
+def test_query_memory_pool_filters_and_ranks(tmp_path: Path) -> None:
+    """Query-side memory pool returns ranked active units/crystals only."""
+    store = KnowledgeStore(str(tmp_path / "units.db"))
+
+    def make_unit(
+        title: str,
+        status: MemoryUnitStatus,
+        project: str = "membox",
+    ) -> MemoryUnitRecord:
+        unit = _unit()
+        unit.project = project
+        unit.title = title
+        unit.content = "Migration Phase E query memory fusion uses ranked memory recall."
+        unit.status = status
+        unit.sources = [
+            MemoryUnitSource(
+                source_kind=MemorySourceKind.HISTORY_MESSAGE,
+                source_ref=f"msg-{title}",
+                source_message_id=f"msg-{title}",
+                quote="Phase E query memory",
+            )
+        ]
+        return unit
+
+    active_id = store.create_memory_unit(make_unit("Active memory", MemoryUnitStatus.ACTIVE_UNIT))
+    crystal_id = store.create_memory_unit(make_unit("Crystal memory", MemoryUnitStatus.CRYSTAL))
+    store.create_memory_unit(make_unit("Candidate memory", MemoryUnitStatus.CRYSTAL_CANDIDATE))
+    store.create_memory_unit(make_unit("Archived memory", MemoryUnitStatus.ARCHIVED))
+    store.create_memory_unit(make_unit("Other project memory", MemoryUnitStatus.CRYSTAL, "other"))
+
+    hits = store.search_memory_units_for_query("membox", "Phase E query memory")
+
+    assert [hit["id"] for hit in hits[:2]] == [crystal_id, active_id]
+    assert hits[0]["score"] > hits[1]["score"]
+    assert {"crystal", "active_unit", "crystal_candidate"}.issubset({hit["status"] for hit in hits})
+
+    all_project_hits = store.search_memory_units_for_query(None, "Phase E query memory")
+    assert {hit["project"] for hit in all_project_hits} == {"membox", "other"}
+
+
 def test_memory_cli_dry_run_and_apply_are_idempotent(tmp_path: Path) -> None:
     """memory triage/extract obey dry-run/apply and source-id dedup."""
     db = str(tmp_path / "cli.db")
