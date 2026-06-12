@@ -391,7 +391,7 @@ def test_consolidation_surfaces_fts_pair_for_paraphrases(tmp_path: Path) -> None
             content="Membox uses local SQLite storage as the default database for agents.",
             unit_type=MemoryUnitType.FACT,
             labels=["storage"],
-            sources=[_source("history:sqlite-a", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[_source("manual:sqlite-a")],
         )
     )
     second = store.create_memory_unit(
@@ -400,11 +400,20 @@ def test_consolidation_surfaces_fts_pair_for_paraphrases(tmp_path: Path) -> None
             content="For agent memory, the default storage backend is a local SQLite database.",
             unit_type=MemoryUnitType.FACT,
             labels=["storage"],
-            sources=[_source("history:sqlite-b", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[_source("manual:sqlite-b")],
         )
     )
     fts_pairs = store.fts_conflict_pairs_for_units(
         store.list_units_for_consolidation(project="membox")
+    )
+    plan = build_consolidation_plan(
+        store.list_units_for_consolidation(project="membox"),
+        {
+            unit.id: store.count_independent_sources(unit.id)
+            for unit in store.list_units_for_consolidation(project="membox")
+            if unit.id is not None
+        },
+        fts_pair_ids=fts_pairs,
     )
 
     dry_run = runner.invoke(
@@ -417,6 +426,9 @@ def test_consolidation_surfaces_fts_pair_for_paraphrases(tmp_path: Path) -> None
     )
 
     assert (first, second) in fts_pairs
+    assert [(pair.left_id, pair.right_id) for pair in plan.fts_pairs] == [(first, second)]
+    assert plan.conflicts == []
+    assert {transition.unit_id for transition in plan.promotions} == {first, second}
     assert dry_run.exit_code == 0, dry_run.output
     assert f"conflict review {first}<->{second}" in dry_run.output
     assert "fts_pair token-overlap candidate" in dry_run.output
@@ -425,8 +437,8 @@ def test_consolidation_surfaces_fts_pair_for_paraphrases(tmp_path: Path) -> None
     second_unit = store.get_memory_unit(second)
     assert first_unit is not None
     assert second_unit is not None
-    assert first_unit.status == MemoryUnitStatus.ACTIVE_UNIT
-    assert second_unit.status == MemoryUnitStatus.ACTIVE_UNIT
+    assert first_unit.status == MemoryUnitStatus.CRYSTAL
+    assert second_unit.status == MemoryUnitStatus.CRYSTAL
 
 
 def test_consolidation_supersedes_newer_corrections(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ A clear message: "`--apply` is not yet implemented; please use `--dry-run`."
 
 ## Actual
 
-```
+```text
 Error: pass --dry-run for Phase F distill
 ```
 

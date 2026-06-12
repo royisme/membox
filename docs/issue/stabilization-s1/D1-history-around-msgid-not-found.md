@@ -18,7 +18,7 @@ The CLI prints the conversation window around the message (preceding message + t
 
 ## Actual
 
-```
+```text
 Error: no such message: membox-capture:test-session-1:msg:m1
 ```
 

@@ -9,6 +9,10 @@
 # Fixture: /tmp/membox-capture-sample.jsonl contains the literal text "membox" and
 # "knowledge graph" in its messages. After a successful pull (4 messages, 1 event):
 uv run membox history search --db "$DB" "membox"
+# If the fixture was imported with --project smoke, pin that scope explicitly:
+uv run membox history search --db "$DB" --project smoke "membox"
+# Or bypass project filtering while debugging the index path:
+uv run membox history search --db "$DB" --all-projects "membox"
 ```
 
 ## Expected
@@ -17,7 +21,7 @@ At least one hit referencing `membox-capture:test-session-1` with the matching m
 
 ## Actual
 
-```
+```text
 No history hits.
 ```
 
@@ -31,7 +35,7 @@ Three candidates — verify by reading the code, not by guessing:
 
 1. **FTS index is not populated on `import_history`.** The history pull path may write to `history_messages` but skip the FTS5 side table that `history search` queries.
 2. **Project scoping drops the import's project.** The importer may record `project="smoke"` on the session row, and the search resolver may default to a different project filter (cwd-inferred, or empty) that excludes the row.
-3. **Query is hitting a different table.** The search may target `messages_text` (knowledge-graph) when it should target `history_messages_fts` (trace).
+3. **Importer/index-builder writes do not match search expectations.** The `import_history` path, the importer that writes `history_messages`, or the index-builder step that updates `history_messages_fts` may be writing to the wrong table or failing to populate the history FTS side table. The mismatch could be between what the importer/index-builder writes and what `history search` expects when it queries `history_messages_fts`.
 
 ## Suggested fix
 

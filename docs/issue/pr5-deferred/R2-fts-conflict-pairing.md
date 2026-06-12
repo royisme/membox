@@ -13,7 +13,8 @@ The `consolidate` command already exposes a "conflicts" surface, but it is popul
 
 - In the gate (wherever `consolidate --dry-run` builds its conflict list), add a second pass that runs an FTS5 query per active unit's text and pairs top-K candidates with cosine-overlap or simple token overlap.
 - Pairing is a candidate, not a hard conflict: the operator still promotes via `consolidate --apply`, and the FTS pairing is one input among others.
-- New FTS-pair rows are stored alongside the existing deterministic conflict rows so the dry-run output is uniform.
+- New FTS-pair rows are stored separately from deterministic conflict rows (for example, `plan.fts_pairs` or `fts_pair_rows`) so the dry-run output is uniform without converting FTS pairs into hard conflict IDs.
+- `build_consolidation_plan()` must only convert deterministic `plan.conflicts` into `conflict_ids`. FTS pairs must not suppress unrelated promotions, candidates, demotions, or supersessions; render and serialize them alongside conflicts where operator output needs the combined review surface.
 
 ## Acceptance criteria
 

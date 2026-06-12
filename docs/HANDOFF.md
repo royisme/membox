@@ -7,7 +7,7 @@
 
 ### Pending user decisions before next work item
 - Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
-- `docs/spec-v0.2-draft.md` (per-project DB storage model) — still pending review; listed in the spec index Drafts section.
+- `docs/spec-v0.2-draft.md` (per-project DB storage model) — retired by owner decision on 2026-06-13; the two-DB storage model is rejected, while the surviving global-memory-scope idea is parked in `docs/roadmap.md` Future Tracks.
 
 ### New conventions worth remembering across sessions
 - **Merge into main uses `merge --no-ff` with a `merge: <theme>` message**, then a separate commit for handoff/design-doc syncs on the feature branch. See `git log main --merges` for examples. No PR/CODEOWNERS flow is required.

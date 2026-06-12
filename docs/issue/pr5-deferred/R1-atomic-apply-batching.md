@@ -19,7 +19,7 @@ Wrap the apply path in a single SQLite transaction with `BEGIN IMMEDIATE`:
 
 ## Acceptance criteria
 
-- A test injects a forced failure on the 7th of 10 candidate units and asserts: the 9 successful transitions are NOT visible after the failure (transaction rolled back), the error message names unit 7, and a follow-up `--apply` on the same 10 candidates succeeds cleanly.
+- A test injects a forced failure on the 7th of 10 candidate units and asserts: the 6 earlier transitions are NOT visible after the failure (transaction rolled back), the error message names the 7th unit, and a follow-up `--apply` on the same 10 candidates succeeds cleanly.
 - Coverage of the transaction-rollback path is at least the same as the happy path.
 
 ## Sequencing

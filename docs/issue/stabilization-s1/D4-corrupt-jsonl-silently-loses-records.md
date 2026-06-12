@@ -22,7 +22,7 @@ Either (a) the import fails loudly on the malformed line, or (b) it succeeds but
 
 ## Actual
 
-```
+```text
 Imported 4 messages, 1 events into session membox-capture:test-session-1
 ```
 

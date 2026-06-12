@@ -355,7 +355,7 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
     prefix = "would " if dry_run else ""
     for issue in plan.validator_rejections:
         typer.echo(f"validator reject {issue.unit_id} title={issue.title!r} reason={issue.reason}")
-    for conflict in plan.conflicts:
+    for conflict in [*plan.conflicts, *plan.fts_pairs]:
         typer.echo(
             f"conflict review {conflict.left_id}<->{conflict.right_id} "
             f"left={conflict.left_title!r} right={conflict.right_title!r} "
@@ -379,7 +379,7 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
                 f"{target} title={action.title!r} reason={action.reason}"
             )
     transition_count = len(_ordered_transitions(plan))
-    conflict_count = len(plan.conflicts)
+    conflict_count = len(plan.conflicts) + len(plan.fts_pairs)
     issue_count = len(plan.validator_rejections) + len(plan.decay_reviews)
     console.print(
         f"[green]{'Would apply' if dry_run else 'Planned'}[/green] "

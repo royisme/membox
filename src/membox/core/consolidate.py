@@ -88,6 +88,7 @@ class ConsolidationPlan:
     candidates: list[ConsolidationTransition] = field(default_factory=list)
     demotions: list[ConsolidationTransition] = field(default_factory=list)
     conflicts: list[ConsolidationConflict] = field(default_factory=list)
+    fts_pairs: list[ConsolidationConflict] = field(default_factory=list)
     supersessions: list[ConsolidationTransition] = field(default_factory=list)
     decay_archives: list[ConsolidationTransition] = field(default_factory=list)
     decay_reviews: list[ConsolidationIssue] = field(default_factory=list)
@@ -139,7 +140,8 @@ def build_consolidation_plan(
     validator_rejections = validate_units(units)
     rejected_ids = {issue.unit_id for issue in validator_rejections}
     eligible_units = [unit for unit in units if unit.id is not None and unit.id not in rejected_ids]
-    conflicts = detect_conflicts(eligible_units, fts_pair_ids=fts_pair_ids)
+    conflicts = detect_conflicts(eligible_units)
+    fts_pairs = detect_fts_pairs(eligible_units, fts_pair_ids=fts_pair_ids)
     conflict_ids = {conflict.left_id for conflict in conflicts} | {
         conflict.right_id for conflict in conflicts
     }
@@ -204,6 +206,7 @@ def build_consolidation_plan(
         candidates=candidates,
         demotions=demotions,
         conflicts=conflicts,
+        fts_pairs=fts_pairs,
         supersessions=supersessions,
         decay_archives=decay_archives,
         decay_reviews=decay_reviews,
@@ -278,13 +281,8 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
     return issues
 
 
-def detect_conflicts(
-    units: list[MemoryUnitRecord],
-    *,
-    fts_pair_ids: set[tuple[int, int]] | None = None,
-) -> list[ConsolidationConflict]:
+def detect_conflicts(units: list[MemoryUnitRecord]) -> list[ConsolidationConflict]:
     """Surface deterministic conflict pairs; never merge or overwrite them."""
-    fts_pairs = fts_pair_ids or set()
     active = [
         unit
         for unit in units
@@ -314,8 +312,36 @@ def detect_conflicts(
                     )
                 )
                 continue
-            if (left.id, right.id) in fts_pairs and _looks_fts_pair(left, right):
-                conflicts.append(
+    return conflicts
+
+
+def detect_fts_pairs(
+    units: list[MemoryUnitRecord],
+    *,
+    fts_pair_ids: set[tuple[int, int]] | None = None,
+) -> list[ConsolidationConflict]:
+    """Surface FTS review pairs without treating them as hard conflicts."""
+    if not fts_pair_ids:
+        return []
+    active = [
+        unit
+        for unit in units
+        if unit.id is not None
+        and unit.status
+        in {
+            MemoryUnitStatus.ACTIVE_UNIT,
+            MemoryUnitStatus.CRYSTAL_CANDIDATE,
+            MemoryUnitStatus.CRYSTAL,
+        }
+    ]
+    pairs: list[ConsolidationConflict] = []
+    for index, left in enumerate(active):
+        for right in active[index + 1 :]:
+            assert left.id is not None and right.id is not None
+            if left.project != right.project or not set(left.labels).intersection(right.labels):
+                continue
+            if (left.id, right.id) in fts_pair_ids and _looks_fts_pair(left, right):
+                pairs.append(
                     ConsolidationConflict(
                         left.id,
                         right.id,
@@ -325,7 +351,7 @@ def detect_conflicts(
                         sorted(_source_refs(left) | _source_refs(right)),
                     )
                 )
-    return conflicts
+    return pairs
 
 
 def detect_supersessions(
@@ -411,6 +437,7 @@ def _apply_llm_comparator(
         candidates=[transition for transition in plan.candidates if keep(transition)],
         demotions=[transition for transition in plan.demotions if keep(transition)],
         conflicts=plan.conflicts,
+        fts_pairs=plan.fts_pairs,
         supersessions=[transition for transition in plan.supersessions if keep(transition)],
         decay_archives=[transition for transition in plan.decay_archives if keep(transition)],
         decay_reviews=plan.decay_reviews,

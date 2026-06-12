@@ -18,7 +18,7 @@ A message that distinguishes the two cases:
 
 ## Actual
 
-```
+```text
 Error: set MEMBOX_SESSION_ROOT or pass --session-root
 ```
 
@@ -30,9 +30,9 @@ The smoke run was the natural first thing a new user tries: "I just installed me
 
 ## Suggested fix
 
-In `src/membox/cli/commands/history.py`'s `_resolve_session_root`, branch on whether a path argument was provided:
-- If yes: never raise; the path is sufficient.
-- If no: raise with a message that lists all three: env, flag, or positional path.
+In the `history pull` command handler in `src/membox/cli/commands/history.py`, branch on whether a path argument was provided before resolving a session root:
+- If yes: validate and import the path directly; do not call `_resolve_session_root` or suppress its error.
+- If no: call `_resolve_session_root`, which should only consider the explicit `--session-root` flag and `MEMBOX_SESSION_ROOT`; the handler should raise with a message that lists all three user options: env, flag, or positional path.
 
 Suggested wording: `Error: no path argument and no session root; pass a file path, set MEMBOX_SESSION_ROOT, or pass --session-root.`
 
