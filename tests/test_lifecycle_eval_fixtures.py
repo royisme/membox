@@ -28,12 +28,16 @@ REQUIRED_CATEGORIES = {
     "repeated_failures",
     "conflicting_memories",
     "user_corrections",
+    # D0 real-trace false-positive families (anonymized reconstructions).
+    "tool_output_noise",
+    "harness_template_noise",
 }
 MULTI_SESSION_CATEGORIES = {
     "plan_to_decision",
     "superseded_facts",
     "conflicting_memories",
     "user_corrections",
+    "harness_template_noise",
 }
 VALID_UNIT_TYPES = {
     "preference",

@@ -1,0 +1,4 @@
+{"type":"session","id":"life-c8-toolnoise","project":"membox-lifecycle","title":"raw tool output noise","started_at":"2026-06-12T09:00:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"run the status check","created_at":"2026-06-12T09:00:10Z"}
+{"type":"event","message_id":"m1","kind":"tool_result","call_id":"noise-held-output","body":"Chunk ID: ab12cd\nWall time: 0.18 seconds\nProcess exited with code 2\nOriginal token count: 120\nOutput: HELD — reply NOT sent. First check the queue, then run `status --all` again.","is_error":true,"created_at":"2026-06-12T09:00:20Z"}
+{"type":"event","message_id":"m1","kind":"tool_result","call_id":"noise-json-cmd","body":"{\"cmd\":\"reply thread-123 'I will take the first task, then wait for the next step'\",\"workdir\":\"/home/dev/project\"}","is_error":false,"created_at":"2026-06-12T09:00:30Z"}

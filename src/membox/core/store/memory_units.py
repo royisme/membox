@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, TypedDict
 
+from membox.core.consolidate import evolved_confidence
 from membox.core.store.retrieval import (
     _cjk_trigram_terms,
     _contains_cjk,
@@ -381,7 +382,7 @@ class MemoryUnitOps:
             if row is None:
                 return False
             from_status = str(row[0])
-            c.execute(
+            cursor = c.execute(
                 """
                 UPDATE memory_units
                 SET status=?, superseded_by=COALESCE(?, superseded_by), updated_at=datetime('now')
@@ -389,7 +390,7 @@ class MemoryUnitOps:
                 """,
                 (to_status.value, superseded_by, unit_id, from_status),
             )
-            if c.total_changes == 0:
+            if cursor.rowcount == 0:
                 return False
             c.execute(
                 """
@@ -399,6 +400,96 @@ class MemoryUnitOps:
                 """,
                 (unit_id, from_status, to_status.value, command, reason, source_ref),
             )
+        return True
+
+    def list_units_for_consolidation(
+        self,
+        *,
+        project: str,
+        since: str | None = None,
+        limit: int = 500,
+    ) -> list[MemoryUnitRecord]:
+        """Return units eligible for Phase D consolidation planning."""
+        clauses = ["project=?"]
+        params: list[object] = [project]
+        if since is not None:
+            clauses.append("COALESCE(updated_at, created_at)>=?")
+            params.append(since)
+        params.append(limit)
+        conn = self._cm.connection()
+        rows = conn.execute(
+            f"""
+            SELECT id, project, unit_type, status, title, content, context,
+                   importance_score, confidence_score, temporal_type,
+                   valid_from, valid_to, superseded_by, created_at, updated_at,
+                   recall_count, last_recalled_at
+            FROM memory_units
+            WHERE {" AND ".join(clauses)}
+              AND status NOT IN ('archived', 'superseded', 'retracted')
+            ORDER BY id
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [_unit_from_row(conn, row) for row in rows]
+
+    def count_independent_sources(self, unit_id: int) -> int:
+        """Count distinct independent sources for crystal promotion."""
+        return len(self._independent_source_keys(unit_id))
+
+    def attach_memory_unit_source(
+        self,
+        unit_id: int,
+        source: MemoryUnitSource,
+        *,
+        command: str = "memory consolidate",
+        reason: str = "attached supporting source",
+    ) -> bool:
+        """Attach a source and evolve confidence for new independent support."""
+        if not source.source_ref:
+            msg = "memory unit sources require source_ref"
+            raise ValueError(msg)
+        with self._cm.transaction() as c:
+            row = c.execute(
+                "SELECT confidence_score FROM memory_units WHERE id=?",
+                (unit_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            before = self._independent_source_keys(unit_id, conn=c)
+            c.execute(
+                """
+                INSERT OR IGNORE INTO memory_unit_sources
+                    (unit_id, source_kind, source_ref, source_message_id, quote)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    unit_id,
+                    source.source_kind.value,
+                    source.source_ref,
+                    source.source_message_id,
+                    source.quote,
+                ),
+            )
+            after = self._independent_source_keys(unit_id, conn=c)
+            gained = len(after - before)
+            if gained > 0:
+                c.execute(
+                    """
+                    UPDATE memory_units
+                    SET confidence_score=?, updated_at=datetime('now')
+                    WHERE id=?
+                    """,
+                    (evolved_confidence(float(row[0]), gained), unit_id),
+                )
+                c.execute(
+                    """
+                    INSERT INTO memory_unit_status_log
+                        (unit_id, from_status, to_status, command, reason, source_ref)
+                    SELECT id, status, status, ?, ?, ? FROM memory_units WHERE id=?
+                    """,
+                    (command, reason, source.source_ref, unit_id),
+                )
         return True
 
     def restore_memory_unit(self, unit_id: int, *, reason: str = "") -> bool:
@@ -538,6 +629,42 @@ class MemoryUnitOps:
             if lease is None or _lease_is_mine(lease):
                 c.execute("DELETE FROM meta WHERE key=?;", (key,))
 
+    def _independent_source_keys(
+        self,
+        unit_id: int,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> set[str]:
+        """Return source keys according to the Phase D independence rule."""
+        c = self._cm.connection() if conn is None else conn
+        rows = c.execute(
+            """
+            SELECT source_kind, source_ref
+            FROM memory_unit_sources
+            WHERE unit_id=?
+            """,
+            (unit_id,),
+        ).fetchall()
+        keys: set[str] = set()
+        for row in rows:
+            source_kind = str(row[0])
+            source_ref = str(row[1])
+            if source_kind == MemorySourceKind.HISTORY_MESSAGE.value:
+                session = c.execute(
+                    "SELECT session_id FROM history_messages WHERE id=?",
+                    (source_ref,),
+                ).fetchone()
+                keys.add(f"session:{session[0] if session else _trace_session_key(source_ref)}")
+            elif source_kind == MemorySourceKind.HISTORY_EVENT.value:
+                session = c.execute(
+                    "SELECT session_id FROM history_events WHERE id=?",
+                    (source_ref,),
+                ).fetchone()
+                keys.add(f"session:{session[0] if session else _trace_session_key(source_ref)}")
+            else:
+                keys.add(f"{source_kind}:{source_ref}")
+        return keys
+
 
 def memory_unit_content_hash(unit: MemoryUnitRecord) -> str:
     """Return the normalized content hash for a memory unit."""
@@ -589,6 +716,14 @@ def _lookup_unit_id(
         msg = "memory unit insert did not produce a row"
         raise RuntimeError(msg)
     return int(row[0])
+
+
+def _trace_session_key(source_ref: str) -> str:
+    """Best-effort session key from a stable history message/event id."""
+    for marker in (":msg:", ":evt:"):
+        if marker in source_ref:
+            return source_ref.split(marker, maxsplit=1)[0]
+    return source_ref
 
 
 def _triage_from_row(row: tuple[object, ...]) -> HistoryTriageRecord:
