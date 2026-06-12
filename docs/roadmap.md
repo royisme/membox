@@ -300,6 +300,8 @@ End-to-end run of the full Lifecycle Track pipeline on membox's own dev sessions
 - [ ] `membox query --include-memory "..."` — confirm memory surfaces in answers
 - [ ] File defects / gaps discovered during the run as GitHub issues
 
+Defects surfaced in the initial 2026-06-12 dogfooding pass are tracked in [`docs/issue/stabilization-s1/`](issue/stabilization-s1/README.md). **D3 (extract creates zero units)** blocks downstream verification of S1 itself; fix first.
+
 ### S2 — Robustness
 
 Harden the import and processing pipeline against real-world edge cases:
@@ -318,6 +320,8 @@ Fold in the items deferred during plan_06 code review:
 - [ ] FTS-based conflict candidate pairing — replace the in-memory pairwise scan in the conflict detector with an FTS5 candidate query to bound quadratic blowup on large unit sets
 - [ ] LLM conflict comparator — injectable `ConflictComparator` Protocol backed by an LLM call; replaces the deterministic word-list signal for high-confidence conflict detection (real-trace recall currently uncalibrated)
 - [ ] Gate v4 — `--help-dump` event family: add a heuristic rule to suppress bare `--help` output events from triage extraction (accepted residual risk in plan_04 D0; gate bump re-triages existing pending rows)
+
+Detailed specs for the four items intentionally carried out of PR #5: [`docs/issue/pr5-deferred/`](issue/pr5-deferred/README.md) (R1 atomic apply → R2 FTS pairing → R3 LLM comparator → R4 gate v4).
 
 ### S4 — Performance Sanity
 
