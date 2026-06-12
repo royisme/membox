@@ -1,6 +1,6 @@
 # Plan 04 — Phase D: Memory Consolidation (crystals, conflicts, decay)
 
-> **Status**: Implementation exists on `feature/phase-d-consolidation` (D1–D5 + review-fix pass, 2026-06-12); the D0 exit gate was NOT met by the first real-trace run (see sign-off line below) and a v3 tuning round was run the same day: c8/c9 noise fixtures committed, gate at heuristic-v3, real-trace re-run 11 extract / 289 reject with both false-positive families eliminated. **Merge waits on the owner's final OK over the v3 results** (the exit gate's "v3 tuning round closed the gaps" path — results recorded in the sign-off package below). · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
+> **Status**: **Complete — merged to main 2026-06-12** (`1861b8d`, "merge: Phase D consolidation + gate v3 (Session 12)"). D0 path taken: first real-trace run failed the exit gate → owner signed NEEDS v3 TUNING → v3 round closed the gaps (c8/c9 fixtures, heuristic-v3, re-run 11/289) → owner gave the final OK over the v3 results and the accepted-risks list below. · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
 > **Predecessor**: Phase C (plan_01) implemented — migration 8, heuristic-v2 gate, `membox memory triage/extract/supersede/retract/restore/search`, C5 harness at precision/recall/type-accuracy 1.00 on the C1 fixtures.
 
 ## Goal
@@ -35,7 +35,9 @@ Exit gate for D0: owner has seen the dry-run sample summary and signed off that 
 - Real-trace re-run (same 300 rows): **11 extract / 289 reject** (was 167/133). Extracted events: 2 (one repeated `--help`-style introspection dump surviving via correction words in help text — known residual, v4 candidate, accepted for now). Template messages extracted: 0. The remaining 9 extracted messages are instruction blobs/assistant rationale hitting `explicit_decision_or_rule` — borderline but not noise families.
 - D5 harness extended to the full plan scope: c3 supersedes_plan, c1/c2 not_applicable, c8/c9 rejected, crystal-precision line printed (1.00 on fixtures). Full suite 535 passed; ruff + strict mypy clean.
 
-**Residual risks accepted with this round** (owner is signing off on these, explicitly): the `--help`-dump event family (2 rows) still extracts; instruction-blob messages extract as borderline `explicit_decision_or_rule`; and the C5 harness type-accuracy semantics changed to "any passing ref predicts the gold type" (an entry with plan+decision refs is type-correct if the decision ref matches) — flag if you want gold-type tied to the superseding ref instead.
+**Residual risks accepted with this round** (owner signed off on these explicitly with the final OK, 2026-06-12): the `--help`-dump event family (2 rows) still extracts (v4 candidate); instruction-blob messages extract as borderline `explicit_decision_or_rule`; and the C5 harness type-accuracy semantics changed to "any passing ref predicts the gold type" (an entry with plan+decision refs is type-correct if the decision ref matches).
+
+**Final sign-off**: `D0 closed: OK over v3 results — 2026-06-12 — merged to main in 1861b8d.`
 
 ## Current state (verify before execution)
 
