@@ -1,6 +1,6 @@
 # Membox Spec 02 — Agent Memory Lifecycle (Trace → Unit → Crystal)
 
-Status: Spec — accepted v2.3 (2026-06-11), Phases A–E implemented (Phase E merged 2026-06-12), Phase F pending
+Status: Spec — accepted v2.3 (2026-06-11), Phases A–E implemented (Phase E merged 2026-06-12), Phase F merged 2026-06-12
 Date: 2026-06-11
 Scope: next-stage memory-system design after graph + FTS retrieval quality gate
 Audience: project owner and coding agents reviewing future Membox phases

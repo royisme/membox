@@ -70,6 +70,8 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/eval_memory.py` — scripts/eval_memory.py — membox Phase 7.5 M3 evaluation harness.
   - `scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
+- `skills/`
+  - `skills/membox-skill.md`
 - `src/`
   - `src/membox/`
     - `src/membox/cli/`

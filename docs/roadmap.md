@@ -271,7 +271,7 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 | C | Triage + memory units, migration 8, heuristic gate | ✅ |
 | D | Consolidation, crystal policy, gate v3 | ✅ |
 | E | Query fusion `--include-memory`, merged f274d27 | ✅ |
-| F | Distill workflows | pending, plan_06 |
+| F | Distill workflows | ✅ merged, plan_06 |
 
 ---
 
@@ -294,10 +294,10 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 
 **Goal**: Write skill instruction files for coding agents.
 
-- [ ] `skills/membox-skill.md` — Generic skill template
-  - [ ] Installation instructions
-  - [ ] Command reference
-  - [ ] Usage examples
+- [x] `skills/membox-skill.md` — Generic skill template
+  - [x] Installation instructions
+  - [x] Command reference
+  - [x] Usage examples
 - [ ] Manual validation: agent reads the skill and successfully invokes the CLI commands
 
 **Validation**: Inject the skill into agent context; the agent can independently perform ingest + query.
@@ -330,7 +330,7 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
          └→ Phase 7.5 Memory Quality Validation
               │  (M1+M2+M3 complete → M6 async queue → M4 supersession → M5 close-the-loop)
               │
-              └→ Lifecycle Track A–E ✅ → F pending (spec_02)
+              └→ Lifecycle Track A–E ✅ → F ✅ (spec_02)
                    │
                    ├→ Phase 8 tree-sitter (Can be done in parallel)
                    ├→ Phase 9 Skill Files (Can be done in parallel)
@@ -347,7 +347,7 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
 - **Agent memory lifecycle** (Trace → Unit → Crystal): design accepted at v2.3
   in `docs/spec/spec_02_memory_lifecycle.md`. Promoted into this roadmap as the
   Lifecycle Track (Phases A–F); see the "Lifecycle Track — Phases A–F" section
-  above. Phases A–E implemented; Phase F pending.
+  above. Phases A–E implemented; Phase F merged.
 - **HOT working-state tier** (current task, open loops, session focus):
   explicitly excluded from the lifecycle track (see its Rejected Alternatives —
   working state has opposite mechanics from long-term memory). Recorded here as
