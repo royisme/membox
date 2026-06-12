@@ -36,7 +36,7 @@ MAX_DEPTH = 4
 def get_git_ignored_paths() -> set[Path]:
     """Return relative paths ignored by git via git ls-files."""
     try:
-        res = subprocess.run(  # noqa: S603
+        res = subprocess.run(
             ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],  # noqa: S607
             cwd=ROOT,
             capture_output=True,
