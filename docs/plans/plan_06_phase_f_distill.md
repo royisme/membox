@@ -1,6 +1,6 @@
 # Plan 06 — Phase F: Distill Workflows
 
-> **Status**: Draft for owner review — do not execute until accepted. · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase F (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
+> **Status**: Accepted 2026-06-12 · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase F (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
 > **Predecessor**: Phase E (plan_05) complete — merged to main `f274d27` (query-side memory fusion, strict eval gate, 544 tests, offline 24/26 + Gemini 26/26 re-verified).
 
 ## Goal
@@ -29,10 +29,10 @@
 
 ### F1 — Candidate model + grouping policy (pure domain, `core/distill.py`)
 
-- `DistillCandidate` dataclass: the grouped units (ids + titles), evidence summary (independent source count across the group, session-level rule reused), frequency (group size + summed `recall_count`), recommended form, and a deterministic explain line per candidate (same explain-line discipline as consolidation transitions).
-- Grouping: `procedure` and `learning` units in the status set above, within the `--since` window, grouped by content similarity — deterministic token/claim overlap (reuse `_claim_tokens` from consolidate), NOT embeddings, NOT LLM. Threshold a named constant (`DISTILL_GROUP_MIN_OVERLAP`), owner-calibration target like the D1/E1 constants.
+- `DistillCandidate` dataclass: the grouped units (ids + titles), evidence summary (independent source count across the group, session-level rule reused), frequency fields (`unit_count` + displayed-only `summed_recall_count`), recommended form, and a deterministic explain line per candidate (same explain-line discipline as consolidation transitions). `recall_count` is never used for candidate qualification, ordering, or form selection.
+- Grouping: `procedure` and `learning` units in the status set above, within the `--since` window when provided (default: all eligible units), grouped by content similarity — deterministic token/claim overlap (reuse `_claim_tokens` from consolidate), NOT embeddings, NOT LLM. Threshold a named constant (`DISTILL_GROUP_MIN_OVERLAP`), owner-calibration target like the D1/E1 constants.
 - Candidate gate (spec: "A candidate must have repeated evidence or explicit user approval"): a group qualifies only with evidence from ≥2 **independent sessions** (Phase D session-level independence rule via `count_independent_sources_for_units` — a message+event pair from one session counts once) OR explicit user approval, defined by the existing Phase D predicate `has_explicit_user_confirmation` (a `MemorySourceKind.MANUAL` source or confirmation phrasing). No new vocabulary: the model's `user_intent` enum is `manual | auto` and `MemoryUnitRecord` does not hydrate it — this plan does not introduce `explicit` as a value nor add the field. Named constant `DISTILL_MIN_INDEPENDENT_EVIDENCE = 2`.
-- Recommended form: closed mapping from unit composition — `procedure`-dominant → "command/script candidate"; `learning`-dominant → "convention/doc candidate"; mixed → "skill-file candidate". No free-text invention; the form vocabulary is a closed set like the label taxonomy.
+- Recommended form: closed mapping from unit composition and asset shape. Machine values are `{command, script, convention_doc, skill_file}`. `command` maps to command assets such as `.claude/commands/`, `script` maps to `scripts/` or Makefile/justfile-style executable workflows, `convention_doc` maps to documentation of durable conventions, and `skill_file` maps to a reusable skill-style workflow. No free-text invention; the form vocabulary is a closed set like the label taxonomy.
 
 ### F2 — Asset inventory (spec: "Existing assets are inventoried before proposing a new one")
 
@@ -40,10 +40,10 @@
 - **Root resolution**: `--project X` is a DB scope, not a filesystem location — the two must not be conflated. CLI gains `--root PATH` (default: cwd); the report always prints `scanned_root: <path>` so a run from the wrong directory is visible instead of silently marking candidates `covered_by` another project's assets. If the root does not exist, error out.
 - A candidate whose recommended form already has a matching asset (token overlap between candidate title and asset name, same named-constant discipline) is reported as `covered_by: <path>` instead of suppressed — honest reporting over silent filtering, same principle as the truncation footer.
 
-### F3 — CLI (`membox distill --project X --since 30d --dry-run`)
+### F3 — CLI (`membox distill --project X --dry-run`)
 
 - New `cli/commands/distill.py` (presentation only; assembly in core, same layering as `memory consolidate`). `--dry-run` required in this phase; passing `--apply` errors with "not implemented in Phase F" (explicitly reserving the flag). `--root PATH` per F2 (default cwd, printed as `scanned_root`).
-- Output: one block per candidate (form, evidence count, frequency, member units by id/title, `covered_by` when applicable, explain line), and an honest empty result: "no distill candidates found" with the scanned-unit count — "created nothing" is a successful result per spec acceptance.
+- Output: one block per candidate (form, evidence count, frequency as `evidence_sessions=N, units=N, recalls=N`, member units by id/title, `covered_by` when applicable, explain line), plus the effective window (`window: all` or `window: since 30d`) and an honest empty result: "no distill candidates found" with the scanned-unit count — "created nothing" is a successful result per spec acceptance.
 - Read-only ⇒ no lease (`lifecycle_lease` is for mutating applies only); document this in the command docstring.
 
 ### F4 — Acceptance: fixture harness + regression
@@ -74,9 +74,9 @@
 - Gates per milestone: `uv run pytest` + ruff + strict mypy green; coverage ≥ 80%; offline eval exactly 24/26 @ 4000 via `--expect-hits`.
 - Stop and escalate on judgment calls beyond the brief — notably: any grouping threshold change, any new recommended-form value, anything that looks like it needs persistence or DDL.
 
-## Owner decisions needed before execution
+## Owner decisions (resolved 2026-06-12, at plan review)
 
-1. **Recommended-form vocabulary**: proposed closed set is `{command/script, convention/doc, skill-file}`. Confirm or amend — this is the distill counterpart of the closed label taxonomy.
-2. **Frequency signal**: F1 proposes group size + summed `recall_count` as reported frequency (first read-side consumer of the E4 bookkeeping counters; they still influence nothing in `query`). Confirm that reading them here does not violate the E4 "bookkeeping-only" decision's intent, or strike `recall_count` from the report.
-3. **`--since` default**: spec example shows `--since 30d`. Propose defaulting to no window (all active units) with `30d` in the help text as the recommended scan, since unit volume is still tiny. Confirm or require the literal 30d default.
-4. **"Explicit user approval" mapping** (from plan review): the spec phrase maps to the existing Phase D predicate `has_explicit_user_confirmation` (a `MemorySourceKind.MANUAL` source or confirmation phrasing in title/content/context) — reusing Phase D's definition rather than minting a new `user_intent` value (`explicit` does not exist; the enum is `manual | auto` and `MemoryUnitRecord` does not carry the field). Confirm this mapping, or require hydrating `memory_units.user_intent` onto the record and gating on `manual` instead.
+1. **Recommended-form vocabulary: `{command, script, convention_doc, skill_file}`.** Use machine-safe closed values, not slash-bearing labels such as `command/script`. `command` and `script` are separate because their asset locations and later `--apply` semantics differ (`.claude/commands/` vs `scripts/` or Makefile/justfile-style executable workflows). `convention_doc` covers durable documentation, and `skill_file` covers reusable skill-style workflows.
+2. **Frequency signal: display `unit_count + summed recall_count`, but never decide from `recall_count`.** The report should show frequency as `evidence_sessions=N, units=N, recalls=N`. `recall_count` is a read-side explanatory field only; it must not influence candidate qualification, candidate ordering, or recommended-form selection. This preserves Phase E's bookkeeping-only decision while making hot workflows visible.
+3. **`--since` default: no window.** By default, scan all eligible active units/crystal candidates/crystals. The help text should recommend `--since 30d` as a common narrowing option, and the output must print the effective window (`window: all` or `window: since 30d`) so scope is never implicit. Rationale: unit volume is still small, and a 30-day default can miss low-frequency long-lived workflows.
+4. **"Explicit user approval" mapping: reuse Phase D's `has_explicit_user_confirmation`.** The spec phrase maps to a `MemorySourceKind.MANUAL` source or confirmation phrasing in title/content/context. Do not mint a new `user_intent=explicit` value (`MemoryUserIntent` is `manual | auto`), and do not expand `MemoryUnitRecord` just for Phase F to hydrate `memory_units.user_intent`. This keeps Phase F read-only and aligned with Phase D's existing user-confirmation semantics.

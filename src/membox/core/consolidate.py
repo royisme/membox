@@ -364,7 +364,7 @@ def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
     combined = left_text + "\n" + right_text
     if any(term in combined for term in _STRONG_CORRECTION_TERMS):
         return False
-    if len(_claim_tokens(left_text) & _claim_tokens(right_text)) < 3:
+    if len(claim_tokens(left_text) & claim_tokens(right_text)) < 3:
         return False
     return any(term in combined for term in _CONTRAST_TERMS)
 
@@ -378,7 +378,7 @@ def _looks_like_replacement(older: MemoryUnitRecord, newer: MemoryUnitRecord) ->
         return False
     older_text = f"{older.title}\n{older.content}".casefold()
     newer_text = f"{newer.title}\n{newer.content}".casefold()
-    if len(_claim_tokens(older_text).intersection(_claim_tokens(newer_text))) < 2:
+    if len(claim_tokens(older_text).intersection(claim_tokens(newer_text))) < 2:
         return False
     if any(term in newer_text for term in _CORRECTION_TERMS):
         return True
@@ -394,19 +394,19 @@ def _source_refs(unit: MemoryUnitRecord) -> set[str]:
 def _unsupported_claim(unit: MemoryUnitRecord) -> bool:
     if any(source.source_kind == MemorySourceKind.MANUAL for source in unit.sources):
         return False
-    content_tokens = _claim_tokens(unit.content)
+    content_tokens = claim_tokens(unit.content)
     if not content_tokens:
         return False
     source_quote = " ".join(source.quote for source in unit.sources).strip()
     if len(source_quote) < 20:
         return False
-    source_tokens = _claim_tokens(source_quote)
+    source_tokens = claim_tokens(source_quote)
     if not source_tokens:
         return False
     return len(content_tokens.intersection(source_tokens)) < 2
 
 
-def _claim_tokens(text: str) -> set[str]:
+def claim_tokens(text: str) -> set[str]:
     return {token for token in text.casefold().replace("_", " ").split() if len(token) >= 4}
 
 

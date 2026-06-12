@@ -33,6 +33,7 @@ from typer.testing import CliRunner
 
 from membox.cli import app
 from membox.core.agent import MemoryAgent
+from membox.core.distill import build_distill_plan
 from membox.core.history_import import import_history
 from membox.core.store import KnowledgeStore
 from membox.core.triage import GATE_VERSION, activation_passes, triage_trace
@@ -482,6 +483,73 @@ def test_phase_e_query_inclusion_matrix(tmp_path: Path) -> None:
     assert "[conflict] [unit] decision: For release-only work" in conflict
 
 
+def test_phase_f_distill_acceptance(tmp_path: Path) -> None:
+    """Distill reports only genuine cross-session repeated workflows."""
+    c5 = LIFECYCLE_DIR / "history/c5_repeated_failure.jsonl"
+    c5_b = LIFECYCLE_DIR / "history/c5_repeated_failure_b.jsonl"
+    c2 = LIFECYCLE_DIR / "history/c2_ephemeral_chatter.jsonl"
+    c8 = LIFECYCLE_DIR / "history/c8_tool_noise.jsonl"
+    c9 = LIFECYCLE_DIR / "history/c9_wakeup_template.jsonl"
+    c9_b = LIFECYCLE_DIR / "history/c9_wakeup_template_b.jsonl"
+
+    c5_only_db = str(tmp_path / "c5_only.db")
+    c5_only_store = KnowledgeStore(c5_only_db)
+    import_history(c5_only_store, c5, "membox-history-jsonl", project=_PROJECT)
+    _run_lifecycle_pipeline(c5_only_db)
+    units = c5_only_store.list_units_for_distill(project=_PROJECT)
+    c5_only_plan = build_distill_plan(
+        units,
+        c5_only_store.count_independent_sources_for_units(
+            [unit.id for unit in units if unit.id is not None]
+        ),
+        independent_source_counter=c5_only_store.count_independent_sources_for_unit_group,
+    )
+    assert c5_only_plan.candidates == []
+
+    repeated_db = str(tmp_path / "repeated.db")
+    repeated_store = KnowledgeStore(repeated_db)
+    for fixture in (c5, c5_b):
+        import_history(repeated_store, fixture, "membox-history-jsonl", project=_PROJECT)
+    _run_lifecycle_pipeline(repeated_db)
+    root = tmp_path / "project"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "verify-migration-head.py").write_text("# fixture asset\n", encoding="utf-8")
+    cli = CliRunner()
+    result = cli.invoke(
+        app,
+        [
+            "distill",
+            "--db",
+            repeated_db,
+            "--project",
+            _PROJECT,
+            "--root",
+            str(root),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "window: all" in result.output
+    assert "Found 1 distill candidates" in result.output
+    assert "frequency: evidence_sessions=2" in result.output
+    assert "form: script" in result.output
+    assert "covered_by: scripts/verify-migration-head.py" in result.output
+
+    noise_db = str(tmp_path / "noise.db")
+    noise_store = KnowledgeStore(noise_db)
+    for fixture in (c2, c8, c9, c9_b):
+        import_history(noise_store, fixture, "membox-history-jsonl", project=_PROJECT)
+    _run_lifecycle_pipeline(noise_db)
+    noise = cli.invoke(
+        app,
+        ["distill", "--db", noise_db, "--project", _PROJECT, "--root", str(root), "--dry-run"],
+    )
+    assert noise.exit_code == 0, noise.output
+    assert "no distill candidates found" in noise.output
+    assert "created nothing" in noise.output
+
+
 def test_phase_e_memory_project_scope(tmp_path: Path) -> None:
     """Memory recall defaults to one project and only crosses projects explicitly."""
     agent = _build_consolidated_agent(tmp_path)
@@ -539,6 +607,18 @@ def _memory_status_by_source(store: KnowledgeStore) -> dict[str, tuple[str, int 
         str(row[0]): (str(row[1]), None if row[2] is None else int(row[2]), int(row[3]))
         for row in rows
     }
+
+
+def _run_lifecycle_pipeline(db: str) -> None:
+    """Run triage, extraction, and consolidation for acceptance fixtures."""
+    cli = CliRunner()
+    for command in (
+        ["memory", "triage", "--db", db, "--project", _PROJECT, "--apply"],
+        ["memory", "extract", "--db", db, "--project", _PROJECT, "--apply"],
+        ["memory", "consolidate", "--db", db, "--project", _PROJECT, "--apply"],
+    ):
+        result = cli.invoke(app, command)
+        assert result.exit_code == 0, result.output
 
 
 # ---------------------------------------------------------------------------

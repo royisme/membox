@@ -453,6 +453,48 @@ class MemoryUnitOps:
         ).fetchall()
         return [_unit_from_row(conn, row) for row in rows]
 
+    def list_units_for_distill(
+        self,
+        *,
+        project: str,
+        since: str | None = None,
+        limit: int = 500,
+    ) -> list[MemoryUnitRecord]:
+        """Return workflow-like memory units eligible for Phase F distillation."""
+        clauses = [
+            "project=?",
+            "unit_type IN (?, ?)",
+            "status IN (?, ?, ?)",
+            "superseded_by IS NULL",
+        ]
+        params: list[object] = [
+            project,
+            MemoryUnitType.PROCEDURE.value,
+            MemoryUnitType.LEARNING.value,
+            MemoryUnitStatus.ACTIVE_UNIT.value,
+            MemoryUnitStatus.CRYSTAL_CANDIDATE.value,
+            MemoryUnitStatus.CRYSTAL.value,
+        ]
+        if since is not None:
+            clauses.append("COALESCE(updated_at, created_at)>=?")
+            params.append(since)
+        params.append(limit)
+        conn = self._cm.connection()
+        rows = conn.execute(
+            f"""
+            SELECT id, project, unit_type, status, title, content, context,
+                   importance_score, confidence_score, temporal_type,
+                   valid_from, valid_to, superseded_by, created_at, updated_at,
+                   recall_count, last_recalled_at
+            FROM memory_units
+            WHERE {" AND ".join(clauses)}
+            ORDER BY id
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [_unit_from_row(conn, row) for row in rows]
+
     def count_independent_sources(self, unit_id: int) -> int:
         """Count distinct independent sources for crystal promotion."""
         return len(self._independent_source_keys(unit_id))
@@ -499,6 +541,48 @@ class MemoryUnitOps:
             else:
                 keys_by_unit[unit_id].add(f"{source_kind}:{source_ref}")
         return {unit_id: len(keys) for unit_id, keys in keys_by_unit.items()}
+
+    def count_independent_sources_for_unit_group(self, unit_ids: list[int]) -> int:
+        """Count distinct independent sources across a group of memory units."""
+        if not unit_ids:
+            return 0
+        unique_ids = sorted(set(unit_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = (
+            self._cm.connection()
+            .execute(
+                f"""
+            SELECT mus.source_kind, mus.source_ref,
+                   hm.session_id AS message_session_id,
+                   he.session_id AS event_session_id
+            FROM memory_unit_sources mus
+            LEFT JOIN history_messages hm
+              ON mus.source_kind=? AND hm.id=mus.source_ref
+            LEFT JOIN history_events he
+              ON mus.source_kind=? AND he.id=mus.source_ref
+            WHERE mus.unit_id IN ({placeholders})
+            """,
+                [
+                    MemorySourceKind.HISTORY_MESSAGE.value,
+                    MemorySourceKind.HISTORY_EVENT.value,
+                    *unique_ids,
+                ],
+            )
+            .fetchall()
+        )
+        keys: set[str] = set()
+        for row in rows:
+            source_kind = str(row[0])
+            source_ref = str(row[1])
+            if source_kind == MemorySourceKind.HISTORY_MESSAGE.value:
+                session = str(row[2]) if row[2] is not None else _trace_session_key(source_ref)
+                keys.add(f"session:{session}")
+            elif source_kind == MemorySourceKind.HISTORY_EVENT.value:
+                session = str(row[3]) if row[3] is not None else _trace_session_key(source_ref)
+                keys.add(f"session:{session}")
+            else:
+                keys.add(f"{source_kind}:{source_ref}")
+        return len(keys)
 
     def attach_memory_unit_source(
         self,

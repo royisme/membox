@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import typer
 
+from membox.cli.commands.distill import distill
 from membox.cli.commands.history import history_app
 from membox.cli.commands.ingest import ingest, ingest_file
 from membox.cli.commands.listing import list_entities, list_relations
@@ -27,6 +28,7 @@ app.command()(version)
 app.command()(ingest)
 app.command("ingest-file")(ingest_file)
 app.command()(query)
+app.command()(distill)
 app.command()(process)
 app.command("queue")(queue_status)
 app.command("list-entities")(list_entities)
