@@ -9,7 +9,7 @@
 
 ## What "distill" is and is not (scope fence)
 
-- **Is**: a read-only analysis pass over active `procedure`/`learning` units (and crystals) that groups recurrences of the same workflow, counts independent evidence, inventories existing assets, and prints a candidate report.
+- **Is**: a read-only analysis pass over `procedure`/`learning` units in statuses `{active_unit, crystal_candidate, crystal}` (the same read-side status set as Phase E's memory pool; `{unit_candidate, superseded, archived, retracted}` excluded) that groups recurrences of the same workflow, counts independent evidence, inventories existing assets, and prints a candidate report. Including `crystal_candidate` is load-bearing: the c5 fixture's Phase D outcome IS `crystal_candidate`, so an active-only scan would exclude the seed acceptance case.
 - **Is not**: a writer. No new tables, no new unit types, no skill/command file generation, no `--apply` in this phase. The only conceivable write is candidate bookkeeping, and this plan explicitly does without it — re-derive on each run, exactly like Phase D's stateless conflict surfacing (same precedent, same revisit condition: only if re-announcement becomes noise).
 - **Is not** the cross-project global-scope distillation from roadmap Future Tracks. Phase F is per-project (`--project X`, same `_default_project` resolution as the other memory commands). The global track builds on this later and owns its own spec chapter.
 
@@ -23,32 +23,34 @@
 
 - `memory_units` already carries everything distill needs: `unit_type` (closed taxonomy; `procedure`/`learning` are the distill sources), `status`, `importance_score`/`confidence_score`, `recall_count`/`last_recalled_at` (Phase E bookkeeping — distill is the first consumer that may *read* them as a frequency signal; they still feed no ranking in `query`), sources with the Phase D session-level independence rule (`count_independent_sources_for_units`, already batched).
 - `core/consolidate.py` has the reusable pure-policy pattern (dataclass results + deterministic plan builder) — `core/distill.py` mirrors it.
-- The c5 fixture (`eval/lifecycle/history/c5_repeated_failure.jsonl`, expectation `unit_type: procedure`) is the seed acceptance case; the fixture corpus has 9 expectation entries to draw negatives from (c2 chatter, c8 tool noise must never become candidates).
+- The c5 fixture (`eval/lifecycle/history/c5_repeated_failure.jsonl`, expectation `unit_type: procedure`, Phase D status `crystal_candidate`) is the seed material — but it is a **single session**, so by itself it must NOT pass the candidate gate; F4 adds a second-session fixture `c5_b` to form the positive case. The corpus has 9 expectation entries to draw negatives from (c2 chatter, c8 tool noise must never become candidates).
 
 ## Milestones
 
 ### F1 — Candidate model + grouping policy (pure domain, `core/distill.py`)
 
 - `DistillCandidate` dataclass: the grouped units (ids + titles), evidence summary (independent source count across the group, session-level rule reused), frequency (group size + summed `recall_count`), recommended form, and a deterministic explain line per candidate (same explain-line discipline as consolidation transitions).
-- Grouping: active `procedure` and `learning` units (+ crystals of those types) within `--since` window, grouped by content similarity — deterministic token/claim overlap (reuse `_claim_tokens` from consolidate), NOT embeddings, NOT LLM. Threshold a named constant (`DISTILL_GROUP_MIN_OVERLAP`), owner-calibration target like the D1/E1 constants.
-- Candidate gate (spec: "A candidate must have repeated evidence or explicit user approval"): a group qualifies only with ≥2 units from independent sessions OR one unit with `user_intent=explicit` provenance. Named constant `DISTILL_MIN_INDEPENDENT_EVIDENCE = 2`.
+- Grouping: `procedure` and `learning` units in the status set above, within the `--since` window, grouped by content similarity — deterministic token/claim overlap (reuse `_claim_tokens` from consolidate), NOT embeddings, NOT LLM. Threshold a named constant (`DISTILL_GROUP_MIN_OVERLAP`), owner-calibration target like the D1/E1 constants.
+- Candidate gate (spec: "A candidate must have repeated evidence or explicit user approval"): a group qualifies only with evidence from ≥2 **independent sessions** (Phase D session-level independence rule via `count_independent_sources_for_units` — a message+event pair from one session counts once) OR explicit user approval, defined by the existing Phase D predicate `has_explicit_user_confirmation` (a `MemorySourceKind.MANUAL` source or confirmation phrasing). No new vocabulary: the model's `user_intent` enum is `manual | auto` and `MemoryUnitRecord` does not hydrate it — this plan does not introduce `explicit` as a value nor add the field. Named constant `DISTILL_MIN_INDEPENDENT_EVIDENCE = 2`.
 - Recommended form: closed mapping from unit composition — `procedure`-dominant → "command/script candidate"; `learning`-dominant → "convention/doc candidate"; mixed → "skill-file candidate". No free-text invention; the form vocabulary is a closed set like the label taxonomy.
 
 ### F2 — Asset inventory (spec: "Existing assets are inventoried before proposing a new one")
 
-- Deterministic scan of conventional asset locations in the project working tree (`scripts/`, `.claude/commands/`, `skills/`, `Makefile`/`justfile` targets) — names+paths only, no content parsing beyond titles. Injectable as a small `AssetInventory` protocol so tests use a fake (project rule: mock only at I/O boundaries).
+- Deterministic scan of conventional asset locations under an explicit filesystem root (`scripts/`, `.claude/commands/`, `skills/`, `Makefile`/`justfile` targets) — names+paths only, no content parsing beyond titles. Injectable as a small `AssetInventory` protocol so tests use a fake (project rule: mock only at I/O boundaries).
+- **Root resolution**: `--project X` is a DB scope, not a filesystem location — the two must not be conflated. CLI gains `--root PATH` (default: cwd); the report always prints `scanned_root: <path>` so a run from the wrong directory is visible instead of silently marking candidates `covered_by` another project's assets. If the root does not exist, error out.
 - A candidate whose recommended form already has a matching asset (token overlap between candidate title and asset name, same named-constant discipline) is reported as `covered_by: <path>` instead of suppressed — honest reporting over silent filtering, same principle as the truncation footer.
 
 ### F3 — CLI (`membox distill --project X --since 30d --dry-run`)
 
-- New `cli/commands/distill.py` (presentation only; assembly in core, same layering as `memory consolidate`). `--dry-run` required in this phase; passing `--apply` errors with "not implemented in Phase F" (explicitly reserving the flag).
+- New `cli/commands/distill.py` (presentation only; assembly in core, same layering as `memory consolidate`). `--dry-run` required in this phase; passing `--apply` errors with "not implemented in Phase F" (explicitly reserving the flag). `--root PATH` per F2 (default cwd, printed as `scanned_root`).
 - Output: one block per candidate (form, evidence count, frequency, member units by id/title, `covered_by` when applicable, explain line), and an honest empty result: "no distill candidates found" with the scanned-unit count — "created nothing" is a successful result per spec acceptance.
 - Read-only ⇒ no lease (`lifecycle_lease` is for mutating applies only); document this in the command docstring.
 
 ### F4 — Acceptance: fixture harness + regression
 
-- Extend `tests/test_lifecycle_acceptance.py`: full pipeline (import → triage → extract → consolidate → distill) asserting (a) the c5 repeated-failure group produces exactly one candidate with the expected form and ≥2-session evidence; (b) c2/c8/c9 noise produces zero candidates; (c) a fabricated single-session repeat does NOT qualify (independence rule); (d) `covered_by` fires against a planted fake asset.
-- `expectations.yaml` gains a `distill` key per entry (only c5 expects a candidate; all others `none`) — same pattern as the `query_inclusion` matrix written at C1 time for Phase E.
+- **New fixture `c5_b` (separate session)**: the existing c5 is a SINGLE session (`requires_multi_session: false`, one message + one tool event — under the session-level independence rule that is 1 source, not 2), so c5 alone must NOT qualify. c5_b is a second, independent session recording a recurrence of the same verify-migration-head workflow (same anonymization discipline as c8/c9). c5+c5_b together form the genuine cross-session repeated workflow.
+- Extend `tests/test_lifecycle_acceptance.py`: full pipeline (import → triage → extract → consolidate → distill) asserting (a) with c5 only, zero candidates (single-session repeat does not qualify — the independence rule as a test, not a claim); (b) with c5+c5_b, exactly one candidate with the expected form and 2-session evidence; (c) c2/c8/c9 noise produces zero candidates; (d) `covered_by` fires against a planted fake asset under an explicit `--root`.
+- `expectations.yaml` gains a `distill` key per entry (c5 expects `none` standalone; the c5+c5_b pair expects one candidate; all others `none`) — same pattern as the `query_inclusion` matrix written at C1 time for Phase E. c5's existing Phase C/D expectations are untouched (c5_b gets its own entry).
 - F0 contract on every milestone commit: 544 existing tests + new ones green, ruff + strict mypy, coverage ≥ 80%, offline eval `--expect-hits 24` @ 4000 (local/agent-run — CI cannot, corpus is gitignored). No Gemini re-verification needed at merge unless retrieval code is touched (it must not be).
 
 ## Deferred / out of scope (recorded, not forgotten)
@@ -77,3 +79,4 @@
 1. **Recommended-form vocabulary**: proposed closed set is `{command/script, convention/doc, skill-file}`. Confirm or amend — this is the distill counterpart of the closed label taxonomy.
 2. **Frequency signal**: F1 proposes group size + summed `recall_count` as reported frequency (first read-side consumer of the E4 bookkeeping counters; they still influence nothing in `query`). Confirm that reading them here does not violate the E4 "bookkeeping-only" decision's intent, or strike `recall_count` from the report.
 3. **`--since` default**: spec example shows `--since 30d`. Propose defaulting to no window (all active units) with `30d` in the help text as the recommended scan, since unit volume is still tiny. Confirm or require the literal 30d default.
+4. **"Explicit user approval" mapping** (from plan review): the spec phrase maps to the existing Phase D predicate `has_explicit_user_confirmation` (a `MemorySourceKind.MANUAL` source or confirmation phrasing in title/content/context) — reusing Phase D's definition rather than minting a new `user_intent` value (`explicit` does not exist; the enum is `manual | auto` and `MemoryUnitRecord` does not carry the field). Confirm this mapping, or require hydrating `memory_units.user_intent` onto the record and gating on `manual` instead.
