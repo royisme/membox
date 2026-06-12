@@ -260,6 +260,21 @@ Worker is spawned as a detached subprocess (`start_new_session=True`); its stdou
 
 ---
 
+## Lifecycle Track — Phases A–F (spec_02)
+
+Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `docs/plans/`.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| A | Retrieval groundwork | ✅ |
+| B | History trace index, migration 6 | ✅ |
+| C | Triage + memory units, migration 8, heuristic gate | ✅ |
+| D | Consolidation, crystal policy, gate v3 | ✅ |
+| E | Query fusion `--include-memory`, merged f274d27 | ✅ |
+| F | Distill workflows | pending, plan_06 |
+
+---
+
 ## Phase 8 — Codebase Structural Analysis (tree-sitter)
 
 > **Note**: Phase 8 is deliberately sequenced after Phase 7.5. The supersession semantics and hybrid retrieval introduced in 7.5 are load-bearing for the temporal recall patterns that codebase analysis will exercise.
@@ -315,10 +330,12 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
          └→ Phase 7.5 Memory Quality Validation
               │  (M1+M2+M3 complete → M6 async queue → M4 supersession → M5 close-the-loop)
               │
-              ├→ Phase 8 tree-sitter (Can be done in parallel)
-              ├→ Phase 9 Skill Files (Can be done in parallel)
+              └→ Lifecycle Track A–E ✅ → F pending (spec_02)
                    │
-                   └→ Phase 10 Release
+                   ├→ Phase 8 tree-sitter (Can be done in parallel)
+                   ├→ Phase 9 Skill Files (Can be done in parallel)
+                        │
+                        └→ Phase 10 Release
 ```
 
 **Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.
@@ -328,9 +345,9 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
 ## Future Tracks (not yet scheduled)
 
 - **Agent memory lifecycle** (Trace → Unit → Crystal): design accepted at v2.3
-  in `docs/spec/spec_02_memory_lifecycle.md`, but not yet scheduled in the main
-  phase sequence. Promote into this roadmap as Phases A–F when implementation
-  begins.
+  in `docs/spec/spec_02_memory_lifecycle.md`. Promoted into this roadmap as the
+  Lifecycle Track (Phases A–F); see the "Lifecycle Track — Phases A–F" section
+  above. Phases A–E implemented; Phase F pending.
 - **HOT working-state tier** (current task, open loops, session focus):
   explicitly excluded from the lifecycle track (see its Rejected Alternatives —
   working state has opposite mechanics from long-term memory). Recorded here as
