@@ -152,7 +152,8 @@ class PiJsonlImporter:
             if not text.strip():
                 continue
 
-            pi_msg_id = str(record.get("id", ""))
+            raw_id = record.get("id")
+            pi_msg_id = str(raw_id) if raw_id else f"seq-{seq}"
             created = opt_str(msg.get("timestamp"))
             messages.append(
                 HistoryMessageRecord(

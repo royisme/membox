@@ -204,3 +204,7 @@ class CodexJsonlImporter:
             next_offset_bytes=end_offset,
             next_seq=seq,
         )
+
+    def discover_sessions(self, project_cwd: Path, session_root: Path) -> list[Path]:
+        """Return an empty list — Codex discovery is not yet implemented."""
+        return []

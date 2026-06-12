@@ -110,6 +110,9 @@ def history_pull_command(
         if not path.exists():
             typer.echo(f"Error: file not found: {path}", err=True)
             raise typer.Exit(1)
+        if path.is_dir():
+            typer.echo(f"Error: expected a file, got directory: {path}", err=True)
+            raise typer.Exit(1)
         import_result = import_history(
             store,
             path,

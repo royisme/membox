@@ -97,6 +97,7 @@ class FilesystemAssetInventory:
         assets.extend(_file_assets(root / "scripts", "script", "*", root))
         assets.extend(_file_assets(root / "docs", "convention_doc", "*.md", root))
         assets.extend(_file_assets(root / "skills", "skill_file", "**/SKILL.md", root))
+        assets.extend(_file_assets(root / "skills", "skill_file", "*.md", root))
         assets.extend(_makefile_assets(root / "Makefile"))
         assets.extend(_makefile_assets(root / "justfile"))
         return sorted(assets, key=lambda asset: (asset.form, asset.path))
@@ -158,7 +159,7 @@ def build_distill_plan(
 
 
 def recommend_form(units: Iterable[MemoryUnitRecord]) -> DistillRecommendedForm:
-    """Return the closed recommended-form value for a workflow group."""
+    """Return the closest recommended-form value for a workflow group."""
     group = list(units)
     unit_types = {unit.unit_type for unit in group}
     tokens = set().union(*(_unit_tokens(unit) for unit in group)) if group else set()

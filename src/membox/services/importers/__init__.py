@@ -20,11 +20,11 @@ IMPORTER_FORMATS: dict[str, type] = {
     "codex": CodexJsonlImporter,
     "pi": PiJsonlImporter,
 }
-"""CLI ``--format`` name → importer class."""
+"""CLI ``--adapt`` name → importer class."""
 
 
 def get_importer(format_name: str) -> HistoryImporter:
-    """Return an importer instance for a CLI ``--format`` name.
+    """Return an importer instance for a CLI ``--adapt`` name.
 
     Args:
         format_name: One of :data:`IMPORTER_FORMATS`.
