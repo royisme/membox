@@ -1,6 +1,6 @@
 # Plan 04 — Phase D: Memory Consolidation (crystals, conflicts, decay)
 
-> **Status**: Draft for owner review — do not execute until accepted. · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
+> **Status**: D1–D5 implemented on `feature/phase-d-consolidation` (2026-06-12, all gates green) + review-fix pass applied. **Merge blocked on the D0 exit gate: owner sign-off of the real-trace dry-run summary below.** · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
 > **Predecessor**: Phase C (plan_01) implemented — migration 8, heuristic-v2 gate, `membox memory triage/extract/supersede/retract/restore/search`, C5 harness at precision/recall/type-accuracy 1.00 on the C1 fixtures.
 
 ## Goal
@@ -19,6 +19,14 @@ D0 procedure (cheap: dry-run only, no API cost, no writes):
 4. If gate quality is materially below the fixture metrics, tune to heuristic-v3 against the grown corpus before D1. Record the real-trace sample size and miss counts in the PR/HANDOFF.
 
 Exit gate for D0: owner has seen the dry-run sample summary and signed off that gate quality is sufficient to build consolidation on, OR a v3 tuning round closed the gaps. (Consolidation amplifies gate errors: a misclassified unit that gains sources becomes a wrong crystal.)
+
+### D0 sign-off package (2026-06-12 — awaiting owner decision)
+
+**Real-trace dry-run summary** (temporary import, nothing persisted): 20 local Codex session logs → 931 messages / 2844 events imported; 300 triage rows sampled; gate v2 decided **113 extract / 187 reject**. Per the D0 procedure, the owner reviews this sample (or a re-run of it) and signs off — or requests a v3 tuning round against any real disagreements, each of which becomes a committed anonymized fixture in `eval/lifecycle/`.
+
+**Boundary declaration for the conflict detector (D2 first cut)** — accept explicitly, not silently: conflict detection is a deterministic word-list signal (contrast terms + ≥3 shared claim tokens + correction-term short-circuit routing correction pairs to supersession). It classifies the lifecycle fixtures correctly (c6 → conflict review; c4/c7 → supersession), but **real-trace conflict recall is uncalibrated and expected to be low** — this is the intentionally conservative first cut. The LLM-backed comparator (injectable Protocol, same pattern as the gate) remains the planned follow-up, as this plan's D2 already sketches. Conflict persistence stayed stateless (re-surfacing each run); migration 9 was not needed.
+
+**Sign-off line** (owner fills in): `D0 signed off: YES / NEEDS v3 TUNING — date — notes`
 
 ## Current state (verify before execution)
 
