@@ -129,3 +129,52 @@
         trace_id: "membox-capture:life-c7-correction-new:msg:m1"
     extraction_hint: "eval/corpus is private; eval/lifecycle fixtures are committed"
   notes: "Explicit user correction should retract or supersede the old unit."
+
+- id: c8_tool_output_noise
+  category: tool_output_noise
+  fixtures: ["history/c8_tool_noise.jsonl"]
+  requires_multi_session: false
+  expected:
+    triage_should_extract: false
+    unit_type: context
+    labels: []
+    activation_status: trace_only
+    phase_d_status: not_applicable
+    query_inclusion: excluded
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c8-toolnoise:msg:m1"
+      - trace_kind: event
+        trace_id: "membox-capture:life-c8-toolnoise:evt:noise-held-output:tool_result"
+      - trace_kind: event
+        trace_id: "membox-capture:life-c8-toolnoise:evt:noise-json-cmd:tool_result"
+    extraction_hint: ""
+  notes: >-
+    Anonymized reconstruction of a D0 real-trace false positive (2026-06-12):
+    raw tool output and JSON command payloads carry procedure keywords
+    (first/then/run `) but are machine noise, not memories. heuristic-v2
+    extracted 119/119 such events; v3 must reject them.
+
+- id: c9_harness_template
+  category: harness_template_noise
+  fixtures: ["history/c9_wakeup_template.jsonl", "history/c9_wakeup_template_b.jsonl"]
+  requires_multi_session: true
+  expected:
+    triage_should_extract: false
+    unit_type: context
+    labels: []
+    activation_status: trace_only
+    phase_d_status: not_applicable
+    query_inclusion: excluded
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c9-template:msg:m1"
+      - trace_kind: message
+        trace_id: "membox-capture:life-c9-template-b:msg:m1"
+    extraction_hint: ""
+  notes: >-
+    Anonymized reconstruction of a D0 real-trace false positive (2026-06-12):
+    a harness wake-up template (role=user, procedure keywords, repeated 48
+    times across 3 sessions). Cross-session repetition would auto-crystallize
+    under the Phase D >=3-independent-sources rule, so this template must be
+    rejected at triage.

@@ -370,7 +370,11 @@ def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
 
 
 def _looks_like_replacement(older: MemoryUnitRecord, newer: MemoryUnitRecord) -> bool:
-    if older.unit_type != newer.unit_type:
+    same_type = older.unit_type == newer.unit_type
+    plan_to_decision = (
+        older.unit_type == MemoryUnitType.PLAN and newer.unit_type == MemoryUnitType.DECISION
+    )
+    if not (same_type or plan_to_decision):
         return False
     older_text = f"{older.title}\n{older.content}".casefold()
     newer_text = f"{newer.title}\n{newer.content}".casefold()

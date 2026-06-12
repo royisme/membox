@@ -87,6 +87,9 @@ Functional Python files include their module header so tools can reuse the file 
       - `eval/lifecycle/history/c6_conflict_b.jsonl`
       - `eval/lifecycle/history/c7_correction_new.jsonl`
       - `eval/lifecycle/history/c7_correction_old.jsonl`
+      - `eval/lifecycle/history/c8_tool_noise.jsonl`
+      - `eval/lifecycle/history/c9_wakeup_template.jsonl`
+      - `eval/lifecycle/history/c9_wakeup_template_b.jsonl`
     - `eval/lifecycle/expectations.yaml`
     - `eval/lifecycle/README.md`
   - `eval/gold.yaml`

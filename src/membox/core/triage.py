@@ -14,13 +14,19 @@ from dataclasses import dataclass, field
 
 from membox.model.schema import MEMORY_LABELS, MemoryTemporalType, MemoryUnitType, MemoryUserIntent
 
-GATE_VERSION = "heuristic-v2"
+GATE_VERSION = "heuristic-v3"
 """Version string persisted with every deterministic triage decision.
 
 v2 (tuned against the C1 lifecycle fixtures): declared-fact prefixes extract
 when the topic is durable; ``更正`` is a correction signal; ``verify`` is a
 procedure signal; ``记住`` types as decision; failure context suppresses
 ``always``/``never``-based preference typing so procedures win.
+
+v3 (tuned against the D0 real-trace validation): events (tool/machine output)
+never extract on bare procedure signals — only manual intent, corrections, or
+the fix combination may extract an event; message-side procedure signals
+require failure, durable-change, or explicit-memory context to extract;
+declared plans about durable topics extract as plan units (message-side only).
 """
 
 REDACTION_MARKER = "[REDACTED]"
@@ -102,6 +108,8 @@ _CORRECTION_SIGNALS = ("correction", "actually", "instead", "不是", "纠正", 
 _PLAN_SIGNALS = ("plan", "todo", "next", "roadmap", "计划", "下一步")
 # Both fullwidth and ASCII colon variants of 事实 are intentional (CJK input).
 _FACT_SIGNALS = ("fact:", "fact snapshot", "updated fact", "事实：", "事实:")  # noqa: RUF001
+# Both fullwidth and ASCII colon variants of 计划 are intentional (CJK input).
+_PLAN_DECLARATION_SIGNALS = ("plan:", "roadmap:", "next step", "计划：", "计划:")  # noqa: RUF001
 
 _LABEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "architecture": ("architecture", "schema", "migration", "架构", "迁移"),
@@ -164,14 +172,28 @@ def triage_trace(
     *,
     role: str = "",
     user_intent: MemoryUserIntent = MemoryUserIntent.AUTO,
+    trace_kind: str = "message",
 ) -> GateDecision:
-    """Run the Phase C deterministic heuristic gate over one bounded trace item."""
+    """Run the Phase C deterministic heuristic gate over one bounded trace item.
+
+    Args:
+        text: Bounded trace text (message text or event body).
+        role: Message role; for events this is the tool name or event kind.
+        user_intent: Manual intent always extracts.
+        trace_kind: ``"message"`` or ``"event"``.  Events are tool/machine
+            output: bare procedure signals never extract them (v3).
+
+    Returns:
+        The deterministic :class:`GateDecision` for this trace item.
+    """
     window = text[:4000]
     lowered = window.casefold()
     manual = user_intent == MemoryUserIntent.MANUAL
+    is_event = trace_kind == "event"
     explicit = _has_any(lowered, _EXPLICIT_MEMORY)
     durable = _has_any(lowered, _DURABLE_CHANGE)
     declared_fact = _has_any(lowered, _FACT_SIGNALS)
+    declared_plan = _has_any(lowered, _PLAN_DECLARATION_SIGNALS)
     fix = _has_any(lowered, _FIX_SIGNALS) and _has_any(
         lowered, ("fixed", "resolved", "pass", "green", "修复", "解决")
     )
@@ -183,12 +205,16 @@ def triage_trace(
         importance, confidence, reason = 0.90, 0.85, "manual_intent"
     elif role_weighted_explicit or correction:
         importance, confidence, reason = 0.80, 0.75, "explicit_decision_or_rule"
-    elif fix or procedure:
+    elif fix or (
+        procedure and not is_event and (durable or explicit or _has_any(lowered, _FIX_SIGNALS))
+    ):
         importance, confidence, reason = 0.65, 0.65, "failure_fix_or_procedure"
     elif durable and explicit:
         importance, confidence, reason = 0.65, 0.60, "durable_change_with_intent"
     elif durable and declared_fact:
         importance, confidence, reason = 0.65, 0.60, "declared_durable_fact"
+    elif durable and declared_plan and not is_event:
+        importance, confidence, reason = 0.55, 0.55, "declared_durable_plan"
     else:
         importance, confidence, reason = 0.35, 0.50, "weak_context_only"
 
@@ -276,8 +302,25 @@ def _infer_labels(lowered: str) -> list[str]:
     return labels or ["workflow"]
 
 
+# Keywords that must match as whole words: plain substring matching lets
+# negations and morphology through ("unresolved" contains "resolved";
+# "flow decisions" contains "decision"), which the D0 real-trace validation
+# showed extracting harness-template noise.  Matching stays substring-based
+# for every other keyword.
+_WORD_BOUNDARY_RES: dict[str, re.Pattern[str]] = {
+    keyword: re.compile(rf"\b{re.escape(keyword)}\b") for keyword in ("resolved", "decision")
+}
+
+
 def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in text for keyword in keywords)
+    for keyword in keywords:
+        pattern = _WORD_BOUNDARY_RES.get(keyword)
+        if pattern is not None:
+            if pattern.search(text):
+                return True
+        elif keyword in text:
+            return True
+    return False
 
 
 def _first_line(text: str) -> str:

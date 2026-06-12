@@ -1,6 +1,6 @@
 # Plan 04 — Phase D: Memory Consolidation (crystals, conflicts, decay)
 
-> **Status**: D1–D5 implemented on `feature/phase-d-consolidation` (2026-06-12, all gates green) + review-fix pass applied. **Merge blocked on the D0 exit gate: owner sign-off of the real-trace dry-run summary below.** · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
+> **Status**: Implementation exists on `feature/phase-d-consolidation` (D1–D5 + review-fix pass, 2026-06-12); the D0 exit gate was NOT met by the first real-trace run (see sign-off line below) and a v3 tuning round was run the same day: c8/c9 noise fixtures committed, gate at heuristic-v3, real-trace re-run 11 extract / 289 reject with both false-positive families eliminated. **Merge waits on the owner's final OK over the v3 results** (the exit gate's "v3 tuning round closed the gaps" path — results recorded in the sign-off package below). · **Spec source**: `docs/spec/spec_02_memory_lifecycle.md` Phase D (deliverables + acceptance are normative there; this plan only sequences and bounds the work).
 > **Predecessor**: Phase C (plan_01) implemented — migration 8, heuristic-v2 gate, `membox memory triage/extract/supersede/retract/restore/search`, C5 harness at precision/recall/type-accuracy 1.00 on the C1 fixtures.
 
 ## Goal
@@ -26,7 +26,16 @@ Exit gate for D0: owner has seen the dry-run sample summary and signed off that 
 
 **Boundary declaration for the conflict detector (D2 first cut)** — accept explicitly, not silently: conflict detection is a deterministic word-list signal (contrast terms + ≥3 shared claim tokens + correction-term short-circuit routing correction pairs to supersession). It classifies the lifecycle fixtures correctly (c6 → conflict review; c4/c7 → supersession), but **real-trace conflict recall is uncalibrated and expected to be low** — this is the intentionally conservative first cut. The LLM-backed comparator (injectable Protocol, same pattern as the gate) remains the planned follow-up, as this plan's D2 already sketches. Conflict persistence stayed stateless (re-surfacing each run); migration 9 was not needed.
 
-**Sign-off line** (owner fills in): `D0 signed off: YES / NEEDS v3 TUNING — date — notes`
+**Sign-off line**: `D0 signed off: NEEDS v3 TUNING — 2026-06-12 — re-run over 20 newest Codex logs (300 rows: 167 extract / 133 reject) exposed two systematic false-positive families: (1) raw tool_result/exec_command bodies (exit codes, "HELD" echoes, JSON cmd payloads) hit failure_fix_or_procedure — 119/119 extracted events were raw tool noise; (2) a harness wake-up template repeated across sessions was extracted per session — the exact cross-session-repetition shape the >=3-independent-sources rule would auto-crystallize. Both become anonymized eval/lifecycle/ fixtures; gate goes to heuristic-v3 before the Phase D branch merges.`
+
+**v3 tuning round — done 2026-06-12 (closes the sign-off line's requirement):**
+
+- Fixtures committed: `eval/lifecycle/history/c8_tool_noise.jsonl` (family 1) and `c9_wakeup_template.jsonl` + `c9_wakeup_template_b.jsonl` (family 2, two sessions because cross-session repetition is the dangerous shape), with reject-shaped `expectations.yaml` entries.
+- Gate at `heuristic-v3`: events never extract on bare procedure signals (corrections and fix+resolution combos still can); message-side procedure requires failure/durable/explicit context; `resolved`/`decision` keyword matches are word-boundary (the template leaked through "unresolved"/"flow decisions" substrings); declared plans about durable topics extract as plan units (restores the c3 plan_to_decision path that the tightening had cut — `_looks_like_replacement` also now allows the plan→decision supersession pairing).
+- Real-trace re-run (same 300 rows): **11 extract / 289 reject** (was 167/133). Extracted events: 2 (one repeated `--help`-style introspection dump surviving via correction words in help text — known residual, v4 candidate, accepted for now). Template messages extracted: 0. The remaining 9 extracted messages are instruction blobs/assistant rationale hitting `explicit_decision_or_rule` — borderline but not noise families.
+- D5 harness extended to the full plan scope: c3 supersedes_plan, c1/c2 not_applicable, c8/c9 rejected, crystal-precision line printed (1.00 on fixtures). Full suite 535 passed; ruff + strict mypy clean.
+
+**Residual risks accepted with this round** (owner is signing off on these, explicitly): the `--help`-dump event family (2 rows) still extracts; instruction-blob messages extract as borderline `explicit_decision_or_rule`; and the C5 harness type-accuracy semantics changed to "any passing ref predicts the gold type" (an entry with plan+decision refs is type-correct if the decision ref matches) — flag if you want gold-type tied to the superseding ref instead.
 
 ## Current state (verify before execution)
 
@@ -55,7 +64,7 @@ Storage side: `count_independent_sources(unit_id)`, attach-source-with-score-evo
 
 Scope to what C1's c6 fixture exercises: two same-type, same-project, overlapping-label active units whose contents disagree. First implementation is deterministic and cheap:
 
-- Candidate pairing via FTS/label/type overlap among active units + crystals (no LLM in the default path; an LLM-backed comparator can follow the same injectable-Protocol pattern as the gate, later).
+- Candidate pairing via FTS/label/type overlap among active units + crystals (no LLM in the default path; an LLM-backed comparator can follow the same injectable-Protocol pattern as the gate, later). **As-built deviation (first cut)**: pairing is pairwise in-memory over the consolidation unit list — project + label intersection + ≥3 shared claim tokens + contrast-term signal, with correction terms short-circuiting pairs to supersession; it does not use FTS and does not require same unit_type. FTS-based candidate pairing becomes relevant when unit counts outgrow the in-memory scan (revisit at Phase E alongside the LLM comparator).
 - A surfaced conflict appears in consolidate dry-run AND apply output with both unit ids, titles, and sources; neither unit is modified automatically. Spec acceptance: "Conflicts are surfaced, not silently overwritten."
 - Persistence question for the implementer to resolve against the spec data model *before* writing DDL: does a surfaced conflict need a table (so repeated runs don't re-announce acknowledged conflicts), or is stateless re-surfacing acceptable for the first cut? If a table is needed, that is migration 9's content; escalate to the owner with the tradeoff rather than deciding silently.
 
@@ -84,7 +93,7 @@ Extend `tests/test_lifecycle_acceptance.py` (or a sibling `test_lifecycle_consol
 
 ## Constraints for all dispatched subagents
 
-- Branch per milestone: `feature/phase-d-crystal-policy`, `feature/phase-d-conflicts`, `feature/phase-d-validator`, `feature/phase-d-consolidate-cli`. Never commit to main/develop.
+- ~~Branch per milestone~~ — superseded by events: D1–D5 landed together on `feature/phase-d-consolidation`; all follow-up Phase D work continues on that branch until merge. Never commit to main/develop.
 - **Pin the expected migration head (8) in every brief and verify the worktree base** before any schema work; if migration 9 turns out to be needed, pin 9 explicitly (session-10 lesson).
 - Do not chain merge + pytest in one backgrounded Bash call (session-8 lesson).
 - Gates per milestone: `uv run pytest` + `uv run ruff check` + `uv run mypy src tests` green; coverage ≥ 80%; Google docstrings; `from __future__ import annotations`; `scripts/update_repository_map.py` after structural changes.

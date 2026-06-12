@@ -67,7 +67,7 @@ def memory_triage(
     written = 0
     try:
         for row in rows:
-            decision = triage_trace(row["text"], role=row["role"])
+            decision = triage_trace(row["text"], role=row["role"], trace_kind=row["trace_kind"])
             if dry_run:
                 typer.echo(
                     f"{row['trace_kind']} {row['trace_id']} "
@@ -130,7 +130,9 @@ def memory_extract(
             if trace is None:
                 typer.echo(f"skip missing source {triage.trace_kind.value}:{triage.trace_id}")
                 continue
-            decision = triage_trace(trace["text"], role=trace["role"])
+            decision = triage_trace(
+                trace["text"], role=trace["role"], trace_kind=trace["trace_kind"]
+            )
             unit = _unit_from_trace(effective_project, trace, decision)
             if dry_run:
                 typer.echo(
