@@ -822,7 +822,10 @@ semantic_budget = budget - memory_reserve
 ```
 
 Initial `memory_share` should be conservative, for example `0.15`, and should
-admit crystals before active units. If the memory pool has no fitting item, the
+admit crystals before active units (at equal final rank — crystal priority is
+a tie-break plus a score boost, not an admission class above relevance; owner
+arbitration 2026-06-12, see `docs/plans/plan_05_phase_e_query_fusion.md`
+"Owner decisions" #3). If the memory pool has no fitting item, the
 unused budget flows back to the existing graph + FTS renderer. Raw history hits
 are never admitted into normal `query` output unless `--include-history` is
 explicitly set.
