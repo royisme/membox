@@ -125,6 +125,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/services/importers/codex_jsonl.py` — Importer for Codex CLI rollout logs (``codex-jsonl``).
         - `src/membox/services/importers/common.py` — Shared helpers for history importers: JSONL iteration and stable IDs.
         - `src/membox/services/importers/membox_jsonl.py` — Importer for ``membox-history-jsonl`` — the normalized fixture format.
+        - `src/membox/services/importers/pi_jsonl.py` — Importer for Pi coding agent session logs (``pi-jsonl``).
       - `src/membox/services/prompts/`
         - `src/membox/services/prompts/__init__.py` — Prompt templates for the membox service layer.
         - `src/membox/services/prompts/extraction.py` — Prompt templates for LLM knowledge extraction.

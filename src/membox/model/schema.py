@@ -20,6 +20,7 @@ class SourceKind(StrEnum):
     CLAUDE_JSONL = "claude-jsonl"
     MIMO_SQLITE = "mimo-sqlite"
     MEMBOX_CAPTURE = "membox-capture"
+    PI_JSONL = "pi-jsonl"
     MANUAL = "manual"
 
 
