@@ -7,6 +7,7 @@ leading comment so tools can reuse the file purpose without asking an LLM to ins
 from __future__ import annotations
 
 import ast
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +33,35 @@ FUNCTIONAL_ROOTS = {"src", "scripts", "tests"}
 MAX_DEPTH = 4
 
 
+def get_git_ignored_paths() -> set[Path]:
+    """Return relative paths ignored by git via git ls-files."""
+    try:
+        res = subprocess.run(  # noqa: S603
+            ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],  # noqa: S607
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        paths = set()
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line:
+                paths.add(Path(line.rstrip("/")))
+        return paths
+    except Exception:
+        return set()
+
+
+GIT_IGNORED_PATHS = get_git_ignored_paths()
+
+
 def should_skip(path: Path) -> bool:
     """Return whether a path is generated noise rather than repository structure."""
     relative = path.relative_to(ROOT)
     if relative in EXCLUDED_RELATIVE_PATHS:
+        return True
+    if any(relative == p or p in relative.parents for p in GIT_IGNORED_PATHS):
         return True
     if path.name in EXCLUDED_DIRS or path.name in EXCLUDED_FILES:
         return True
