@@ -32,10 +32,18 @@ import yaml
 from typer.testing import CliRunner
 
 from membox.cli import app
+from membox.core.agent import MemoryAgent
 from membox.core.history_import import import_history
 from membox.core.store import KnowledgeStore
 from membox.core.triage import GATE_VERSION, activation_passes, triage_trace
-from membox.model.schema import MemoryUnitType
+from membox.model.schema import (
+    MemorySourceKind,
+    MemoryUnitRecord,
+    MemoryUnitSource,
+    MemoryUnitStatus,
+    MemoryUnitType,
+)
+from membox.services.extraction import DummyExtractor
 
 ROOT = Path(__file__).parent.parent
 LIFECYCLE_DIR = ROOT / "eval" / "lifecycle"
@@ -62,6 +70,28 @@ def _build_store(tmp_path: Path) -> KnowledgeStore:
                 import_history(store, fixture, "membox-history-jsonl", project=_PROJECT)
                 imported.add(str(fixture))
     return store
+
+
+def _build_consolidated_agent(tmp_path: Path) -> MemoryAgent:
+    """Run import → triage → extract → consolidate and return an agent on that DB."""
+    db = str(tmp_path / "phase_e.db")
+    agent = MemoryAgent(DummyExtractor(), db_path=db)
+    imported: set[str] = set()
+    for entry in _load_expectations():
+        for fixture_name in entry["fixtures"]:
+            fixture = LIFECYCLE_DIR / str(fixture_name)
+            if str(fixture) not in imported:
+                import_history(agent.store, fixture, "membox-history-jsonl", project=_PROJECT)
+                imported.add(str(fixture))
+    cli = CliRunner()
+    for command in (
+        ["memory", "triage", "--db", db, "--project", _PROJECT, "--apply"],
+        ["memory", "extract", "--db", db, "--project", _PROJECT, "--apply"],
+        ["memory", "consolidate", "--db", db, "--project", _PROJECT, "--apply"],
+    ):
+        result = cli.invoke(app, command)
+        assert result.exit_code == 0, result.output
+    return agent
 
 
 def _activation_expected(activation_status: str) -> bool:
@@ -400,6 +430,96 @@ def test_phase_d_consolidation_acceptance_statuses(tmp_path: Path) -> None:
         f"unexpected crystals from sources "
         f"{[s for s in crystal_units if _session_prefix(s) not in candidate_session_prefixes]}"
     )
+
+
+def test_phase_e_query_inclusion_matrix(tmp_path: Path) -> None:
+    """Query-side memory fusion matches lifecycle query_inclusion expectations."""
+    agent = _build_consolidated_agent(tmp_path)
+
+    memory_off = agent.compact_query(
+        "lifecycle eval fixture triage keyword threshold",
+        budget=800,
+    )
+    assert "Relevant memory" not in memory_off
+
+    explicit = agent.compact_query(
+        "lifecycle eval fixture triage keyword 阈值",
+        budget=1200,
+        include_memory=True,
+        memory_project=_PROJECT,
+    )
+    assert "Relevant memory" in explicit
+    assert "lifecycle eval fixture 必须先交付" in explicit
+    assert "life-c2-chatter" not in explicit
+    assert "life-c8-toolnoise" not in explicit
+    assert "life-c9-template" not in explicit
+
+    latest = agent.compact_query(
+        "graph-only graph plus FTS fusion retrieval default",
+        budget=1200,
+        include_memory=True,
+        memory_project=_PROJECT,
+    )
+    assert "graph plus FTS fusion" in latest
+    assert "graph-only retrieval by default" not in latest
+
+    corrected = agent.compact_query(
+        "eval corpus gitignored private lifecycle fixtures committed",
+        budget=1200,
+        include_memory=True,
+        memory_project=_PROJECT,
+    )
+    assert "eval/corpus is gitignored private handoff data" in corrected
+    assert "eval/corpus contains the lifecycle fixtures" not in corrected
+
+    conflict = agent.compact_query(
+        "branch feature develop main conflict workflow",
+        budget=1600,
+        include_memory=True,
+        memory_project=_PROJECT,
+    )
+    assert "[conflict] [unit] preference: For this repo" in conflict
+    assert "[conflict] [unit] decision: For release-only work" in conflict
+
+
+def test_phase_e_memory_project_scope(tmp_path: Path) -> None:
+    """Memory recall defaults to one project and only crosses projects explicitly."""
+    agent = _build_consolidated_agent(tmp_path)
+    agent.store.create_memory_unit(
+        MemoryUnitRecord(
+            project="other-project",
+            unit_type=MemoryUnitType.DECISION,
+            status=MemoryUnitStatus.ACTIVE_UNIT,
+            title="Other project secret workflow",
+            content="Other project memory must not leak into scoped query output.",
+            importance_score=0.9,
+            confidence_score=0.9,
+            labels=["workflow"],
+            sources=[
+                MemoryUnitSource(
+                    source_kind=MemorySourceKind.MANUAL,
+                    source_ref="manual:other-project",
+                    quote="other project",
+                )
+            ],
+        )
+    )
+
+    scoped = agent.compact_query(
+        "Other project secret workflow",
+        budget=800,
+        include_memory=True,
+        memory_project=_PROJECT,
+    )
+    assert "Other project secret workflow" not in scoped
+
+    all_projects = agent.compact_query(
+        "Other project secret workflow",
+        budget=800,
+        include_memory=True,
+        memory_project=None,
+    )
+    assert "Other project secret workflow" in all_projects
 
 
 def _memory_status_by_source(store: KnowledgeStore) -> dict[str, tuple[str, int | None, int]]:

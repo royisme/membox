@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from membox.cli._common import make_agent
+from membox.core.agent import _infer_project
 
 
 def query(
@@ -30,6 +33,16 @@ def query(
         "--include-superseded",
         help="Include superseded (older-version) relations in the query results.",
     ),
+    include_memory: bool = typer.Option(
+        False,
+        "--include-memory",
+        help="Include opt-in crystals and memory units in a separate budget partition.",
+    ),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="When --include-memory is set, recall memory from every project.",
+    ),
 ) -> None:
     """Query the knowledge graph and print a compact context.
 
@@ -40,11 +53,16 @@ def query(
     newer version of the same source document.
     """
     agent = make_agent(db, no_llm=no_llm, warn=True)
+    memory_project = None
+    if include_memory and not all_projects:
+        memory_project = project or _infer_project(Path.cwd() / "_")
     result = agent.query(
         question,
         max_hops=max_hops,
         budget=budget,
         project_filter=project,
         include_superseded=include_superseded,
+        include_memory=include_memory,
+        memory_project=memory_project,
     )
     typer.echo(result)

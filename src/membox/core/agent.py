@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import datetime
+import re
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from membox.core.chunking import _DEFAULT_MAX_TOKENS, chunk_markdown
 from membox.core.normalize import normalize_name, normalize_predicate
 from membox.core.store import KnowledgeStore
+from membox.core.store.retrieval import est_tokens
 from membox.model.schema import (
     DocumentChunk,
     Entity,
@@ -22,6 +25,7 @@ from membox.services.embedding import BatchEmbedder
 
 if TYPE_CHECKING:
     from membox.config import RetrievalConfig
+    from membox.core.store.memory_units import MemoryQueryHit
     from membox.services.embedding import Embedder
     from membox.services.extraction import LLMExtractor
 
@@ -411,6 +415,8 @@ class MemoryAgent:
         project_filter: str | None = None,
         *,
         include_superseded: bool = False,
+        include_memory: bool = False,
+        memory_project: str | None = None,
     ) -> str:
         """Query the knowledge graph and return a compact context string.
 
@@ -426,6 +432,9 @@ class MemoryAgent:
             project_filter: Restrict evidence to this project name.
             include_superseded: When True, superseded relations are included in
                 the BFS traversal.  Defaults to False.
+            include_memory: When True, append opt-in query-side memory recall.
+            memory_project: Project scope for memory recall; None means all
+                projects and should only be used for explicit cross-project calls.
 
         Returns:
             Compact context string with coverage footer.
@@ -436,6 +445,8 @@ class MemoryAgent:
             budget=budget,
             project_filter=project_filter,
             include_superseded=include_superseded,
+            include_memory=include_memory,
+            memory_project=memory_project,
         )
 
     def compact_query(
@@ -447,6 +458,9 @@ class MemoryAgent:
         config: object | None = None,
         *,
         include_superseded: bool = False,
+        include_memory: bool = False,
+        memory_project: str | None = None,
+        _append_pending: bool = True,
     ) -> str:
         """Hybrid BFS + scored rerank + compact output with token-budget truncation.
 
@@ -467,6 +481,10 @@ class MemoryAgent:
                 :class:`~membox.config.RetrievalConfig`; uses defaults if None.
             include_superseded: When True, superseded relations are included in
                 the BFS traversal.  Defaults to False.
+            include_memory: When True, append opt-in memory units/crystals under
+                a separate budget partition.
+            memory_project: Project scope for memory recall. Pass None only for
+                explicit all-project memory recall.
 
         Returns:
             Compact context string with coverage footer.
@@ -482,6 +500,17 @@ class MemoryAgent:
 
         effective_budget = budget if budget is not None else ret_cfg.budget
 
+        if include_memory:
+            return self._compact_query_with_memory(
+                question,
+                max_hops=max_hops,
+                budget=effective_budget,
+                project_filter=project_filter,
+                ret_cfg=ret_cfg,
+                include_superseded=include_superseded,
+                memory_project=memory_project,
+            )
+
         seeds = self._extractor.extract_query_entities(question)
         seed_ids: list[int] = []
         for name in seeds:
@@ -495,9 +524,8 @@ class MemoryAgent:
         if ret_cfg.fusion_mode == "fallback":
             # Original either/or control flow: preserved for A/B comparison and rollback.
             if not seed_ids:
-                return self._append_pending_note(
-                    self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
-                )
+                fallback = self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+                return self._append_pending_note(fallback) if _append_pending else fallback
 
             query_emb_fb: list[float] | None = None
             if self._embedder is not None:
@@ -514,16 +542,15 @@ class MemoryAgent:
             )
 
             if not scored_fb:
-                return self._append_pending_note(
-                    self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
-                )
+                fallback = self._fts_fallback(question, effective_budget, project_filter, ret_cfg)
+                return self._append_pending_note(fallback) if _append_pending else fallback
 
             output_fb = self.store.compact_output(
                 scored=scored_fb,
                 budget=effective_budget,
                 top_evidence_k=ret_cfg.top_evidence_k,
             )
-            return self._append_pending_note(output_fb)
+            return self._append_pending_note(output_fb) if _append_pending else output_fb
 
         # --- fusion_mode == "merge": budget-partitioned graph+FTS fusion ---
         # Seed resolution (same as before).
@@ -562,7 +589,175 @@ class MemoryAgent:
             chunk_share=ret_cfg.chunk_share,
             top_evidence_k=ret_cfg.top_evidence_k,
         )
+        return self._append_pending_note(output) if _append_pending else output
+
+    def _compact_query_with_memory(
+        self,
+        question: str,
+        *,
+        max_hops: int,
+        budget: int,
+        project_filter: str | None,
+        ret_cfg: RetrievalConfig,
+        include_superseded: bool,
+        memory_project: str | None,
+    ) -> str:
+        """Return compact query output with an opt-in memory section."""
+        memory_budget = int(budget * ret_cfg.memory_share)
+        memory_hits = self.store.search_memory_units_for_query(
+            memory_project,
+            question,
+            limit=20,
+        )
+        (
+            memory_lines,
+            memory_used,
+            admitted_crystals,
+            total_crystals,
+            admitted_units,
+            total_units,
+            admitted_ids,
+        ) = self._render_memory_hits(memory_hits, memory_budget)
+        semantic_budget = budget - memory_budget + (memory_budget - memory_used)
+        base_output = self.compact_query(
+            question,
+            max_hops=max_hops,
+            budget=semantic_budget,
+            project_filter=project_filter,
+            config=ret_cfg,
+            include_superseded=include_superseded,
+            _append_pending=False,
+        )
+        output = self._insert_memory_section(
+            base_output,
+            memory_lines,
+            memory_used=memory_used,
+            total_budget=budget,
+            admitted_crystals=admitted_crystals,
+            total_crystals=total_crystals,
+            admitted_units=admitted_units,
+            total_units=total_units,
+        )
+        with suppress(Exception):
+            self.store.mark_memory_units_recalled(admitted_ids)
         return self._append_pending_note(output)
+
+    def _render_memory_hits(
+        self,
+        hits: list[MemoryQueryHit],
+        budget: int,
+    ) -> tuple[list[str], int, int, int, int, int, list[int]]:
+        """Render memory hits within a budget and return coverage counts.
+
+        Admission is rank-prefix: rendering stops at the first hit that does
+        not fit the remaining budget, so admitted hits are always the strict
+        top-N of the ranked pool and the footer's ``n/m`` coverage reads as
+        "best n of m". Lower-ranked shorter hits never leapfrog a higher-ranked
+        one that was skipped for size (owner decision #3: crystals-before-units
+        applies to ranking, and admission must not reorder it).
+        """
+        from membox.core.consolidate import detect_conflicts
+
+        remaining = budget
+        lines: list[str] = []
+        admitted_crystals = 0
+        admitted_units = 0
+        total_crystals = sum(1 for hit in hits if hit["status"] == "crystal")
+        total_units = len(hits) - total_crystals
+        admitted_ids: list[int] = []
+        records = [self.store.get_memory_unit(hit["id"]) for hit in hits]
+        conflict_ids = {
+            unit_id
+            for conflict in detect_conflicts([record for record in records if record is not None])
+            for unit_id in (conflict.left_id, conflict.right_id)
+        }
+        for hit in hits:
+            tier = "crystal" if hit["status"] == "crystal" else "unit"
+            content = str(hit["content"]).strip().splitlines()[0] if hit["content"].strip() else ""
+            conflict_prefix = "[conflict] " if hit["id"] in conflict_ids else ""
+            line = f"{conflict_prefix}[{tier}] {hit['unit_type']}: {hit['title']} - {content}"
+            cost = est_tokens(line)
+            if cost > remaining:
+                break
+            lines.append(line)
+            remaining -= cost
+            if tier == "crystal":
+                admitted_crystals += 1
+            else:
+                admitted_units += 1
+            admitted_ids.append(hit["id"])
+        return (
+            lines,
+            budget - remaining,
+            admitted_crystals,
+            total_crystals,
+            admitted_units,
+            total_units,
+            admitted_ids,
+        )
+
+    def _insert_memory_section(
+        self,
+        output: str,
+        memory_lines: list[str],
+        *,
+        memory_used: int,
+        total_budget: int,
+        admitted_crystals: int,
+        total_crystals: int,
+        admitted_units: int,
+        total_units: int,
+    ) -> str:
+        """Insert memory lines before the coverage footer and extend the footer."""
+        lines = output.splitlines()
+        footer_index = next(
+            (index for index, line in enumerate(lines) if line.startswith("(returned ")),
+            len(lines),
+        )
+        before = lines[:footer_index]
+        footer = lines[footer_index] if footer_index < len(lines) else "(returned 0/0 triples)"
+        after = lines[footer_index + 1 :] if footer_index < len(lines) else []
+        if memory_lines:
+            if before and before[-1] != "":
+                before.append("")
+            before.append("Relevant memory")
+            before.extend(memory_lines)
+            before.append("")
+        new_footer = self._extend_memory_footer(
+            footer,
+            memory_used=memory_used,
+            total_budget=total_budget,
+            admitted_crystals=admitted_crystals,
+            total_crystals=total_crystals,
+            admitted_units=admitted_units,
+            total_units=total_units,
+        )
+        return "\n".join([*before, new_footer, *after])
+
+    def _extend_memory_footer(
+        self,
+        footer: str,
+        *,
+        memory_used: int,
+        total_budget: int,
+        admitted_crystals: int,
+        total_crystals: int,
+        admitted_units: int,
+        total_units: int,
+    ) -> str:
+        """Append memory coverage to an existing graph/chunk coverage footer."""
+        footer_body = footer[:-1] if footer.endswith(")") else footer
+        footer_body = re.sub(
+            r"~([0-9,]+)/([0-9,]+) tokens",
+            lambda match: (
+                f"~{int(match.group(1).replace(',', '')) + memory_used:,}/{total_budget:,} tokens"
+            ),
+            footer_body,
+        )
+        return (
+            f"{footer_body}, {admitted_crystals}/{total_crystals} crystals, "
+            f"{admitted_units}/{total_units} units)"
+        )
 
     def _fts_fallback(
         self,
