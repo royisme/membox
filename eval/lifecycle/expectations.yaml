@@ -12,6 +12,7 @@
     activation_status: active_unit
     phase_d_status: not_applicable
     query_inclusion: explicit_memory_only
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c1-rules:msg:m1"
@@ -29,6 +30,7 @@
     activation_status: trace_only
     phase_d_status: not_applicable
     query_inclusion: excluded
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c2-chatter:msg:m1"
@@ -46,6 +48,7 @@
     activation_status: active_unit
     phase_d_status: supersedes_plan
     query_inclusion: explicit_memory_only
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c3-plan:msg:m1"
@@ -65,6 +68,7 @@
     activation_status: active_unit
     phase_d_status: superseded
     query_inclusion: latest_only
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c4-old:msg:m1"
@@ -84,6 +88,7 @@
     activation_status: active_unit
     phase_d_status: crystal_candidate
     query_inclusion: explicit_memory_only
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c5-failure:msg:m1"
@@ -91,6 +96,24 @@
         trace_id: "membox-capture:life-c5-failure:evt:failed-migration-check:tool_result"
     extraction_hint: "verify migration head before editing migrations"
   notes: "Failure plus fix should become a repeatable procedure or learning."
+
+- id: c5_repeated_failure_learning_b
+  category: repeated_failures
+  fixtures: ["history/c5_repeated_failure_b.jsonl"]
+  requires_multi_session: false
+  expected:
+    triage_should_extract: true
+    unit_type: procedure
+    labels: ["workflow", "testing"]
+    activation_status: active_unit
+    phase_d_status: crystal_candidate
+    query_inclusion: explicit_memory_only
+    distill: candidate_with_c5
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c5-failure-b:msg:m1"
+    extraction_hint: "verify migration head before editing migrations"
+  notes: "Second independent c5 session used only to prove Phase F repetition."
 
 - id: c6_conflicting_memories
   category: conflicting_memories
@@ -103,6 +126,7 @@
     activation_status: active_unit
     phase_d_status: conflict_review
     query_inclusion: surface_conflict
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c6-conflict-a:msg:m1"
@@ -122,6 +146,7 @@
     activation_status: active_unit
     phase_d_status: retracted_or_superseded
     query_inclusion: corrected_only
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c7-correction-old:msg:m1"
@@ -141,6 +166,7 @@
     activation_status: trace_only
     phase_d_status: not_applicable
     query_inclusion: excluded
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c8-toolnoise:msg:m1"
@@ -166,6 +192,7 @@
     activation_status: trace_only
     phase_d_status: not_applicable
     query_inclusion: excluded
+    distill: none
     source_refs:
       - trace_kind: message
         trace_id: "membox-capture:life-c9-template:msg:m1"

@@ -8,31 +8,11 @@ Functional Python files include their module header so tools can reuse the file 
 
 ## Directory Outline
 
-- `.claude/`
-  - `.claude/worktrees/`
-  - `.claude/scheduled_tasks.lock`
-- `.crew/`
-  - `.crew/audit/`
-    - `.crew/audit/prune.jsonl`
-  - `.crew/state/`
-    - `.crew/state/metrics/`
-      - `.crew/state/metrics/2026-06-10.jsonl`
-      - `.crew/state/metrics/2026-06-11.jsonl`
-      - `.crew/state/metrics/2026-06-12.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
     - `.github/workflows/ci.yml`
   - `.github/dependabot.yml`
-- `.serena/`
-  - `.serena/cache/`
-    - `.serena/cache/python/`
-  - `.serena/memories/`
-  - `.serena/.gitignore`
-  - `.serena/project.local.yml`
-  - `.serena/project.yml`
-- `.works/`
-  - `.works/translation_plan.md`
 - `docs/`
   - `docs/agent/`
     - `docs/agent/01-project-contract.md`
@@ -49,6 +29,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/plans/plan_03_ingest_performance.md`
     - `docs/plans/plan_04_phase_d_consolidation.md`
     - `docs/plans/plan_05_phase_e_query_fusion.md`
+    - `docs/plans/plan_06_phase_f_distill.md`
   - `docs/spec/`
     - `docs/spec/spec_01_core.md`
     - `docs/spec/spec_02_memory_lifecycle.md`
@@ -60,21 +41,6 @@ Functional Python files include their module header so tools can reuse the file 
   - `docs/spec.md`
   - `docs/workflow.md`
 - `eval/`
-  - `eval/corpus/`
-    - `eval/corpus/china-zhouyi-app--HANDOFF.md`
-    - `eval/corpus/easymem--HANDOFF.md`
-    - `eval/corpus/m5go--handoff-2026-03-16.md`
-    - `eval/corpus/membox--HANDOFF.md`
-    - `eval/corpus/moziBot--HANDOFF.md`
-    - `eval/corpus/pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md`
-    - `eval/corpus/pika--HANDOFF_STT_COHERENT_PROFILE.md`
-    - `eval/corpus/playfun--EVENTS.md`
-    - `eval/corpus/playfun--HANDOFF.md`
-  - `eval/corpus-pre-resnapshot/`
-    - `eval/corpus-pre-resnapshot/china-zhouyi-app--HANDOFF.md`
-    - `eval/corpus-pre-resnapshot/easymem--HANDOFF.md`
-    - `eval/corpus-pre-resnapshot/membox--HANDOFF.md`
-    - `eval/corpus-pre-resnapshot/playfun--HANDOFF.md`
   - `eval/lifecycle/`
     - `eval/lifecycle/history/`
       - `eval/lifecycle/history/c1_explicit_rules.jsonl`
@@ -84,6 +50,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `eval/lifecycle/history/c4_fact_new.jsonl`
       - `eval/lifecycle/history/c4_fact_old.jsonl`
       - `eval/lifecycle/history/c5_repeated_failure.jsonl`
+      - `eval/lifecycle/history/c5_repeated_failure_b.jsonl`
       - `eval/lifecycle/history/c6_conflict_a.jsonl`
       - `eval/lifecycle/history/c6_conflict_b.jsonl`
       - `eval/lifecycle/history/c7_correction_new.jsonl`
@@ -103,12 +70,15 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/eval_memory.py` — scripts/eval_memory.py — membox Phase 7.5 M3 evaluation harness.
   - `scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
+- `skills/`
+  - `skills/membox-skill.md`
 - `src/`
   - `src/membox/`
     - `src/membox/cli/`
       - `src/membox/cli/commands/`
         - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
-        - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace import and search.
+        - `src/membox/cli/commands/distill.py` — `membox distill` read-only workflow packaging analysis command.
+        - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace pull and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
         - `src/membox/cli/commands/memory.py` — `membox memory` commands for lifecycle Phase C units.
@@ -135,6 +105,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
       - `src/membox/core/consolidate.py` — Pure consolidation policy for lifecycle Phase D memory units.
+      - `src/membox/core/distill.py` — Pure workflow-distillation policy for lifecycle Phase F memory units.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
@@ -151,9 +122,10 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/services/importers/`
         - `src/membox/services/importers/__init__.py` — History log importers — one module per upstream format, parsing only.
         - `src/membox/services/importers/base.py` — HistoryImporter protocol — the contract every log-format adapter satisfies.
-        - `src/membox/services/importers/codex_jsonl.py` — Importer for Codex CLI rollout logs (``codex-jsonl``).
+        - `src/membox/services/importers/codex_jsonl.py` — Importer for Codex CLI rollout logs (``codex`` adapt format).
         - `src/membox/services/importers/common.py` — Shared helpers for history importers: JSONL iteration and stable IDs.
-        - `src/membox/services/importers/membox_jsonl.py` — Importer for ``membox-history-jsonl`` — the normalized fixture format.
+        - `src/membox/services/importers/membox_jsonl.py` — Importer for ``membox`` — the normalized fixture adapt format.
+        - `src/membox/services/importers/pi_jsonl.py` — Importer for Pi coding agent session logs (``pi`` adapt format).
       - `src/membox/services/prompts/`
         - `src/membox/services/prompts/__init__.py` — Prompt templates for the membox service layer.
         - `src/membox/services/prompts/extraction.py` — Prompt templates for LLM knowledge extraction.
@@ -172,6 +144,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_consolidation.py` — Lifecycle Phase D memory-consolidation tests.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
+  - `tests/test_distill.py` — Lifecycle Phase F workflow-distillation tests.
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
   - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).
   - `tests/test_fts_fallback.py` — FTS fallback: direct chunk search when seed resolution or graph recall is empty.
@@ -192,7 +165,6 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_supersession.py` — M4 supersession semantics tests.
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
-- `.env`
 - `.gitignore`
 - `.pre-commit-config.yaml`
 - `.python-version`

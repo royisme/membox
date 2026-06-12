@@ -49,7 +49,15 @@ Thumbs.db
 .env.*
 docs/reference/
 .works/
+.serena/
 .claude/
 .crew/
 eval/corpus/
 eval/corpus-pre-resnapshot/
+
+/.crew/
+/.crew
+!.crew/artifacts/
+!.crew/graphs/
+!.crew/artifacts/.gitkeep
+!.crew/graphs/.gitkeep

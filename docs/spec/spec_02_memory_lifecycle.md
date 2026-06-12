@@ -1,6 +1,6 @@
 # Membox Spec 02 — Agent Memory Lifecycle (Trace → Unit → Crystal)
 
-Status: Spec — accepted v2.3 (2026-06-11), Phase B implemented
+Status: Spec — accepted v2.3 (2026-06-11), Phases A–E implemented (Phase E merged 2026-06-12), Phase F merged 2026-06-12 (PR #5)
 Date: 2026-06-11
 Scope: next-stage memory-system design after graph + FTS retrieval quality gate
 Audience: project owner and coding agents reviewing future Membox phases
@@ -852,8 +852,9 @@ Phase-appropriate commands:
 
 ```bash
 # Trace
-membox history import <path> --format membox-history-jsonl --project X
-membox history import <path> --format codex-jsonl --project X
+membox history pull --adapt pi --project X
+membox history pull --adapt codex --project X
+membox history pull --adapt membox session.jsonl --project X
 membox history search "..." --project X --kind tool_error
 membox history around <message-id> --project X
 membox history fetch <message-or-event-id> --project X   # redacted by default

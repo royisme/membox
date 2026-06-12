@@ -27,11 +27,12 @@ if TYPE_CHECKING:
     from membox.core.store.history import ImportState
 
 _FORMAT_BY_SOURCE_KIND: dict[str, str] = {
-    SourceKind.CODEX_JSONL.value: "codex-jsonl",
-    SourceKind.MEMBOX_CAPTURE.value: "membox-history-jsonl",
-    SourceKind.MANUAL.value: "membox-history-jsonl",
+    SourceKind.CODEX_JSONL.value: "codex",
+    SourceKind.PI_JSONL.value: "pi",
+    SourceKind.MEMBOX_CAPTURE.value: "membox",
+    SourceKind.MANUAL.value: "membox",
 }
-"""``source_kind`` → importer ``--format`` used to re-parse for fetch."""
+"""``source_kind`` → importer ``--adapt`` name used to re-parse for fetch."""
 
 
 class ImportResult(TypedDict):
@@ -49,6 +50,74 @@ class FetchResult(TypedDict):
     found: bool
     payload: str
     note: str
+
+
+class PullResult(TypedDict):
+    """Summary of one :func:`history_pull` call."""
+
+    sessions: int
+    messages: int
+    events: int
+    files: list[str]
+
+
+def history_pull(
+    store: KnowledgeStore,
+    format_name: str,
+    *,
+    project: str | None = None,
+    session_root: Path,
+    text_cap_bytes: int = 16384,
+) -> PullResult:
+    """Auto-discover and import all session logs for the current project.
+
+    Uses the adapter's ``discover_sessions`` to find session files matching
+    the current working directory, then imports each one via
+    :func:`import_history` (incremental + idempotent).
+
+    Args:
+        store: Open knowledge store.
+        format_name: Importer ``--adapt`` name.
+        project: Project scope override.
+        session_root: Agent session storage root directory.
+        text_cap_bytes: Preview cap passed to ``import_history``.
+
+    Returns:
+        Pull summary with counts and file list.
+
+    Raises:
+        ValueError: If ``format_name`` is unknown or the adapter doesn't
+            support session discovery.
+    """
+    importer = get_importer(format_name)
+    project_cwd = Path.cwd()
+
+    discovered = importer.discover_sessions(project_cwd, session_root)
+    if not discovered:
+        return PullResult(sessions=0, messages=0, events=0, files=[])
+
+    total_msg = 0
+    total_evt = 0
+    imported_files: list[str] = []
+    for path in discovered:
+        result = import_history(
+            store,
+            path,
+            format_name,
+            project=project,
+            text_cap_bytes=text_cap_bytes,
+        )
+        if not result["skipped"]:
+            total_msg += result["messages"]
+            total_evt += result["events"]
+            imported_files.append(str(path))
+
+    return PullResult(
+        sessions=len(discovered),
+        messages=total_msg,
+        events=total_evt,
+        files=imported_files,
+    )
 
 
 def import_history(
@@ -70,7 +139,7 @@ def import_history(
     Args:
         store: Open knowledge store.
         path: Source log file.
-        format_name: Importer ``--format`` name.
+        format_name: Importer ``--adapt`` name.
         project: Project override carried into the session record.
         text_cap_bytes: Preview cap (``HistoryConfig.text_cap_bytes``).
 

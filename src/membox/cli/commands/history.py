@@ -1,4 +1,4 @@
-"""``membox history`` command group — session-trace import and search.
+"""``membox history`` command group — session-trace pull and search.
 
 Presentation only: parsing lives in :mod:`membox.services.importers`, storage
 in :mod:`membox.core.store.history`, orchestration in
@@ -13,6 +13,7 @@ shared database never leaks another project's trace by default.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -20,14 +21,14 @@ import typer
 from membox.cli._common import console
 from membox.config import HistoryConfig
 from membox.core.agent import _infer_project
-from membox.core.history_import import fetch_payload, import_history
+from membox.core.history_import import fetch_payload, history_pull, import_history
 from membox.core.store import KnowledgeStore
 from membox.core.triage import redact_secrets
 from membox.services.importers import IMPORTER_FORMATS
 
 history_app = typer.Typer(
     name="history",
-    help="Import and search agent session history (trace layer).",
+    help="Pull and search agent session history (trace layer).",
     no_args_is_help=True,
 )
 
@@ -75,40 +76,79 @@ def _print_hits(rows: list[dict[str, object]], empty_msg: str) -> None:
         typer.echo(body)
 
 
-@history_app.command("import")
-def history_import(
-    path: Path = typer.Argument(..., help="Path to the session log file"),
+@history_app.command("pull")
+def history_pull_command(
     format_name: str = typer.Option(
         ...,
-        "--format",
-        help=f"Log file format: {', '.join(sorted(IMPORTER_FORMATS))}",
+        "--adapt",
+        help=f"Agent adapter: {', '.join(sorted(IMPORTER_FORMATS))}",
     ),
     project: str | None = typer.Option(None, "--project", help="Project scope override"),
+    session_root: str | None = typer.Option(
+        None,
+        "--session-root",
+        help="Agent session storage root (default: $MEMBOX_SESSION_ROOT)",
+    ),
+    path: Path | None = typer.Argument(None, help="Single session file to import (optional)"),
     db: str = _DB_OPTION,
 ) -> None:
-    """Import a session log (idempotent; re-import resumes incrementally)."""
+    """Pull session history from an agent adapter (auto-discovery or single file).
+
+    Without a path argument, auto-discovers sessions matching the current
+    working directory under --session-root (or $MEMBOX_SESSION_ROOT).
+    With a path, imports that single file directly.
+    """
     if format_name not in IMPORTER_FORMATS:
         known = ", ".join(sorted(IMPORTER_FORMATS))
-        typer.echo(f"Error: unknown format {format_name!r}; known: {known}", err=True)
+        typer.echo(f"Error: unknown adapter {format_name!r}; known: {known}", err=True)
         raise typer.Exit(1)
-    if not path.exists():
-        typer.echo(f"Error: file not found: {path}", err=True)
-        raise typer.Exit(1)
+
     store = KnowledgeStore(db)
-    result = import_history(
+
+    if path is not None:
+        # Single-file import (existing behavior).
+        if not path.exists():
+            typer.echo(f"Error: file not found: {path}", err=True)
+            raise typer.Exit(1)
+        if path.is_dir():
+            typer.echo(f"Error: expected a file, got directory: {path}", err=True)
+            raise typer.Exit(1)
+        import_result = import_history(
+            store,
+            path,
+            format_name,
+            project=project,
+            text_cap_bytes=HistoryConfig().text_cap_bytes,
+        )
+        if import_result["skipped"]:
+            console.print(f"[yellow]Unchanged, skipped:[/yellow] {import_result['session_id']}")
+        else:
+            console.print(
+                f"[green]Imported[/green] {import_result['messages']} messages, "
+                f"{import_result['events']} events into session {import_result['session_id']}"
+            )
+        return
+
+    # Auto-discovery mode.
+    resolved_root = _resolve_session_root(session_root)
+    if resolved_root is None:
+        typer.echo("Error: set MEMBOX_SESSION_ROOT or pass --session-root", err=True)
+        raise typer.Exit(1)
+
+    pull_result = history_pull(
         store,
-        path,
         format_name,
         project=project,
+        session_root=resolved_root,
         text_cap_bytes=HistoryConfig().text_cap_bytes,
     )
-    if result["skipped"]:
-        console.print(f"[yellow]Unchanged, skipped:[/yellow] {result['session_id']}")
-    else:
-        console.print(
-            f"[green]Imported[/green] {result['messages']} messages, "
-            f"{result['events']} events into session {result['session_id']}"
-        )
+    if pull_result["sessions"] == 0:
+        typer.echo("No sessions found for current project.")
+        return
+    console.print(
+        f"[green]Pulled[/green] {pull_result['messages']} messages, "
+        f"{pull_result['events']} events from {pull_result['sessions']} session(s)"
+    )
 
 
 @history_app.command("search")
@@ -228,3 +268,11 @@ def history_failures(
         project=_resolve_project(project, all_projects), since=since, limit=limit
     )
     _print_hits(rows, "No failures recorded.")
+
+
+def _resolve_session_root(explicit: str | None) -> Path | None:
+    """Resolve session root from explicit flag or MEMBOX_SESSION_ROOT env var."""
+    raw = explicit or os.environ.get("MEMBOX_SESSION_ROOT")
+    if raw is None:
+        return None
+    return Path(raw).expanduser()

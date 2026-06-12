@@ -105,7 +105,10 @@ def test_lifecycle_expectations_cover_required_categories() -> None:
     entries = _load_expectations()
     categories = {str(entry["category"]) for entry in entries}
     assert categories == REQUIRED_CATEGORIES
-    assert len(entries) == len(REQUIRED_CATEGORIES)
+    assert {str(entry["id"]) for entry in entries} >= {
+        "c5_repeated_failure_learning",
+        "c5_repeated_failure_learning_b",
+    }
 
 
 def test_lifecycle_expectation_schema_is_strict() -> None:
@@ -123,6 +126,7 @@ def test_lifecycle_expectation_schema_is_strict() -> None:
         assert expected["activation_status"] in VALID_ACTIVATION_STATUSES
         assert expected["phase_d_status"] in VALID_PHASE_D_STATUSES
         assert expected["query_inclusion"] in VALID_QUERY_INCLUSIONS
+        assert expected["distill"] in {"none", "candidate_with_c5"}
         assert isinstance(expected["extraction_hint"], str)
 
         labels = expected["labels"]
@@ -161,7 +165,7 @@ def test_lifecycle_history_fixtures_are_importable(tmp_path: Path) -> None:
                 result = import_history(
                     store,
                     fixture,
-                    "membox-history-jsonl",
+                    "membox",
                     project="membox-lifecycle",
                 )
                 assert result["skipped"] is False

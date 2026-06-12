@@ -13,16 +13,18 @@ from __future__ import annotations
 from membox.services.importers.base import HistoryImporter
 from membox.services.importers.codex_jsonl import CodexJsonlImporter
 from membox.services.importers.membox_jsonl import MemboxHistoryJsonlImporter
+from membox.services.importers.pi_jsonl import PiJsonlImporter
 
 IMPORTER_FORMATS: dict[str, type] = {
-    "membox-history-jsonl": MemboxHistoryJsonlImporter,
-    "codex-jsonl": CodexJsonlImporter,
+    "membox": MemboxHistoryJsonlImporter,
+    "codex": CodexJsonlImporter,
+    "pi": PiJsonlImporter,
 }
-"""CLI ``--format`` name → importer class."""
+"""CLI ``--adapt`` name → importer class."""
 
 
 def get_importer(format_name: str) -> HistoryImporter:
-    """Return an importer instance for a CLI ``--format`` name.
+    """Return an importer instance for a CLI ``--adapt`` name.
 
     Args:
         format_name: One of :data:`IMPORTER_FORMATS`.
@@ -47,5 +49,6 @@ __all__ = [
     "CodexJsonlImporter",
     "HistoryImporter",
     "MemboxHistoryJsonlImporter",
+    "PiJsonlImporter",
     "get_importer",
 ]
