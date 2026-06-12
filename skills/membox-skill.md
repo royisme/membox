@@ -68,9 +68,13 @@ membox queue                      # show per-status counts and recent failures
 ### Trace Layer (lifecycle Phase B)
 
 ```bash
-# Import session history (idempotent; re-import resumes incrementally)
-membox history import session.jsonl --adapt membox --project myrepo
-membox history import session.jsonl --adapt codex --project myrepo
+# Pull session history (auto-discovery via MEMBOX_SESSION_ROOT)
+export MEMBOX_SESSION_ROOT=~/.pi/agent/sessions   # Pi agent
+membox history pull --adapt pi --project myrepo
+
+# Or import a single file directly
+membox history pull --adapt membox session.jsonl --project myrepo
+membox history pull --adapt codex session.jsonl --project myrepo
 
 # Search history
 membox history search "migration error" --project myrepo
@@ -147,8 +151,8 @@ At session end (or after major milestones), feed the session trace into
 the lifecycle pipeline:
 
 ```bash
-# 1. Import the session history
-membox history import handoff.jsonl --adapt membox --project myrepo
+# 1. Pull the session history
+membox history pull --adapt pi
 
 # 2. Triage — decide what is worth keeping
 membox memory triage --project myrepo --apply

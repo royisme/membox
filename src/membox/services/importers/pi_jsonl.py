@@ -1,38 +1,20 @@
 """Importer for Pi coding agent session logs (``pi`` adapt format).
 
 Pi stores one session per file under
-``~/.pi/agent/sessions/<project-path>/<timestamp>_<uuid>.jsonl``.
-Every line is a JSON object with ``type``, ``id``, ``parentId``, and
-``timestamp`` at the top level.
+``~/.pi/agent/sessions/<project-dir>/<timestamp>_<uuid>.jsonl``.
 
-Record types this adapter maps:
-
-- ``session`` → the session record (``id`` is the session UUID,
-  ``cwd`` becomes the title and project-inference basis).
-- ``message`` → a message, with ``message.role`` in
-  ``{user, assistant, toolResult}`` and ``message.content`` as an array
-  of content parts:
-  - ``{type: "text", text: "..."}`` — text content.
-  - ``{type: "thinking", thinking: "...", ...}`` — skipped (reasoning
-    content is encrypted/not useful for recall).
-  - ``{type: "toolCall", id, name, arguments}`` → a ``tool_call`` event.
-  - ``{type: "toolResult", toolCallId, content, isError}`` → embedded
-    in ``toolResult``-role messages.
-- ``model_change`` / ``thinking_level_change`` / ``custom`` /
-  ``compaction`` → skipped.
-
-Pi message IDs are stable upstream UUIDs, so external IDs use the
-upstream ``id`` directly — no synthetic content hashes needed.
+This adapter extracts **conversation only** — user and assistant text messages.
+Tool calls, tool results, thinking, model changes, and other non-conversation
+events are skipped.  The goal is agent memory from dialogue, not from tool
+execution logs.
 """
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+import json
+from pathlib import Path, PurePosixPath
 
 from membox.model.schema import (
-    HistoryEventKind,
-    HistoryEventRecord,
     HistoryImportBatch,
     HistoryMessageRecord,
     HistorySessionRecord,
@@ -40,36 +22,77 @@ from membox.model.schema import (
 )
 from membox.services.importers.common import iter_jsonl, opt_str
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
-def _message_text(content: list[dict[str, object]]) -> str:
-    """Concatenate text parts of a Pi message content array, skipping non-text."""
-    parts: list[str] = []
-    for part in content:
-        if not isinstance(part, dict):
-            continue
-        if part.get("type") == "text":
-            text = part.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-    return "\n".join(parts)
-
 
 def _message_text_from_obj(content: object) -> str:
-    """Extract text from either a string or Pi content-part array."""
+    """Extract text from either a string or Pi content-part array (``text`` parts only)."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return _message_text(content)
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
     return ""
 
 
 class PiJsonlImporter:
-    """Parses Pi coding agent session logs."""
+    """Parses Pi coding agent session logs — conversation only."""
 
     format_name = "pi"
+
+    # -- session discovery ------------------------------------------------
+
+    @staticmethod
+    def _peek_session_cwd(path: Path) -> str | None:
+        """Read ``cwd`` from the first ``session`` record without full parse."""
+        try:
+            with path.open("rb") as fh:
+                for raw in fh:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(record, dict) and record.get("type") == "session":
+                        cwd = record.get("cwd")
+                        return cwd if isinstance(cwd, str) else None
+        except OSError:
+            return None
+        return None
+
+    def discover_sessions(self, project_cwd: Path, session_root: Path) -> list[Path]:
+        """Return Pi session ``.jsonl`` files matching *project_cwd* under *session_root*.
+
+        Scans *session_root* subdirectories, peeks at session ``cwd`` headers,
+        and returns files whose recorded cwd matches *project_cwd*.
+        """
+        root = session_root.expanduser().resolve()
+        if not root.is_dir():
+            return []
+        resolved_target = project_cwd.resolve()
+        results: list[Path] = []
+        for session_dir in sorted(root.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            files = sorted(session_dir.glob("*.jsonl"))
+            if not files:
+                continue
+            peek_cwd = self._peek_session_cwd(files[0])
+            if peek_cwd is None:
+                continue
+            try:
+                if Path(peek_cwd).resolve() == resolved_target:
+                    results.extend(files)
+            except OSError:
+                continue
+        return sorted(results, reverse=True)
+
+    # -- parse ------------------------------------------------------------
 
     def parse(
         self,
@@ -80,30 +103,14 @@ class PiJsonlImporter:
         next_seq: int = 0,
         session: HistorySessionRecord | None = None,
     ) -> HistoryImportBatch:
-        """Parse one Pi session log, optionally resuming mid-file.
+        """Parse one Pi session log — conversation messages only.
 
-        Args:
-            path: Source ``.jsonl`` file.
-            project: Project override; falls back to the basename of the
-                session's recorded ``cwd``.
-            offset_bytes: Byte offset to resume from.
-            next_seq: First message ``seq`` to assign when resuming.
-            session: Previously imported session, required when resuming
-                past the session header line.
-
-        Returns:
-            Normalized batch with resume state.
-
-        Raises:
-            FileNotFoundError: If ``path`` does not exist.
-            ValueError: If no ``session`` record is found and none was
-                supplied via ``session``.
+        User and assistant text is extracted; tool calls, tool results,
+        thinking, model changes, and custom events are skipped.
         """
         messages: list[HistoryMessageRecord] = []
-        events: list[HistoryEventRecord] = []
         seq = next_seq
         end_offset = offset_bytes
-        last_message_id: str | None = None
         last_timestamp: str | None = None
 
         for record, _offset_before, offset_after in iter_jsonl(path, offset_bytes):
@@ -130,46 +137,26 @@ class PiJsonlImporter:
                 continue
             if session is None:
                 continue
+
+            # Only conversation messages.
             if rtype != "message":
                 continue
-
-            prefix = f"{SourceKind.PI_JSONL.value}:{session.external_id}"
             msg = record.get("message")
             if not isinstance(msg, dict):
                 continue
             role = str(msg.get("role", ""))
-            content = msg.get("content", [])
-            created = opt_str(msg.get("timestamp"))
-            pi_msg_id = str(record.get("id", ""))
-
-            if role == "toolResult":
-                # Tool results are separate messages in Pi.
-                tc_id = opt_str(msg.get("toolCallId")) or ""
-                tool_name = opt_str(msg.get("toolName"))
-                is_error = bool(msg.get("isError", False))
-                body = _message_text_from_obj(content)
-                events.append(
-                    HistoryEventRecord(
-                        id=f"{prefix}:evt:{tc_id}:{HistoryEventKind.TOOL_RESULT.value}",
-                        session_id=session.id,
-                        message_id=last_message_id,
-                        message_external_id="",
-                        anchor=tc_id,
-                        kind=HistoryEventKind.TOOL_RESULT,
-                        tool_name=tool_name,
-                        ordinal=0,
-                        body=body,
-                        is_error=is_error,
-                        created_at=timestamp,
-                    )
-                )
+            if role not in ("user", "assistant"):
                 continue
 
-            # User and assistant messages.
-            text = _message_text_from_obj(content)
+            text = _message_text_from_obj(msg.get("content", []))
+            if not text.strip():
+                continue
+
+            pi_msg_id = str(record.get("id", ""))
+            created = opt_str(msg.get("timestamp"))
             messages.append(
                 HistoryMessageRecord(
-                    id=f"{prefix}:msg:{pi_msg_id}",
+                    id=f"{SourceKind.PI_JSONL.value}:{session.external_id}:msg:{pi_msg_id}",
                     session_id=session.id,
                     external_id=pi_msg_id,
                     role=role,
@@ -178,36 +165,7 @@ class PiJsonlImporter:
                     created_at=created or timestamp,
                 )
             )
-            last_message_id = f"{prefix}:msg:{pi_msg_id}"
             seq += 1
-
-            # Extract tool calls from assistant message content parts.
-            if not isinstance(content, list):
-                continue
-            for part_idx, part in enumerate(content):
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") != "toolCall":
-                    continue
-                tc_id = opt_str(part.get("id")) or f"{pi_msg_id}-tc{part_idx}"
-                tool_name = opt_str(part.get("name"))
-                args = part.get("arguments")
-                body = str(args) if args is not None else ""
-                events.append(
-                    HistoryEventRecord(
-                        id=f"{prefix}:evt:{tc_id}:{HistoryEventKind.TOOL_CALL.value}",
-                        session_id=session.id,
-                        message_id=last_message_id,
-                        message_external_id=pi_msg_id,
-                        anchor=tc_id,
-                        kind=HistoryEventKind.TOOL_CALL,
-                        tool_name=tool_name,
-                        ordinal=part_idx,
-                        body=body,
-                        is_error=False,
-                        created_at=timestamp,
-                    )
-                )
 
         if session is None:
             msg = f"{path}: no session record found"
@@ -217,7 +175,7 @@ class PiJsonlImporter:
         return HistoryImportBatch(
             session=session,
             messages=messages,
-            events=events,
+            events=[],
             next_offset_bytes=end_offset,
             next_seq=seq,
         )

@@ -90,11 +90,11 @@ def _write_fixture(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _invoke_import(fixture: Path, db: Path, project: str | None = None) -> Result:
-    """Run `membox history import` and return the result."""
+def _invoke_pull(fixture: Path, db: Path, project: str | None = None) -> Result:
+    """Run `membox history pull` and return the result."""
     args = [
         "history",
-        "import",
+        "pull",
         str(fixture),
         "--adapt",
         _FMT,
@@ -117,7 +117,7 @@ def test_cli_import_and_search_roundtrip(tmp_path: Path) -> None:
     db = tmp_path / "mem.db"
     _write_fixture(fixture)
 
-    result_import = _invoke_import(fixture, db, project="demo")
+    result_import = _invoke_pull(fixture, db, project="demo")
     assert result_import.exit_code == 0, result_import.output
 
     result_search = runner.invoke(
@@ -152,7 +152,7 @@ def test_cli_import_unknown_format(tmp_path: Path) -> None:
         app,
         [
             "history",
-            "import",
+            "pull",
             str(fixture),
             "--adapt",
             "not-a-real-format",
@@ -177,7 +177,7 @@ def test_cli_import_missing_file(tmp_path: Path) -> None:
         app,
         [
             "history",
-            "import",
+            "pull",
             str(tmp_path / "does_not_exist.jsonl"),
             "--adapt",
             _FMT,
@@ -199,7 +199,7 @@ def test_cli_fetch_unknown_record_id(tmp_path: Path) -> None:
     # Import something so the DB exists and has schema
     fixture = tmp_path / "session.jsonl"
     _write_fixture(fixture)
-    _invoke_import(fixture, db)
+    _invoke_pull(fixture, db)
 
     result = runner.invoke(
         app,
@@ -219,7 +219,7 @@ def test_cli_fetch_redacts_by_default(tmp_path: Path) -> None:
     db = tmp_path / "mem.db"
     fixture = tmp_path / "secret-session.jsonl"
     _write_fixture(fixture, include_secret=True)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     result = runner.invoke(
         app,
@@ -244,7 +244,7 @@ def test_cli_fetch_raw_requires_explicit_flag(tmp_path: Path) -> None:
     db = tmp_path / "mem.db"
     fixture = tmp_path / "raw-session.jsonl"
     _write_fixture(fixture, include_secret=True)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     result = runner.invoke(
         app,
@@ -274,7 +274,7 @@ def test_cli_failures_output(tmp_path: Path) -> None:
     fixture = tmp_path / "session.jsonl"
     db = tmp_path / "mem.db"
     _write_fixture(fixture, include_error=True)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     result = runner.invoke(
         app,
@@ -322,7 +322,7 @@ def test_cli_search_project_filter(tmp_path: Path) -> None:
             + "\n"
         )
         fixture.write_text(lines, encoding="utf-8")
-        _invoke_import(fixture, db, project=proj)
+        _invoke_pull(fixture, db, project=proj)
 
     result = runner.invoke(
         app,
@@ -345,7 +345,7 @@ def test_cli_around_known_id(tmp_path: Path) -> None:
     fixture = tmp_path / "session.jsonl"
     db = tmp_path / "mem.db"
     _write_fixture(fixture)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     center_id = "membox-capture:cs1:msg:cm1"
     result = runner.invoke(
@@ -361,7 +361,7 @@ def test_cli_around_project_scope(tmp_path: Path) -> None:
     fixture = tmp_path / "session.jsonl"
     db = tmp_path / "mem.db"
     _write_fixture(fixture)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     result = runner.invoke(
         app,
@@ -390,7 +390,7 @@ def test_cli_around_unknown_id(tmp_path: Path) -> None:
     # Ensure schema exists
     fixture = tmp_path / "session.jsonl"
     _write_fixture(fixture)
-    _invoke_import(fixture, db, project="demo")
+    _invoke_pull(fixture, db, project="demo")
 
     result = runner.invoke(
         app,

@@ -78,7 +78,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/cli/commands/`
         - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
         - `src/membox/cli/commands/distill.py` — `membox distill` read-only workflow packaging analysis command.
-        - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace import and search.
+        - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace pull and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
         - `src/membox/cli/commands/memory.py` — `membox memory` commands for lifecycle Phase C units.

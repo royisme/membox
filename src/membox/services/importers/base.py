@@ -6,6 +6,11 @@ database, never redact, and never truncate — those are store-boundary
 concerns.  ``text`` / ``body`` therefore carry the full upstream payload, and
 the same ``parse()`` call doubles as the resolver for ``history fetch``
 (re-parse the upstream file, look up the record by identity).
+
+Adapters may optionally implement ``discover_sessions`` to return session
+file paths automatically — used by ``history pull`` when the CLI path
+argument is omitted.  If an adapter does not implement discovery, the user
+must provide an explicit file path.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ class HistoryImporter(Protocol):
     """Parses one upstream session log into a normalized import batch."""
 
     format_name: str
-    """CLI ``--format`` name this importer handles."""
+    """CLI ``--adapt`` name this importer handles."""
 
     def parse(
         self,
@@ -36,24 +41,17 @@ class HistoryImporter(Protocol):
         """Parse a session log file, optionally resuming mid-file.
 
         Implementations must produce deterministic, file-position-independent
-        record IDs so that repeated and incremental imports converge (see the
-        lifecycle design's incremental re-import semantics).
+        record IDs so that repeated and incremental imports converge.
+        """
+        ...
 
-        Args:
-            path: Source log file.
-            project: Project override; None lets the importer infer one from
-                the log itself (or leave it empty).
-            offset_bytes: Byte offset to resume from (0 = full parse).  Only
-                offsets previously returned as ``next_offset_bytes`` are
-                valid.
-            next_seq: First message ``seq`` value to assign when resuming.
-            session: Previously imported session record, required when
-                resuming past the log's session header.
+    def discover_sessions(self, project_cwd: Path, session_root: Path) -> list[Path]:
+        """Return session file paths matching *project_cwd* under *session_root*.
 
-        Returns:
-            The normalized batch including resume state.
+        Adapters that know their agent's session directory layout implement
+        this so the user can run ``history pull`` without specifying files.
 
-        Raises:
-            FileNotFoundError: If ``path`` does not exist.
+        Returns an empty list when discovery is unsupported or no sessions
+        match.
         """
         ...
