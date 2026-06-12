@@ -66,7 +66,12 @@ Evidence rows are never deleted.  A partial index ``idx_relations_active`` over
 ``(source_id) WHERE superseded_by IS NULL`` keeps active-relation lookups fast.
 Retrieval excludes superseded relations by default; pass ``include_superseded``
 to expose them for auditing.
+
+Migration 0008 (Lifecycle Phase C — Triage + Memory Units) creates the
+``history_triage`` audit table, ``memory_units`` plus source/label/status-log
+tables, and unicode61 + trigram FTS5 sidecars over unit title/content/context.
 """
+# ruff: noqa: S608
 
 from __future__ import annotations
 
@@ -362,7 +367,7 @@ def _create_history_fts(
             INSERT INTO {fts_name}(rowid, {content_column})
                 VALUES (new.rid, new.{content_column});
         END;
-        """  # noqa: S608
+        """
     )
     conn.execute(
         f"""
@@ -373,7 +378,7 @@ def _create_history_fts(
             INSERT INTO {fts_name}(rowid, {content_column})
                 VALUES (new.rid, new.{content_column});
         END;
-        """  # noqa: S608
+        """
     )
     conn.execute(
         f"""
@@ -382,7 +387,7 @@ def _create_history_fts(
             INSERT INTO {fts_name}({fts_name}, rowid, {content_column})
                 VALUES ('delete', old.rid, old.{content_column});
         END;
-        """  # noqa: S608
+        """
     )
 
 
@@ -517,6 +522,161 @@ def _migrate_0007(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0008(conn: sqlite3.Connection) -> None:
+    """Apply Lifecycle Phase C triage and memory-unit schema changes."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history_triage (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            project             TEXT NOT NULL DEFAULT '',
+            trace_kind          TEXT NOT NULL,
+            trace_id            TEXT NOT NULL,
+            should_extract      INTEGER NOT NULL,
+            unit_type           TEXT NOT NULL,
+            importance_score    REAL NOT NULL DEFAULT 0,
+            confidence_score    REAL NOT NULL DEFAULT 0,
+            temporal_type       TEXT NOT NULL DEFAULT 'unknown',
+            user_intent         TEXT NOT NULL DEFAULT 'auto',
+            extraction_hint     TEXT NOT NULL DEFAULT '',
+            reason              TEXT NOT NULL DEFAULT '',
+            gate_version        TEXT NOT NULL,
+            consumed_at         TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (trace_kind, trace_id, gate_version)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_history_triage_pending
+        ON history_triage(project, should_extract, consumed_at);
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_units (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            project             TEXT NOT NULL DEFAULT '',
+            unit_type           TEXT NOT NULL,
+            status              TEXT NOT NULL,
+            title               TEXT NOT NULL,
+            content             TEXT NOT NULL,
+            content_hash        TEXT NOT NULL,
+            context             TEXT NOT NULL DEFAULT '',
+            importance_score    REAL NOT NULL DEFAULT 0,
+            confidence_score    REAL NOT NULL DEFAULT 0,
+            temporal_type       TEXT NOT NULL DEFAULT 'unknown',
+            valid_from          TEXT,
+            valid_to            TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT,
+            superseded_by       INTEGER REFERENCES memory_units(id),
+            recall_count        INTEGER NOT NULL DEFAULT 0,
+            last_recalled_at    TEXT,
+            UNIQUE (project, unit_type, content_hash)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_unit_sources (
+            unit_id             INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,
+            source_kind         TEXT NOT NULL,
+            source_ref          TEXT NOT NULL,
+            source_message_id   TEXT NOT NULL DEFAULT '',
+            quote               TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (unit_id, source_kind, source_ref, source_message_id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_unit_labels (
+            unit_id             INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,
+            label               TEXT NOT NULL,
+            PRIMARY KEY (unit_id, label)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_unit_status_log (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            unit_id             INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,
+            from_status         TEXT,
+            to_status           TEXT NOT NULL,
+            command             TEXT NOT NULL,
+            reason              TEXT NOT NULL DEFAULT '',
+            source_ref          TEXT NOT NULL DEFAULT '',
+            created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS idx_memory_units_project_status "
+        "ON memory_units(project, status);",
+        "CREATE INDEX IF NOT EXISTS idx_memory_units_type ON memory_units(project, unit_type);",
+        "CREATE INDEX IF NOT EXISTS idx_memory_unit_sources_lookup "
+        "ON memory_unit_sources(source_kind, source_ref, source_message_id);",
+    ):
+        conn.execute(ddl)
+
+    _create_memory_units_fts(conn, "memory_units_fts", "munit_fts", trigram=False)
+    _create_memory_units_fts(conn, "memory_units_fts_trigram", "munit_tri", trigram=True)
+
+
+def _create_memory_units_fts(
+    conn: sqlite3.Connection,
+    fts_name: str,
+    trigger_prefix: str,
+    *,
+    trigram: bool,
+) -> None:
+    """Create one memory-unit FTS sidecar and sync triggers."""
+    tokenize = ", tokenize='trigram', detail=none" if trigram else ""
+    conn.execute(
+        f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS {fts_name}
+        USING fts5(
+            title,
+            content,
+            context,
+            content='memory_units',
+            content_rowid='id'{tokenize}
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_ai
+        AFTER INSERT ON memory_units BEGIN
+            INSERT INTO {fts_name}(rowid, title, content, context)
+            VALUES (new.id, new.title, new.content, new.context);
+        END;
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_au
+        AFTER UPDATE OF title, content, context ON memory_units BEGIN
+            INSERT INTO {fts_name}({fts_name}, rowid, title, content, context)
+            VALUES ('delete', old.id, old.title, old.content, old.context);
+            INSERT INTO {fts_name}(rowid, title, content, context)
+            VALUES (new.id, new.title, new.content, new.context);
+        END;
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TRIGGER IF NOT EXISTS {trigger_prefix}_ad
+        AFTER DELETE ON memory_units BEGIN
+            INSERT INTO {fts_name}({fts_name}, rowid, title, content, context)
+            VALUES ('delete', old.id, old.title, old.content, old.context);
+        END;
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
@@ -525,6 +685,7 @@ MIGRATIONS: list[Migration] = [
     (5, _migrate_0005),
     (6, _migrate_0006),
     (7, _migrate_0007),
+    (8, _migrate_0008),
 ]
 
 

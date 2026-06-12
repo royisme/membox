@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c6-conflict-b","project":"membox-lifecycle","title":"second conflicting preference","started_at":"2026-06-11T09:55:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"For release-only work, branch from main instead of develop. This conflicts with the normal feature workflow and must be surfaced.","created_at":"2026-06-11T09:55:10Z"}

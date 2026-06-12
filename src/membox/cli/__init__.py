@@ -12,6 +12,7 @@ import typer
 from membox.cli.commands.history import history_app
 from membox.cli.commands.ingest import ingest, ingest_file
 from membox.cli.commands.listing import list_entities, list_relations
+from membox.cli.commands.memory import memory_app
 from membox.cli.commands.query import query
 from membox.cli.commands.queue import process, queue_status
 from membox.cli.commands.version import version
@@ -31,5 +32,6 @@ app.command("queue")(queue_status)
 app.command("list-entities")(list_entities)
 app.command("list-relations")(list_relations)
 app.add_typer(history_app)
+app.add_typer(memory_app)
 
 __all__ = ["app"]

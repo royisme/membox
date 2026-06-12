@@ -1,0 +1,131 @@
+# Membox Phase C lifecycle fixture expectations.
+# Synthetic committed corpus; safe to use in CI.
+
+- id: c1_explicit_rules
+  category: explicit_user_rules
+  fixtures: ["history/c1_explicit_rules.jsonl"]
+  requires_multi_session: false
+  expected:
+    triage_should_extract: true
+    unit_type: preference
+    labels: ["workflow", "testing"]
+    activation_status: active_unit
+    phase_d_status: not_applicable
+    query_inclusion: explicit_memory_only
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c1-rules:msg:m1"
+    extraction_hint: "fixture corpus must precede triage tuning"
+  notes: "Explicit Chinese user rule with durable Phase C ordering."
+
+- id: c2_ephemeral_chatter
+  category: ephemeral_chatter
+  fixtures: ["history/c2_ephemeral_chatter.jsonl"]
+  requires_multi_session: false
+  expected:
+    triage_should_extract: false
+    unit_type: context
+    labels: []
+    activation_status: trace_only
+    phase_d_status: not_applicable
+    query_inclusion: excluded
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c2-chatter:msg:m1"
+    extraction_hint: ""
+  notes: "Small talk should remain searchable trace only, not a memory unit."
+
+- id: c3_plan_to_decision
+  category: plan_to_decision
+  fixtures: ["history/c3_plan.jsonl", "history/c3_decision.jsonl"]
+  requires_multi_session: true
+  expected:
+    triage_should_extract: true
+    unit_type: decision
+    labels: ["architecture", "storage"]
+    activation_status: active_unit
+    phase_d_status: supersedes_plan
+    query_inclusion: explicit_memory_only
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c3-plan:msg:m1"
+      - trace_kind: message
+        trace_id: "membox-capture:life-c3-decision:msg:m1"
+    extraction_hint: "migration 8 schema decision supersedes tentative plan"
+  notes: "Plan and later decision are distinct sessions by design."
+
+- id: c4_superseded_fact
+  category: superseded_facts
+  fixtures: ["history/c4_fact_old.jsonl", "history/c4_fact_new.jsonl"]
+  requires_multi_session: true
+  expected:
+    triage_should_extract: true
+    unit_type: fact
+    labels: ["retrieval"]
+    activation_status: active_unit
+    phase_d_status: superseded
+    query_inclusion: latest_only
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c4-old:msg:m1"
+      - trace_kind: message
+        trace_id: "membox-capture:life-c4-new:msg:m1"
+    extraction_hint: "graph-only retrieval fact is replaced by graph plus FTS fusion"
+  notes: "Old evidence remains, but default recall should prefer the newer fact."
+
+- id: c5_repeated_failure_learning
+  category: repeated_failures
+  fixtures: ["history/c5_repeated_failure.jsonl"]
+  requires_multi_session: false
+  expected:
+    triage_should_extract: true
+    unit_type: procedure
+    labels: ["workflow", "testing"]
+    activation_status: active_unit
+    phase_d_status: crystal_candidate
+    query_inclusion: explicit_memory_only
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c5-failure:msg:m1"
+      - trace_kind: event
+        trace_id: "membox-capture:life-c5-failure:evt:failed-migration-check:tool_result"
+    extraction_hint: "verify migration head before editing migrations"
+  notes: "Failure plus fix should become a repeatable procedure or learning."
+
+- id: c6_conflicting_memories
+  category: conflicting_memories
+  fixtures: ["history/c6_conflict_a.jsonl", "history/c6_conflict_b.jsonl"]
+  requires_multi_session: true
+  expected:
+    triage_should_extract: true
+    unit_type: preference
+    labels: ["workflow"]
+    activation_status: active_unit
+    phase_d_status: conflict_review
+    query_inclusion: surface_conflict
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c6-conflict-a:msg:m1"
+      - trace_kind: message
+        trace_id: "membox-capture:life-c6-conflict-b:msg:m1"
+    extraction_hint: "branch-base preferences conflict and must not silently merge"
+  notes: "Conflicting workflow rules need explicit surfacing."
+
+- id: c7_user_correction
+  category: user_corrections
+  fixtures: ["history/c7_correction_old.jsonl", "history/c7_correction_new.jsonl"]
+  requires_multi_session: true
+  expected:
+    triage_should_extract: true
+    unit_type: decision
+    labels: ["workflow", "testing"]
+    activation_status: active_unit
+    phase_d_status: retracted_or_superseded
+    query_inclusion: corrected_only
+    source_refs:
+      - trace_kind: message
+        trace_id: "membox-capture:life-c7-correction-old:msg:m1"
+      - trace_kind: message
+        trace_id: "membox-capture:life-c7-correction-new:msg:m1"
+    extraction_hint: "eval/corpus is private; eval/lifecycle fixtures are committed"
+  notes: "Explicit user correction should retract or supersede the old unit."

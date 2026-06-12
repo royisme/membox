@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c3-plan","project":"membox-lifecycle","title":"plan before decision","started_at":"2026-06-11T09:10:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"Plan: maybe put memory unit tables in migration 8 after lifecycle fixtures are merged. Do not implement this until we confirm the schema.","created_at":"2026-06-11T09:10:10Z"}

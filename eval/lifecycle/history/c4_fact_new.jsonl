@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c4-new","project":"membox-lifecycle","title":"new fact supersedes old","started_at":"2026-06-11T09:35:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"Updated fact: membox query now uses graph plus FTS fusion by default, so the old graph-only statement is stale.","created_at":"2026-06-11T09:35:10Z"}
