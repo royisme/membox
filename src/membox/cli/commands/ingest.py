@@ -17,6 +17,11 @@ from membox.model.schema import IngestMetadata
 
 _SYNC_HELP = "Block until ingestion completes (enqueue + drain inline)."
 _NO_SPAWN_HELP = "Enqueue only; do not spawn a worker (start one with `membox process`)."
+_CONCURRENCY_HELP = (
+    "Number of chunks to process concurrently (extraction + embedding run in parallel "
+    "per chunk; DB writes stay serialized). "
+    "Defaults to MEMBOX_INGEST_CONCURRENCY env var, or 1 if unset."
+)
 
 
 def _finish_enqueue(db: str, queue_id: int, pending: int, no_spawn: bool) -> None:
@@ -44,9 +49,10 @@ def ingest(
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     sync: bool = typer.Option(False, "--sync", help=_SYNC_HELP),
     no_spawn: bool = typer.Option(False, "--no-spawn", help=_NO_SPAWN_HELP),
+    concurrency: int | None = typer.Option(None, "--concurrency", help=_CONCURRENCY_HELP),
 ) -> None:
     """Ingest text into the knowledge graph (asynchronously by default)."""
-    agent = make_agent(db, no_llm=no_llm, warn=sync)
+    agent = make_agent(db, no_llm=no_llm, warn=sync, concurrency=concurrency)
     if sync:
         agent.ingest(text, source)
         console.print("[green]Ingested.[/green]")
@@ -80,6 +86,7 @@ def ingest_file(
     ),
     sync: bool = typer.Option(False, "--sync", help=_SYNC_HELP),
     no_spawn: bool = typer.Option(False, "--no-spawn", help=_NO_SPAWN_HELP),
+    concurrency: int | None = typer.Option(None, "--concurrency", help=_CONCURRENCY_HELP),
 ) -> None:
     """Ingest a file into the knowledge graph (asynchronously by default).
 
@@ -93,12 +100,12 @@ def ingest_file(
     if not file.exists():
         typer.echo(f"Error: file not found: {file}", err=True)
         raise typer.Exit(1)
-    agent = make_agent(db, no_llm=no_llm, warn=sync)
+    agent = make_agent(db, no_llm=no_llm, warn=sync, concurrency=concurrency)
     metadata = IngestMetadata(project=project, doc_date=doc_date)
     if sync:
         results = agent.ingest_file(file, metadata=metadata)
         chunk_count = len(results)
-        console.print(f"[green]Ingested {file} — {chunk_count} chunk(s).[/green]", soft_wrap=False)
+        console.print(f"[green]Ingested {file} — {chunk_count} chunk(s).[/green]", overflow="crop")
         return
     queue_id = agent.enqueue_file(file, metadata=metadata)
     _finish_enqueue(db, queue_id, agent.store.pending_ingest_count(), no_spawn)

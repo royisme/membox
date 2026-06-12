@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,11 +18,21 @@ from membox.model.schema import (
     IngestMetadata,
     Relation,
 )
+from membox.services.embedding import BatchEmbedder
 
 if TYPE_CHECKING:
     from membox.config import RetrievalConfig
     from membox.services.embedding import Embedder
     from membox.services.extraction import LLMExtractor
+
+
+def _prewarm_embeddings(embedder: Embedder | None, texts: list[str]) -> None:
+    """Populate a batch-capable embedder's cache for unique texts."""
+    if embedder is None or not isinstance(embedder, BatchEmbedder):
+        return
+    unique_texts = list(dict.fromkeys(texts))
+    if unique_texts:
+        embedder.embed_many(unique_texts)
 
 
 class MemoryAgent:
@@ -39,12 +50,14 @@ class MemoryAgent:
         db_path: str = "memory.db",
         *,
         disambiguation_threshold: float = 0.85,
+        ingest_concurrency: int = 1,
     ) -> None:
         # Pass embedder to KnowledgeStore so the meta guard can run on open.
         self.store = KnowledgeStore(db_path, embedder=embedder)
         self._extractor = extractor
         self._embedder = embedder
         self._disambiguation_threshold = disambiguation_threshold
+        self._ingest_concurrency = max(1, ingest_concurrency)
 
     def ingest(self, text: str, source: str = "") -> None:
         """Extract entities and relations from text via LLM and store them.
@@ -92,33 +105,38 @@ class MemoryAgent:
         )
         threshold = self._disambiguation_threshold
         name_to_id: dict[str, int] = {}
-        for entity in graph.entities:
-            eid = self.store.find_or_create_entity(
-                entity.name, entity.type, entity.description, self._embedder, threshold=threshold
-            )
-            name_to_id[entity.name] = eid
-        rel_count = 0
+        entity_specs = {entity.name: (entity.type, entity.description) for entity in graph.entities}
         for rel in graph.relations:
-            sid = name_to_id.get(rel.source)
-            if sid is None:
-                sid = self.store.find_or_create_entity(
-                    rel.source, "Unknown", "", self._embedder, threshold=threshold
-                )
-            tid = name_to_id.get(rel.target)
-            if tid is None:
-                tid = self.store.find_or_create_entity(
-                    rel.target, "Unknown", "", self._embedder, threshold=threshold
-                )
+            entity_specs.setdefault(rel.source, ("Unknown", ""))
+            entity_specs.setdefault(rel.target, ("Unknown", ""))
+
+        _prewarm_embeddings(self._embedder, list(entity_specs))
+
+        for name, (type_, description) in entity_specs.items():
+            eid = self.store.find_or_create_entity(
+                name, type_, description, self._embedder, threshold=threshold
+            )
+            name_to_id[name] = eid
+        rel_count = 0
+        relation_payloads: list[tuple[int, int, str, str]] = []
+        for rel in graph.relations:
+            sid = name_to_id[rel.source]
+            tid = name_to_id[rel.target]
             norm_pred = normalize_predicate(rel.predicate)
+            src_row = self.store.get_entity(sid)
+            tgt_row = self.store.get_entity(tid)
+            src_str = src_row[1] if src_row else rel.source
+            tgt_str = tgt_row[1] if tgt_row else rel.target
+            triple_text = f"{src_str} {norm_pred} {tgt_str}"
+            relation_payloads.append((sid, tid, norm_pred, triple_text))
+
+        _prewarm_embeddings(self._embedder, [payload[3] for payload in relation_payloads])
+
+        for sid, tid, norm_pred, triple_text in relation_payloads:
             # Compute triple embedding once at ingest time (spec §3.7).
             # Rendered as "subject predicate object" plain text.
             rel_embedding: list[float] | None = None
             if self._embedder is not None:
-                src_row = self.store.get_entity(sid)
-                tgt_row = self.store.get_entity(tid)
-                src_str = src_row[1] if src_row else rel.source
-                tgt_str = tgt_row[1] if tgt_row else rel.target
-                triple_text = f"{src_str} {norm_pred} {tgt_str}"
                 rel_embedding = self._embedder.embed(triple_text)
             self.store.upsert_relation(sid, tid, norm_pred, doc_id, embedding=rel_embedding)
             rel_count += 1
@@ -152,6 +170,9 @@ class MemoryAgent:
                 the ``source_path`` suffix (``.md`` / ``.markdown``).
             chunk_max_tokens: Maximum estimated tokens per chunk before
                 paragraph-level sub-chunking is applied.
+            Concurrent extraction is controlled by this instance's
+                ``ingest_concurrency`` setting; SQLite writes remain serial
+                and preserve chunk order.
 
         Returns:
             List of per-chunk result dicts.  Successful chunks have keys
@@ -167,36 +188,80 @@ class MemoryAgent:
         else:
             raw_chunks = [(None, content)]
 
-        results: list[dict[str, int | str]] = []
-        for section_title, chunk_content in raw_chunks:
-            if not chunk_content.strip():
-                continue
-            chunk = DocumentChunk(section=section_title, content=chunk_content)
-            try:
-                graph = self._extractor.extract(chunk.content)
-                _ok = self.ingest_extracted(
-                    chunk.content,
-                    graph,
+        chunks = [
+            DocumentChunk(section=section_title, content=chunk_content)
+            for section_title, chunk_content in raw_chunks
+            if chunk_content.strip()
+        ]
+
+        if self._ingest_concurrency <= 1 or len(chunks) <= 1:
+            return [
+                self._extract_and_ingest_chunk(
+                    chunk,
                     source=source,
                     project=project,
                     source_path=source_path,
-                    section=chunk.section,
                     doc_date=doc_date,
                 )
-                result: dict[str, int | str] = dict(_ok)
-            except KeyboardInterrupt:
-                raise
-            except Exception as exc:  # broad catch is intentional at orchestration layer
-                results.append(
-                    {
-                        "section": section_title or "",
+                for chunk in chunks
+            ]
+
+        results: list[dict[str, int | str]] = []
+        with ThreadPoolExecutor(max_workers=self._ingest_concurrency) as executor:
+            futures = [executor.submit(self._extractor.extract, chunk.content) for chunk in chunks]
+            for chunk, future in zip(chunks, futures, strict=True):
+                try:
+                    graph = future.result()
+                    _ok = self.ingest_extracted(
+                        chunk.content,
+                        graph,
+                        source=source,
+                        project=project,
+                        source_path=source_path,
+                        section=chunk.section,
+                        doc_date=doc_date,
+                    )
+                    result: dict[str, int | str] = dict(_ok)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:  # broad catch is intentional at orchestration layer
+                    result = {
+                        "section": chunk.section or "",
                         "error": str(exc),
                     }
-                )
-                continue
-            results.append(result)
+                results.append(result)
 
         return results
+
+    def _extract_and_ingest_chunk(
+        self,
+        chunk: DocumentChunk,
+        *,
+        source: str,
+        project: str | None,
+        source_path: str | None,
+        doc_date: str | None,
+    ) -> dict[str, int | str]:
+        """Extract and materialize one chunk, isolating non-interrupt failures."""
+        try:
+            graph = self._extractor.extract(chunk.content)
+            _ok = self.ingest_extracted(
+                chunk.content,
+                graph,
+                source=source,
+                project=project,
+                source_path=source_path,
+                section=chunk.section,
+                doc_date=doc_date,
+            )
+            return dict(_ok)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # broad catch is intentional at orchestration layer
+            return {
+                "section": chunk.section or "",
+                "error": str(exc),
+            }
 
     def ingest_file(
         self,
