@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from membox.model.schema import MEMORY_LABELS, MemoryTemporalType, MemoryUnitType, MemoryUserIntent
 
-GATE_VERSION = "heuristic-v3"
+GATE_VERSION = "heuristic-v4"
 """Version string persisted with every deterministic triage decision.
 
 v2 (tuned against the C1 lifecycle fixtures): declared-fact prefixes extract
@@ -27,7 +27,14 @@ never extract on bare procedure signals — only manual intent, corrections, or
 the fix combination may extract an event; message-side procedure signals
 require failure, durable-change, or explicit-memory context to extract;
 declared plans about durable topics extract as plan units (message-side only).
+
+v4 keeps the v3 deterministic triage heuristics and integrates the
+Stabilization Track gate hardening around it: atomic consolidation apply,
+FTS-style conflict pairing, and optional LLM comparator re-scoring when a
+caller injects one.
 """
+LEGACY_GATE_VERSIONS = ("heuristic-v3",)
+"""Gate versions accepted temporarily as CLI escape hatches."""
 
 REDACTION_MARKER = "[REDACTED]"
 """Replacement text for every secret match."""

@@ -19,6 +19,7 @@ ROOT = Path(__file__).parent.parent
 LIFECYCLE_DIR = ROOT / "eval" / "lifecycle"
 HISTORY_DIR = LIFECYCLE_DIR / "history"
 EXPECTATIONS = LIFECYCLE_DIR / "expectations.yaml"
+COMPARATOR_CASES = LIFECYCLE_DIR / "comparator_cases.yaml"
 
 REQUIRED_CATEGORIES = {
     "explicit_user_rules",
@@ -186,3 +187,27 @@ def test_lifecycle_fixtures_include_cjk_cases() -> None:
         if _contains_cjk(path.read_text(encoding="utf-8"))
     ]
     assert len(cjk_files) >= 2
+
+
+def test_comparator_cases_schema_and_agreement_gate() -> None:
+    """The committed comparator corpus is labeled and passes the offline gate."""
+    data = yaml.safe_load(COMPARATOR_CASES.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    assert data["score_threshold"] == 0.5
+    assert data["min_agreement"] >= 0.8
+    cases = data["cases"]
+    assert isinstance(cases, list)
+    assert len(cases) >= 5
+    assert {case["human_label"] for case in cases} == {"keep", "drop"}
+    assert all(0.0 <= float(case["llm_score"]) <= 1.0 for case in cases)
+
+    import importlib.util
+
+    script_path = Path(__file__).parent.parent / "scripts" / "eval_lifecycle_comparator.py"
+    spec = importlib.util.spec_from_file_location("eval_lifecycle_comparator", script_path)
+    assert spec is not None
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+
+    assert mod.main([]) == 0

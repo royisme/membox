@@ -316,10 +316,10 @@ Harden the import and processing pipeline against real-world edge cases:
 Fold in the items deferred during plan_06 code review:
 
 - [ ] Consolidate CLI N+1 source counts — batch `count_independent_sources_for_units` calls in `membox memory consolidate` output (same pattern as Phase E's `count_independent_sources_for_units` fix)
-- [ ] Atomic apply batching — wrap the per-transition apply loop in a single transaction with abort reporting (current: per-transition commits; lease + status log mitigate but a mid-apply crash leaves partial state)
-- [ ] FTS-based conflict candidate pairing — replace the in-memory pairwise scan in the conflict detector with an FTS5 candidate query to bound quadratic blowup on large unit sets
-- [ ] LLM conflict comparator — injectable `ConflictComparator` Protocol backed by an LLM call; replaces the deterministic word-list signal for high-confidence conflict detection (real-trace recall currently uncalibrated)
-- [ ] Gate v4 — `--help-dump` event family: add a heuristic rule to suppress bare `--help` output events from triage extraction (accepted residual risk in plan_04 D0; gate bump re-triages existing pending rows)
+- [x] Atomic apply batching — wrap the per-transition apply loop in a single transaction with abort reporting (implemented as `transition_memory_units_atomically`)
+- [x] FTS-based conflict candidate pairing — use `memory_units_fts` to produce review pairs for `memory consolidate`
+- [x] LLM conflict comparator — injectable `LLMComparator` Protocol with an offline replay eval corpus
+- [x] Gate v4 — default `heuristic-v4` with one-release `--gate heuristic-v3` escape hatch and v4 comparator replay eval
 
 Detailed specs for the four items intentionally carried out of PR #5: [`docs/issue/pr5-deferred/`](issue/pr5-deferred/README.md) (R1 atomic apply → R2 FTS pairing → R3 LLM comparator → R4 gate v4).
 

@@ -51,6 +51,27 @@ def iter_jsonl(path: Path, offset_bytes: int = 0) -> Iterator[tuple[dict[str, ob
                 yield record, before, pos
 
 
+def count_malformed_jsonl_lines(path: Path, offset_bytes: int = 0) -> int:
+    """Count complete non-blank JSONL lines skipped as malformed."""
+    skipped = 0
+    with path.open("rb") as fh:
+        fh.seek(offset_bytes)
+        for raw in fh:
+            if not raw.endswith(b"\n"):
+                break
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                skipped += 1
+                continue
+            if not isinstance(record, dict):
+                skipped += 1
+    return skipped
+
+
 def opt_str(value: object) -> str | None:
     """Return *value* as a string, or None when absent or non-string."""
     return value if isinstance(value, str) else None

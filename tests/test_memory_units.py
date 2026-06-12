@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from membox.cli import app
 from membox.core.store import KnowledgeStore
 from membox.core.store.migrations import MIGRATIONS, apply_migrations, get_user_version
+from membox.core.triage import GATE_VERSION
 from membox.model.schema import (
     HistoryMessageRecord,
     HistorySessionRecord,
@@ -235,6 +236,10 @@ def test_memory_cli_dry_run_and_apply_are_idempotent(tmp_path: Path) -> None:
     triage = runner.invoke(app, ["memory", "triage", "--db", db, "--project", "membox", "--apply"])
     assert triage.exit_code == 0
     assert store._conn().execute("SELECT COUNT(*) FROM history_triage;").fetchone()[0] == 1
+    assert (
+        store._conn().execute("SELECT gate_version FROM history_triage;").fetchone()[0]
+        == GATE_VERSION
+    )
 
     extract = runner.invoke(
         app, ["memory", "extract", "--db", db, "--project", "membox", "--apply"]
@@ -249,4 +254,65 @@ def test_memory_cli_dry_run_and_apply_are_idempotent(tmp_path: Path) -> None:
         app, ["memory", "extract", "--db", db, "--project", "membox", "--apply"]
     )
     assert extract_again.exit_code == 0
+    assert store._conn().execute("SELECT COUNT(*) FROM memory_units;").fetchone()[0] == 1
+
+
+def test_memory_cli_accepts_temporary_v3_gate_escape_hatch(tmp_path: Path) -> None:
+    """Explicit --gate heuristic-v3 rows are still consumable for one release."""
+    db = str(tmp_path / "legacy-gate.db")
+    store = KnowledgeStore(db)
+    session = HistorySessionRecord(
+        id="membox-capture:s1",
+        external_id="s1",
+        project="membox",
+        title="test",
+        source_kind=SourceKind.MEMBOX_CAPTURE,
+        source_ref="fixture.jsonl",
+    )
+    message = HistoryMessageRecord(
+        id="membox-capture:s1:msg:1",
+        session_id=session.id,
+        external_id="1",
+        role="user",
+        text="Remember this rule: always run migration checks before storage work.",
+        created_at="2026-06-11T00:00:00",
+    )
+    store.upsert_history_session(session)
+    store.upsert_history_messages(session, [message])
+
+    triage = runner.invoke(
+        app,
+        [
+            "memory",
+            "triage",
+            "--db",
+            db,
+            "--project",
+            "membox",
+            "--gate",
+            "heuristic-v3",
+            "--apply",
+        ],
+    )
+    extract = runner.invoke(
+        app,
+        [
+            "memory",
+            "extract",
+            "--db",
+            db,
+            "--project",
+            "membox",
+            "--gate",
+            "heuristic-v3",
+            "--apply",
+        ],
+    )
+
+    assert triage.exit_code == 0, triage.output
+    assert extract.exit_code == 0, extract.output
+    assert (
+        store._conn().execute("SELECT gate_version FROM history_triage;").fetchone()[0]
+        == "heuristic-v3"
+    )
     assert store._conn().execute("SELECT COUNT(*) FROM memory_units;").fetchone()[0] == 1

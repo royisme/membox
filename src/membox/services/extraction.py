@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from membox.model.schema import ExtractedGraph
+from membox.model.schema import ExtractedGraph, MemoryUnitRecord
 from membox.services.prompts.extraction import (
     EXTRACTION_SYSTEM_PROMPT,
     QUERY_KEYWORDS_SYSTEM_PROMPT,
@@ -48,6 +48,35 @@ class LLMExtractor(Protocol):
 
         Returns:
             List of entity name strings to use as BFS seeds.
+        """
+        ...
+
+
+class ComparatorScore(BaseModel):
+    """LLM comparator score for one candidate memory unit."""
+
+    unit_id: int
+    score: float
+    reason: str = ""
+
+
+class LLMComparator(Protocol):
+    """Protocol for batched LLM re-scoring of candidate memory units."""
+
+    def rescore_candidates(
+        self,
+        candidates: list[MemoryUnitRecord],
+        surrounding_units: list[MemoryUnitRecord],
+    ) -> list[ComparatorScore]:
+        """Return one score per candidate memory unit.
+
+        Args:
+            candidates: Candidate units being considered for gate actions.
+            surrounding_units: Nearby or otherwise relevant existing units.
+
+        Returns:
+            Scores in the inclusive ``0.0`` to ``1.0`` range. Missing unit IDs
+            are treated as pass-through by callers.
         """
         ...
 

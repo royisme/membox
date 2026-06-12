@@ -123,16 +123,26 @@ def history_pull_command(
         if import_result["skipped"]:
             console.print(f"[yellow]Unchanged, skipped:[/yellow] {import_result['session_id']}")
         else:
-            console.print(
+            summary = (
                 f"[green]Imported[/green] {import_result['messages']} messages, "
-                f"{import_result['events']} events into session {import_result['session_id']}"
+                f"{import_result['events']} events"
             )
+            if import_result["skipped_lines"]:
+                summary += f", {import_result['skipped_lines']} malformed lines skipped"
+            summary += f" into session {import_result['session_id']}"
+            console.print(summary)
+            if import_result["skipped_lines"]:
+                raise typer.Exit(1)
         return
 
     # Auto-discovery mode.
     resolved_root = _resolve_session_root(session_root)
     if resolved_root is None:
-        typer.echo("Error: set MEMBOX_SESSION_ROOT or pass --session-root", err=True)
+        typer.echo(
+            "Error: no path argument and no session root; pass a file path, "
+            "set MEMBOX_SESSION_ROOT, or pass --session-root.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     pull_result = history_pull(
@@ -145,10 +155,15 @@ def history_pull_command(
     if pull_result["sessions"] == 0:
         typer.echo("No sessions found for current project.")
         return
-    console.print(
-        f"[green]Pulled[/green] {pull_result['messages']} messages, "
-        f"{pull_result['events']} events from {pull_result['sessions']} session(s)"
+    summary = (
+        f"[green]Pulled[/green] {pull_result['messages']} messages, {pull_result['events']} events"
     )
+    if pull_result["skipped_lines"]:
+        summary += f", {pull_result['skipped_lines']} malformed lines skipped"
+    summary += f" from {pull_result['sessions']} session(s)"
+    console.print(summary)
+    if pull_result["skipped_lines"]:
+        raise typer.Exit(1)
 
 
 @history_app.command("search")
@@ -181,7 +196,14 @@ def history_search(
         limit=limit,
     )
     if not hits:
-        typer.echo("No history hits.")
+        scope = _resolve_project(project, all_projects)
+        if scope is None:
+            typer.echo("No history hits.")
+        else:
+            typer.echo(
+                f"No history hits in project {scope!r}. "
+                "Pass --project for another scope or --all-projects to search every project."
+            )
         return
     for hit in hits:
         flags = " [error]" if hit["is_error"] else ""
@@ -204,9 +226,10 @@ def history_around(
 ) -> None:
     """Show the conversation window around one message."""
     store = KnowledgeStore(db)
-    rows = store.history_around(
-        message_id, radius=radius, project=_resolve_project(project, all_projects)
+    scope = (
+        None if project is None and not all_projects else _resolve_project(project, all_projects)
     )
+    rows = store.history_around(message_id, radius=radius, project=scope)
     if not rows:
         typer.echo(f"Error: no such message: {message_id}", err=True)
         raise typer.Exit(1)
@@ -273,6 +296,6 @@ def history_failures(
 def _resolve_session_root(explicit: str | None) -> Path | None:
     """Resolve session root from explicit flag or MEMBOX_SESSION_ROOT env var."""
     raw = explicit or os.environ.get("MEMBOX_SESSION_ROOT")
-    if raw is None:
+    if raw is None or not raw.strip():
         return None
     return Path(raw).expanduser()

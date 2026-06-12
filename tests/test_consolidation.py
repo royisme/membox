@@ -8,7 +8,11 @@ import pytest
 from typer.testing import CliRunner
 
 from membox.cli import app
-from membox.core.consolidate import build_consolidation_plan, crystal_policy
+from membox.core.consolidate import (
+    ConsolidationTransition,
+    build_consolidation_plan,
+    crystal_policy,
+)
 from membox.core.store import KnowledgeStore
 from membox.model.schema import (
     HistoryMessageRecord,
@@ -21,8 +25,30 @@ from membox.model.schema import (
     MemoryUnitType,
     SourceKind,
 )
+from membox.services.extraction import ComparatorScore
 
 runner = CliRunner()
+
+
+class LowScoreComparator:
+    """Fake comparator that drops the configured unit IDs."""
+
+    def __init__(self, low_score_ids: set[int]) -> None:
+        self.low_score_ids = low_score_ids
+
+    def rescore_candidates(
+        self,
+        candidates: list[MemoryUnitRecord],
+        surrounding_units: list[MemoryUnitRecord],
+    ) -> list[ComparatorScore]:
+        """Return deterministic scores for tests without calling an LLM."""
+        _ = surrounding_units
+        return [
+            ComparatorScore(
+                unit_id=unit.id or 0, score=0.10 if unit.id in self.low_score_ids else 1
+            )
+            for unit in candidates
+        ]
 
 
 def _source(
@@ -170,6 +196,31 @@ def test_consolidate_dry_run_does_not_write_or_take_lease(tmp_path: Path) -> Non
     )
 
 
+def test_optional_llm_comparator_filters_low_scoring_transitions(tmp_path: Path) -> None:
+    """Injected comparator can drop low-scoring transitions; default path is unchanged."""
+    store = KnowledgeStore(str(tmp_path / "memory.db"))
+    unit_id = store.create_memory_unit(
+        _unit(
+            title="Confirmed decision",
+            content="Owner confirmed this decision.",
+            confidence=0.90,
+            sources=[_source("history:1", MemorySourceKind.HISTORY_MESSAGE)],
+        )
+    )
+    units = store.list_units_for_consolidation(project="membox")
+    counts = store.count_independent_sources_for_units([unit_id])
+
+    default_plan = build_consolidation_plan(units, counts)
+    filtered_plan = build_consolidation_plan(
+        units,
+        counts,
+        comparator=LowScoreComparator({unit_id}),
+    )
+
+    assert [transition.unit_id for transition in default_plan.promotions] == [unit_id]
+    assert filtered_plan.promotions == []
+
+
 def test_consolidate_apply_promotes_candidates_and_logs(tmp_path: Path) -> None:
     """Apply performs audited Phase D transitions."""
     db = str(tmp_path / "memory.db")
@@ -221,6 +272,80 @@ def test_consolidate_apply_promotes_candidates_and_logs(tmp_path: Path) -> None:
     assert rows == [("crystal", "memory consolidate"), ("crystal_candidate", "memory consolidate")]
 
 
+def test_atomic_transition_batch_rolls_back_partial_failure(tmp_path: Path) -> None:
+    """A mid-batch transition failure leaves no earlier transitions visible."""
+    store = KnowledgeStore(str(tmp_path / "memory.db"))
+    unit_ids = [
+        store.create_memory_unit(
+            _unit(
+                title=f"Batch unit {index}",
+                content=f"Batch unit {index} content for atomic apply testing.",
+                unit_type=MemoryUnitType.PROCEDURE,
+            )
+        )
+        for index in range(10)
+    ]
+    transitions = [
+        ConsolidationTransition(
+            unit_id=unit_id,
+            title=f"Batch unit {index}",
+            to_status=MemoryUnitStatus.CRYSTAL_CANDIDATE,
+            reason="test batch transition",
+        )
+        for index, unit_id in enumerate(unit_ids)
+    ]
+    failing_unit = unit_ids[6]
+    transitions[6] = ConsolidationTransition(
+        unit_id=failing_unit,
+        title="Batch unit 6",
+        to_status=MemoryUnitStatus.SUPERSEDED,
+        reason="forced failure on seventh unit",
+        superseded_by=failing_unit,
+    )
+
+    with pytest.raises(ValueError, match=f"unit cannot supersede itself: {failing_unit}"):
+        store.transition_memory_units_atomically(transitions, command="memory consolidate")
+
+    statuses_after_failure = []
+    for unit_id in unit_ids:
+        unit = store.get_memory_unit(unit_id)
+        assert unit is not None
+        statuses_after_failure.append(unit.status)
+    assert statuses_after_failure == [MemoryUnitStatus.ACTIVE_UNIT] * 10
+    log_count = (
+        store._conn()
+        .execute(
+            """
+            SELECT COUNT(*) FROM memory_unit_status_log
+            WHERE command='memory consolidate'
+            """
+        )
+        .fetchone()[0]
+    )
+    assert log_count == 0
+
+    applied = store.transition_memory_units_atomically(
+        [
+            ConsolidationTransition(
+                unit_id=unit_id,
+                title=f"Batch unit {index}",
+                to_status=MemoryUnitStatus.CRYSTAL_CANDIDATE,
+                reason="retry after rollback",
+            )
+            for index, unit_id in enumerate(unit_ids)
+        ],
+        command="memory consolidate",
+    )
+
+    assert applied == 10
+    statuses_after_retry = []
+    for unit_id in unit_ids:
+        unit = store.get_memory_unit(unit_id)
+        assert unit is not None
+        statuses_after_retry.append(unit.status)
+    assert statuses_after_retry == [MemoryUnitStatus.CRYSTAL_CANDIDATE] * 10
+
+
 def test_consolidation_surfaces_conflict_without_overwriting(tmp_path: Path) -> None:
     """Conflicting units are reported and left active."""
     store = KnowledgeStore(str(tmp_path / "memory.db"))
@@ -248,6 +373,54 @@ def test_consolidation_surfaces_conflict_without_overwriting(tmp_path: Path) -> 
 
     assert [(c.left_id, c.right_id) for c in plan.conflicts] == [(first, second)]
     assert plan.supersessions == []
+    first_unit = store.get_memory_unit(first)
+    second_unit = store.get_memory_unit(second)
+    assert first_unit is not None
+    assert second_unit is not None
+    assert first_unit.status == MemoryUnitStatus.ACTIVE_UNIT
+    assert second_unit.status == MemoryUnitStatus.ACTIVE_UNIT
+
+
+def test_consolidation_surfaces_fts_pair_for_paraphrases(tmp_path: Path) -> None:
+    """Paraphrased units are surfaced as review-only FTS pair candidates."""
+    db = str(tmp_path / "memory.db")
+    store = KnowledgeStore(db)
+    first = store.create_memory_unit(
+        _unit(
+            title="SQLite storage default",
+            content="Membox uses local SQLite storage as the default database for agents.",
+            unit_type=MemoryUnitType.FACT,
+            labels=["storage"],
+            sources=[_source("history:sqlite-a", MemorySourceKind.HISTORY_MESSAGE)],
+        )
+    )
+    second = store.create_memory_unit(
+        _unit(
+            title="Local SQLite agent database",
+            content="For agent memory, the default storage backend is a local SQLite database.",
+            unit_type=MemoryUnitType.FACT,
+            labels=["storage"],
+            sources=[_source("history:sqlite-b", MemorySourceKind.HISTORY_MESSAGE)],
+        )
+    )
+    fts_pairs = store.fts_conflict_pairs_for_units(
+        store.list_units_for_consolidation(project="membox")
+    )
+
+    dry_run = runner.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", "membox", "--dry-run"],
+    )
+    apply = runner.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", "membox", "--apply"],
+    )
+
+    assert (first, second) in fts_pairs
+    assert dry_run.exit_code == 0, dry_run.output
+    assert f"conflict review {first}<->{second}" in dry_run.output
+    assert "fts_pair token-overlap candidate" in dry_run.output
+    assert apply.exit_code == 0, apply.output
     first_unit = store.get_memory_unit(first)
     second_unit = store.get_memory_unit(second)
     assert first_unit is not None

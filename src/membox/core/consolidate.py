@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from membox.model.schema import MemorySourceKind, MemoryUnitRecord, MemoryUnitStatus, MemoryUnitType
+
+if TYPE_CHECKING:
+    from membox.services.extraction import LLMComparator
 
 CRYSTAL_SOURCE_THRESHOLD = 3
 """Independent-source count required for automatic crystal promotion."""
@@ -126,12 +130,16 @@ def evolved_confidence(current: float, new_independent_sources: int) -> float:
 def build_consolidation_plan(
     units: list[MemoryUnitRecord],
     independent_counts: dict[int, int],
+    *,
+    fts_pair_ids: set[tuple[int, int]] | None = None,
+    comparator: LLMComparator | None = None,
+    comparator_threshold: float = 0.50,
 ) -> ConsolidationPlan:
     """Build a deterministic dry-run/apply plan for Phase D consolidation."""
     validator_rejections = validate_units(units)
     rejected_ids = {issue.unit_id for issue in validator_rejections}
     eligible_units = [unit for unit in units if unit.id is not None and unit.id not in rejected_ids]
-    conflicts = detect_conflicts(eligible_units)
+    conflicts = detect_conflicts(eligible_units, fts_pair_ids=fts_pair_ids)
     conflict_ids = {conflict.left_id for conflict in conflicts} | {
         conflict.right_id for conflict in conflicts
     }
@@ -191,7 +199,7 @@ def build_consolidation_plan(
                     )
                 )
 
-    return ConsolidationPlan(
+    plan = ConsolidationPlan(
         promotions=promotions,
         candidates=candidates,
         demotions=demotions,
@@ -201,6 +209,9 @@ def build_consolidation_plan(
         decay_reviews=decay_reviews,
         validator_rejections=validator_rejections,
     )
+    if comparator is None:
+        return plan
+    return _apply_llm_comparator(plan, eligible_units, comparator, comparator_threshold)
 
 
 def has_explicit_user_confirmation(unit: MemoryUnitRecord) -> bool:
@@ -267,8 +278,13 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
     return issues
 
 
-def detect_conflicts(units: list[MemoryUnitRecord]) -> list[ConsolidationConflict]:
+def detect_conflicts(
+    units: list[MemoryUnitRecord],
+    *,
+    fts_pair_ids: set[tuple[int, int]] | None = None,
+) -> list[ConsolidationConflict]:
     """Surface deterministic conflict pairs; never merge or overwrite them."""
+    fts_pairs = fts_pair_ids or set()
     active = [
         unit
         for unit in units
@@ -294,6 +310,18 @@ def detect_conflicts(units: list[MemoryUnitRecord]) -> list[ConsolidationConflic
                         left.title,
                         right.title,
                         "overlapping labels and topic with contrast signals",
+                        sorted(_source_refs(left) | _source_refs(right)),
+                    )
+                )
+                continue
+            if (left.id, right.id) in fts_pairs and _looks_fts_pair(left, right):
+                conflicts.append(
+                    ConsolidationConflict(
+                        left.id,
+                        right.id,
+                        left.title,
+                        right.title,
+                        "fts_pair token-overlap candidate",
                         sorted(_source_refs(left) | _source_refs(right)),
                     )
                 )
@@ -358,6 +386,49 @@ def decay_action(unit: MemoryUnitRecord) -> ConsolidationTransition | Consolidat
     )
 
 
+def _apply_llm_comparator(
+    plan: ConsolidationPlan,
+    eligible_units: list[MemoryUnitRecord],
+    comparator: LLMComparator,
+    threshold: float,
+) -> ConsolidationPlan:
+    """Drop low-scoring candidate transitions from a consolidation plan."""
+    candidate_ids = {transition.unit_id for transition in _plan_transitions(plan)}
+    candidates = [unit for unit in eligible_units if unit.id in candidate_ids]
+    if not candidates:
+        return plan
+    scores = {
+        score.unit_id: score.score
+        for score in comparator.rescore_candidates(candidates, eligible_units)
+    }
+
+    def keep(transition: ConsolidationTransition) -> bool:
+        score = scores.get(transition.unit_id)
+        return score is None or score >= threshold
+
+    return ConsolidationPlan(
+        promotions=[transition for transition in plan.promotions if keep(transition)],
+        candidates=[transition for transition in plan.candidates if keep(transition)],
+        demotions=[transition for transition in plan.demotions if keep(transition)],
+        conflicts=plan.conflicts,
+        supersessions=[transition for transition in plan.supersessions if keep(transition)],
+        decay_archives=[transition for transition in plan.decay_archives if keep(transition)],
+        decay_reviews=plan.decay_reviews,
+        validator_rejections=plan.validator_rejections,
+    )
+
+
+def _plan_transitions(plan: ConsolidationPlan) -> list[ConsolidationTransition]:
+    """Return all status transitions in deterministic plan order."""
+    return [
+        *plan.supersessions,
+        *plan.decay_archives,
+        *plan.promotions,
+        *plan.candidates,
+        *plan.demotions,
+    ]
+
+
 def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
     left_text = f"{left.title}\n{left.content}".casefold()
     right_text = f"{right.title}\n{right.content}".casefold()
@@ -367,6 +438,24 @@ def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
     if len(claim_tokens(left_text) & claim_tokens(right_text)) < 3:
         return False
     return any(term in combined for term in _CONTRAST_TERMS)
+
+
+def _looks_fts_pair(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
+    """Return whether two units should be surfaced as FTS-like review pairs."""
+    if left.unit_type != right.unit_type:
+        return False
+    left_text = f"{left.title}\n{left.content}".casefold()
+    right_text = f"{right.title}\n{right.content}".casefold()
+    combined = left_text + "\n" + right_text
+    if any(term in combined for term in _STRONG_CORRECTION_TERMS):
+        return False
+    left_tokens = claim_tokens(left_text)
+    right_tokens = claim_tokens(right_text)
+    if len(left_tokens) < 4 or len(right_tokens) < 4:
+        return False
+    overlap = left_tokens & right_tokens
+    union = left_tokens | right_tokens
+    return len(overlap) >= 4 and (len(overlap) / len(union)) >= 0.35
 
 
 def _looks_like_replacement(older: MemoryUnitRecord, newer: MemoryUnitRecord) -> bool:

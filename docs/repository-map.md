@@ -74,6 +74,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `eval/lifecycle/history/c8_tool_noise.jsonl`
       - `eval/lifecycle/history/c9_wakeup_template.jsonl`
       - `eval/lifecycle/history/c9_wakeup_template_b.jsonl`
+    - `eval/lifecycle/comparator_cases.yaml`
     - `eval/lifecycle/expectations.yaml`
     - `eval/lifecycle/README.md`
   - `eval/gold.yaml`
@@ -83,6 +84,7 @@ Functional Python files include their module header so tools can reuse the file 
 - `scripts/`
   - `scripts/__init__.py` — Automation scripts for repository maintenance and release workflows.
   - `scripts/bump_version.py` — Synchronize the project version across release metadata files.
+  - `scripts/eval_lifecycle_comparator.py` — Offline eval harness for the lifecycle LLM-comparator protocol.
   - `scripts/eval_memory.py` — scripts/eval_memory.py — membox Phase 7.5 M3 evaluation harness.
   - `scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
