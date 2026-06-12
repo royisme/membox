@@ -2,8 +2,8 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-12 (session 12 — Phase D consolidation implemented + review-fix pass on `feature/phase-d-consolidation`; merge blocked on D0 owner sign-off)
-**Current phase**: **Lifecycle Phase D implemented** on `feature/phase-d-consolidation` (`membox memory consolidate --dry-run/--apply`, crystal policy, conflict surfacing, validator, supersession, decay — no migration needed, head stays 8). All gates green (528 tests, coverage 91.3%, eval offline 24/26 @ `--budget 4000` = baseline). **Merge is blocked on exactly one thing: owner sign-off of the D0 real-trace dry-run summary** (sign-off package at the top of `docs/plans/plan_04_phase_d_consolidation.md`).
+**Last updated**: 2026-06-12 (session 12 close — Phase D + gate v3 **merged to main** `1861b8d`; D0 closed with owner's final OK)
+**Current phase**: **Lifecycle Phase D complete on main** (`membox memory consolidate --dry-run/--apply`, crystal policy, conflict surfacing, validator, supersession, decay — no migration needed, head stays 8) plus **heuristic-v3 gate** from the D0 tuning round (real-trace triage 167/133 → 11/289, c8/c9 noise fixtures committed). All gates green (535 tests, coverage ≥91%, eval offline 24/26 @ `--budget 4000` = baseline). Next track: **Phase E** (query-side memory: `--include-memory` fusion, crystal footer coverage, reinforcement) — plan to be drafted.
 
 ### Pending user decisions before next work item
 - Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
@@ -103,12 +103,12 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 ## Current state
 
 - **main**: as of session 11 (`d6e6c99` merge) — Phases 1-7 + 7.5, lifecycle design v2.3, Phase B (migration 6), M4 + M5 (migration 7), spec reorg, Phase C (migration 8, gate v2, `membox memory` CLI, C5 harness), plan_03 ingest perf, eval re-snapshot baseline. Migration head on main: 8.
-- **`feature/phase-d-consolidation`** (unmerged, ahead of main): Phase D consolidation (plan_04 D1–D5 + review-fix pass) — `core/consolidate.py`, store consolidation ops, `membox memory consolidate --dry-run/--apply`, Phase D acceptance tests. 528 tests, coverage 91.3%, all gates green. No new migration (head stays 8). **Merge blocked on D0 owner sign-off only.**
+- **`feature/phase-d-consolidation` merged to main** (`1861b8d`): Phase D consolidation (plan_04 D1–D5 + review-fix pass + gate v3) — `core/consolidate.py`, store consolidation ops, `membox memory consolidate --dry-run/--apply`, c8/c9 fixtures, Phase D acceptance tests. 535 tests, all gates green. No new migration (head stays 8). Branch deletable after owner confirms.
 - `docs/design/agent-memory-lifecycle.md` is a tombstone pointer; the normative chapter is `docs/spec/spec_02_memory_lifecycle.md`.
 - Merged branches awaiting deletion after user confirms: `feature/lifecycle-design-v2`, `feature/phase-b-history-trace`, `feature/m4-supersession`, `feature/cjk-trigram-fts-design`, the phase 1-7 branches, and `develop`.
 - **Working eval DBs**: `/tmp/membox-eval-full-20260611.db` (59 chunks / 556 entities / 410 relations — basis for the post-resnapshot 26/26 baseline) is the current working DB. `/tmp/membox-eval-gemini3-trigram-full.db` (pre-resnapshot 24/26) and `gemini3.db` retained for history.
 - **`eval/corpus/` is gitignored** (private handoff docs from local projects). `eval/corpus-pre-resnapshot/` (also gitignored) holds the old q23-q26 sources for the supersession test. Tests in `tests/test_eval_corpus.py` that need the corpus skip cleanly on CI via the `requires_corpus` fixture.
-- **Plan_04 Phase D implemented** (session 12) on `feature/phase-d-consolidation`; plan doc now carries the D0 sign-off package (real-trace dry-run summary + conflict-detector boundary declaration + sign-off line) at the top. D0 owner sign-off is the only merge blocker.
+- **Plan_04 Phase D complete** (session 12, merged `1861b8d`); the full D0 trail (first run → NEEDS v3 TUNING → v3 round → final OK) plus accepted residual risks live at the top of the plan doc.
 
 ### Locked architectural decisions
 - **Single global DB** (`~/.membox/membox.db` default; `--db` > `MEMBOX_DB` env > default). No per-project DBs, no registry, no ATTACH federation. `documents.project` column scopes; entities/relations are global for cross-project identity.
@@ -134,14 +134,14 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 8. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
 9. ~~Lifecycle eval fixture design~~ — **resolved session 11**: 7 committed fixtures at `eval/lifecycle/`, harness in `tests/test_lifecycle_acceptance.py`. C5 metrics at heuristic-v2: precision/recall/type-accuracy 1.00, dup rate 0.00, all hard-asserted. Fixture size is the acknowledged fragility — D0 entry condition of plan_04 is the real-trace validation.
 10. ~~`feature/phase-c-eval-ingest-plans` → main merge~~ — **resolved session 11** (`d6e6c99`, merge --no-ff).
-11. **Plan_04 / Phase D**: D1–D5 implemented on `feature/phase-d-consolidation` (session 12); D2 persistence resolved as stateless re-surfacing for the first cut. **Open: D0 owner sign-off** of the real-trace dry-run summary (sign-off package at the top of plan_04) — the only blocker for merging the branch. Owner may instead request a heuristic-v3 tuning round; any real disagreement becomes a committed anonymized fixture.
+11. ~~Plan_04 / Phase D~~ — **resolved session 12**: D0 NEEDS-v3-TUNING → v3 round → owner final OK → merged to main (`1861b8d`). Accepted residual risks recorded in plan_04's D0 package (--help-dump events, instruction blobs, C5 type-accuracy semantics).
 12. **Conflict-detector calibration**: first cut is a deterministic word-list signal, fixture-correct but real-trace recall uncalibrated/expected low. LLM-backed comparator via injectable Protocol is the planned follow-up (post-D0, likely alongside Phase E).
 
 ---
 
 ## Next concrete steps
 
-0. **Owner: final OK over the v3 tuning results** recorded in plan_04's D0 package (11/289 re-run, residual risks list). On OK → merge `feature/phase-d-consolidation` to main (`merge --no-ff`, "merge: Phase D consolidation + gate v3 (Session 12)"). The earlier NEEDS-v3-TUNING decision and the tuning round itself are done.
+0. ~~Phase D merge~~ — **done session 12** (`1861b8d`). Next: **draft plan_05 (Phase E — query-side memory)**: `--include-memory` query fusion, memory budget partition, footer coverage for crystals/units, reinforcement (`recall_count`/`last_recalled_at` at query time), ranking weights (relevance × importance × recency). Deferred items to fold in: consolidate CLI N+1 source counts, atomic apply batching, FTS-based conflict candidate pairing, LLM-backed conflict comparator (injectable Protocol), gate v4 candidate (--help-dump event family).
 1. ~~Phase C (triage + memory units, migration 8)~~ — **implemented 2026-06-11**, merged to main session 11 (`d6e6c99`).
 1b. ~~Phase D plan + implementation~~ — **implemented session 12** on `feature/phase-d-consolidation` (D1–D5 + review fixes); see step 0 for the remaining D0 gate.
 2. ~~Re-snapshot eval corpus + update temporal gold answers~~ — **done 2026-06-11** (plan_02): q23–q26 sources re-snapshotted (old copies in gitignored `eval/corpus-pre-resnapshot/`), gold updated, full Gemini 26/26 @ `--budget 4000` recorded as the new baseline (see Notes; budget-comparability rule applies).
