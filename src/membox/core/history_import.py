@@ -27,11 +27,11 @@ if TYPE_CHECKING:
     from membox.core.store.history import ImportState
 
 _FORMAT_BY_SOURCE_KIND: dict[str, str] = {
-    SourceKind.CODEX_JSONL.value: "codex-jsonl",
-    SourceKind.MEMBOX_CAPTURE.value: "membox-history-jsonl",
-    SourceKind.MANUAL.value: "membox-history-jsonl",
+    SourceKind.CODEX_JSONL.value: "codex",
+    SourceKind.MEMBOX_CAPTURE.value: "membox",
+    SourceKind.MANUAL.value: "membox",
 }
-"""``source_kind`` → importer ``--format`` used to re-parse for fetch."""
+"""``source_kind`` → importer ``--adapt`` name used to re-parse for fetch."""
 
 
 class ImportResult(TypedDict):
@@ -70,7 +70,7 @@ def import_history(
     Args:
         store: Open knowledge store.
         path: Source log file.
-        format_name: Importer ``--format`` name.
+        format_name: Importer ``--adapt`` name.
         project: Project override carried into the session record.
         text_cap_bytes: Preview cap (``HistoryConfig.text_cap_bytes``).
 

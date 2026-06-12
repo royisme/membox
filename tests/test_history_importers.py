@@ -151,8 +151,8 @@ def test_event_ids_independent_of_file_position(tmp_path: Path) -> None:
     store1 = KnowledgeStore(str(db1))
     store2 = KnowledgeStore(str(db2))
 
-    import_history(store1, fixture1, "membox-history-jsonl", project="demo")
-    import_history(store2, fixture2, "membox-history-jsonl", project="demo")
+    import_history(store1, fixture1, "membox", project="demo")
+    import_history(store2, fixture2, "membox", project="demo")
 
     # ID for evtA is keyed on call_id="evtA", not file position
     expected_a = "membox-capture:pos1:evt:evtA:tool_call"
@@ -267,13 +267,13 @@ def test_codex_importer_reimport_same_ids(tmp_path: Path) -> None:
 
 
 def test_codex_importer_via_import_history(tmp_path: Path) -> None:
-    """import_history with 'codex-jsonl' format stores session under inferred project."""
+    """import_history with 'codex' format stores session under inferred project."""
     db = tmp_path / "codex.db"
     fixture = tmp_path / "codex.jsonl"
     fixture.write_text(_CODEX_LOG, encoding="utf-8")
 
     store = KnowledgeStore(str(db))
-    result = import_history(store, fixture, "codex-jsonl")
+    result = import_history(store, fixture, "codex")
 
     assert result["skipped"] is False
     assert result["messages"] >= 1

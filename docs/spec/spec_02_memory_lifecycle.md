@@ -852,8 +852,8 @@ Phase-appropriate commands:
 
 ```bash
 # Trace
-membox history import <path> --format membox-history-jsonl --project X
-membox history import <path> --format codex-jsonl --project X
+membox history import <path> --adapt membox --project X
+membox history import <path> --adapt codex --project X
 membox history search "..." --project X --kind tool_error
 membox history around <message-id> --project X
 membox history fetch <message-or-event-id> --project X   # redacted by default

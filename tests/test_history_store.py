@@ -65,7 +65,7 @@ _EVENT_RESULT_LINE = json.dumps(
     }
 )
 
-_FMT = "membox-history-jsonl"
+_FMT = "membox"
 
 
 def _write_basic_fixture(path: Path) -> None:

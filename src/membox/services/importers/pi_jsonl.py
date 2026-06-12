@@ -1,4 +1,4 @@
-"""Importer for Pi coding agent session logs (``pi-jsonl``).
+"""Importer for Pi coding agent session logs (``pi`` adapt format).
 
 Pi stores one session per file under
 ``~/.pi/agent/sessions/<project-path>/<timestamp>_<uuid>.jsonl``.
@@ -69,7 +69,7 @@ def _message_text_from_obj(content: object) -> str:
 class PiJsonlImporter:
     """Parses Pi coding agent session logs."""
 
-    format_name = "pi-jsonl"
+    format_name = "pi"
 
     def parse(
         self,

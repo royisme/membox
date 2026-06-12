@@ -69,8 +69,8 @@ membox queue                      # show per-status counts and recent failures
 
 ```bash
 # Import session history (idempotent; re-import resumes incrementally)
-membox history import session.jsonl --format membox-history-jsonl --project myrepo
-membox history import session.jsonl --format codex-jsonl --project myrepo
+membox history import session.jsonl --adapt membox --project myrepo
+membox history import session.jsonl --adapt codex --project myrepo
 
 # Search history
 membox history search "migration error" --project myrepo
@@ -148,7 +148,7 @@ the lifecycle pipeline:
 
 ```bash
 # 1. Import the session history
-membox history import handoff.jsonl --format membox-history-jsonl --project myrepo
+membox history import handoff.jsonl --adapt membox --project myrepo
 
 # 2. Triage — decide what is worth keeping
 membox memory triage --project myrepo --apply

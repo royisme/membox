@@ -16,9 +16,9 @@ from membox.services.importers.membox_jsonl import MemboxHistoryJsonlImporter
 from membox.services.importers.pi_jsonl import PiJsonlImporter
 
 IMPORTER_FORMATS: dict[str, type] = {
-    "membox-history-jsonl": MemboxHistoryJsonlImporter,
-    "codex-jsonl": CodexJsonlImporter,
-    "pi-jsonl": PiJsonlImporter,
+    "membox": MemboxHistoryJsonlImporter,
+    "codex": CodexJsonlImporter,
+    "pi": PiJsonlImporter,
 }
 """CLI ``--format`` name → importer class."""
 

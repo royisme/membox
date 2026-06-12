@@ -80,8 +80,8 @@ def history_import(
     path: Path = typer.Argument(..., help="Path to the session log file"),
     format_name: str = typer.Option(
         ...,
-        "--format",
-        help=f"Log file format: {', '.join(sorted(IMPORTER_FORMATS))}",
+        "--adapt",
+        help=f"Agent adapter: {', '.join(sorted(IMPORTER_FORMATS))}",
     ),
     project: str | None = typer.Option(None, "--project", help="Project scope override"),
     db: str = _DB_OPTION,

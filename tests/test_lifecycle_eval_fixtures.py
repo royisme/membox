@@ -165,7 +165,7 @@ def test_lifecycle_history_fixtures_are_importable(tmp_path: Path) -> None:
                 result = import_history(
                     store,
                     fixture,
-                    "membox-history-jsonl",
+                    "membox",
                     project="membox-lifecycle",
                 )
                 assert result["skipped"] is False

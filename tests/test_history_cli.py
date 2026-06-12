@@ -16,7 +16,7 @@ from membox.cli import app
 
 runner = CliRunner()
 
-_FMT = "membox-history-jsonl"
+_FMT = "membox"
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -96,7 +96,7 @@ def _invoke_import(fixture: Path, db: Path, project: str | None = None) -> Resul
         "history",
         "import",
         str(fixture),
-        "--format",
+        "--adapt",
         _FMT,
         "--db",
         str(db),
@@ -143,7 +143,7 @@ def test_cli_import_and_search_roundtrip(tmp_path: Path) -> None:
 
 
 def test_cli_import_unknown_format(tmp_path: Path) -> None:
-    """Unknown --format gives exit code 1 and mentions 'unknown' or 'known'."""
+    """Unknown --adapt gives exit code 1 and mentions 'unknown' or 'known'."""
     fixture = tmp_path / "session.jsonl"
     db = tmp_path / "mem.db"
     _write_fixture(fixture)
@@ -154,7 +154,7 @@ def test_cli_import_unknown_format(tmp_path: Path) -> None:
             "history",
             "import",
             str(fixture),
-            "--format",
+            "--adapt",
             "not-a-real-format",
             "--db",
             str(db),
@@ -179,7 +179,7 @@ def test_cli_import_missing_file(tmp_path: Path) -> None:
             "history",
             "import",
             str(tmp_path / "does_not_exist.jsonl"),
-            "--format",
+            "--adapt",
             _FMT,
             "--db",
             str(db),

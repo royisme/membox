@@ -1,4 +1,4 @@
-"""Importer for Codex CLI rollout logs (``codex-jsonl``).
+"""Importer for Codex CLI rollout logs (``codex`` adapt format).
 
 Codex stores one session per file under ``~/.codex/sessions/YYYY/MM/DD/
 rollout-<timestamp>-<uuid>.jsonl``.  Every line is
@@ -56,7 +56,7 @@ def _payload_text(payload: dict[str, object]) -> str:
 class CodexJsonlImporter:
     """Parses Codex CLI rollout session logs."""
 
-    format_name = "codex-jsonl"
+    format_name = "codex"
 
     def parse(
         self,

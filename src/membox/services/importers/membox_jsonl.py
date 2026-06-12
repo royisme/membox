@@ -1,4 +1,4 @@
-"""Importer for ``membox-history-jsonl`` — the normalized fixture format.
+"""Importer for ``membox`` — the normalized fixture adapt format.
 
 One JSON object per line.  The first line must be the session header; later
 lines are messages and events in conversation order:
@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 
 
 class MemboxHistoryJsonlImporter:
-    """Parses the normalized ``membox-history-jsonl`` fixture format."""
+    """Parses the normalized ``membox`` fixture adapt format."""
 
-    format_name = "membox-history-jsonl"
+    format_name = "membox"
 
     def parse(
         self,

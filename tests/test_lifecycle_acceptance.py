@@ -68,7 +68,7 @@ def _build_store(tmp_path: Path) -> KnowledgeStore:
         for fixture_name in entry["fixtures"]:
             fixture = LIFECYCLE_DIR / str(fixture_name)
             if str(fixture) not in imported:
-                import_history(store, fixture, "membox-history-jsonl", project=_PROJECT)
+                import_history(store, fixture, "membox", project=_PROJECT)
                 imported.add(str(fixture))
     return store
 
@@ -82,7 +82,7 @@ def _build_consolidated_agent(tmp_path: Path) -> MemoryAgent:
         for fixture_name in entry["fixtures"]:
             fixture = LIFECYCLE_DIR / str(fixture_name)
             if str(fixture) not in imported:
-                import_history(agent.store, fixture, "membox-history-jsonl", project=_PROJECT)
+                import_history(agent.store, fixture, "membox", project=_PROJECT)
                 imported.add(str(fixture))
     cli = CliRunner()
     for command in (
@@ -212,7 +212,7 @@ def test_c5_gate_acceptance_precision_and_dup_rate(tmp_path: Path) -> None:
         for fixture_name in entry["fixtures"]:
             fixture = LIFECYCLE_DIR / str(fixture_name)
             if str(fixture) not in imported_dup:
-                import_history(dup_store, fixture, "membox-history-jsonl", project=_PROJECT)
+                import_history(dup_store, fixture, "membox", project=_PROJECT)
                 imported_dup.add(str(fixture))
 
     cli = CliRunner()
@@ -305,7 +305,7 @@ def test_phase_d_consolidation_acceptance_statuses(tmp_path: Path) -> None:
         for fixture_name in entry["fixtures"]:
             fixture = LIFECYCLE_DIR / str(fixture_name)
             if str(fixture) not in imported:
-                import_history(store, fixture, "membox-history-jsonl", project=_PROJECT)
+                import_history(store, fixture, "membox", project=_PROJECT)
                 imported.add(str(fixture))
 
     cli = CliRunner()
@@ -494,7 +494,7 @@ def test_phase_f_distill_acceptance(tmp_path: Path) -> None:
 
     c5_only_db = str(tmp_path / "c5_only.db")
     c5_only_store = KnowledgeStore(c5_only_db)
-    import_history(c5_only_store, c5, "membox-history-jsonl", project=_PROJECT)
+    import_history(c5_only_store, c5, "membox", project=_PROJECT)
     _run_lifecycle_pipeline(c5_only_db)
     units = c5_only_store.list_units_for_distill(project=_PROJECT)
     c5_only_plan = build_distill_plan(
@@ -509,7 +509,7 @@ def test_phase_f_distill_acceptance(tmp_path: Path) -> None:
     repeated_db = str(tmp_path / "repeated.db")
     repeated_store = KnowledgeStore(repeated_db)
     for fixture in (c5, c5_b):
-        import_history(repeated_store, fixture, "membox-history-jsonl", project=_PROJECT)
+        import_history(repeated_store, fixture, "membox", project=_PROJECT)
     _run_lifecycle_pipeline(repeated_db)
     root = tmp_path / "project"
     scripts = root / "scripts"
@@ -539,7 +539,7 @@ def test_phase_f_distill_acceptance(tmp_path: Path) -> None:
     noise_db = str(tmp_path / "noise.db")
     noise_store = KnowledgeStore(noise_db)
     for fixture in (c2, c8, c9, c9_b):
-        import_history(noise_store, fixture, "membox-history-jsonl", project=_PROJECT)
+        import_history(noise_store, fixture, "membox", project=_PROJECT)
     _run_lifecycle_pipeline(noise_db)
     noise = cli.invoke(
         app,
