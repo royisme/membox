@@ -47,6 +47,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/plans/plan_01_phase_c_triage_memory_units.md`
     - `docs/plans/plan_02_eval_corpus_resnapshot.md`
     - `docs/plans/plan_03_ingest_performance.md`
+    - `docs/plans/plan_04_phase_d_consolidation.md`
   - `docs/spec/`
     - `docs/spec/spec_01_core.md`
     - `docs/spec/spec_02_memory_lifecycle.md`

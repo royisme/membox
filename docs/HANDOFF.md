@@ -122,7 +122,9 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-1. **Phase C (triage + memory units, migration 8)** per `docs/spec/spec_02_memory_lifecycle.md`: lifecycle eval fixture corpus first (see open question 9), then `history_triage` table + heuristic gate in `core/triage.py`, `memory_units` tables, `membox memory triage/extract` dry-run + apply, per-project `lifecycle_lease:<project>` reusing the worker-lease pattern.
+0. **Merge `feature/phase-c-eval-ingest-plans` to main** (5 thematic commits: Phase C, plan_03 perf, retrieval excerpts, eval baseline docs, gate v2) and add the Session 11 entry to this handoff.
+1. ~~Phase C (triage + memory units, migration 8)~~ — **implemented 2026-06-11** on `feature/phase-c-eval-ingest-plans` (plan_01 C1–C5 complete; C5 metrics in Notes; gate at heuristic-v2).
+1b. **Phase D plan written, awaiting owner acceptance**: `docs/plans/plan_04_phase_d_consolidation.md` (SDD — do not execute before acceptance). Hard entry condition D0: validate the heuristic gate on real imported trace (dry-run sample ≥ 30 decisions) before any consolidation code; the C5 1.00 metrics are fixture-tuned, and spec_02 names real-trace gate precision as the design's most fragile assumption.
 2. ~~Re-snapshot eval corpus + update temporal gold answers~~ — **done 2026-06-11** (plan_02): q23–q26 sources re-snapshotted (old copies in gitignored `eval/corpus-pre-resnapshot/`), gold updated, full Gemini 26/26 @ `--budget 4000` recorded as the new baseline (see Notes; budget-comparability rule applies).
 3. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch. **Do not chain merge+test in one Bash call** (lesson from session 8).
 4. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms.
