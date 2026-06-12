@@ -530,7 +530,9 @@ class TestCLIIngestFileFlags:
             ["ingest-file", str(md), "--db", db, "--no-llm", "--sync"],
         )
         assert result.exit_code == 0
-        assert "1 chunk" in result.output
+        # Rich soft-wraps at the CI runner's terminal width, which can split
+        # "1 chunk" across lines; normalize whitespace before asserting.
+        assert "1 chunk" in " ".join(result.output.split())
 
     def test_ingest_file_project_flag(self, tmp_path: Path) -> None:
         md = tmp_path / "doc.md"
