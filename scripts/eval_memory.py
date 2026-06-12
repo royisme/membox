@@ -18,8 +18,15 @@ Default mode (Ollama)
 ``--provider gemini``
     Same pipeline against the Gemini API's OpenAI-compatible endpoint —
     extraction ``gemini-3.1-flash-lite`` (formal eval default, owner decision
-    2026-06-12; basis of the 24/26 = 92.3% retrieval baseline), embedding
+    2026-06-12; basis of both retrieval baselines), embedding
     ``gemini-embedding-001`` (1536-dim), much faster than local Ollama.
+
+    Baselines (only comparable at matching corpus + ``--budget``):
+    pre-resnapshot corpus (2026-06-09) @ ``--budget 2000`` → 24/26 (92.3%);
+    re-snapshot corpus (2026-06-11, ~3x larger) @ ``--budget 4000`` → 26/26.
+    Runs against the re-snapshot corpus MUST pass ``--budget 4000`` — at the
+    2000 default the larger corpus truncates multi-hop output (multi-hop
+    drops to ~2/7) and the result is not comparable to either baseline.
     Requires ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY``.  Model/dim/threshold
     overridable via the same ``MEMBOX_EVAL_*`` env vars — but baseline
     numbers are only comparable when produced with the default model.  The
@@ -292,12 +299,14 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
     if offline:
         extractor = DummyExtractor()
         embedder: object | None = _SemanticDummyEmbedder()
+        ingest_concurrency = int(os.environ.get("MEMBOX_INGEST_CONCURRENCY", "1"))
 
         # _SemanticDummyEmbedder satisfies the Embedder Protocol structurally.
         return MemoryAgent(
             extractor=extractor,
             embedder=embedder,  # type: ignore[arg-type]
             db_path=db_path,
+            ingest_concurrency=ingest_concurrency,
         )
 
     # Real provider mode (Ollama local or Gemini online).
@@ -357,14 +366,17 @@ def make_eval_agent(offline: bool, db_path: str, provider: str = "ollama") -> Me
             reasoning_effort=reasoning_effort,
         )
     )  # type: ignore[assignment]
-    embedder = EmbeddingService(OpenAIEmbedClient(client, embedding_model, embed_dim), embed_dim)
-    embedder.model = embedding_model  # type: ignore[attr-defined]
+    embedder = EmbeddingService(
+        OpenAIEmbedClient(client, embedding_model, embed_dim), embed_dim, model=embedding_model
+    )
+    ingest_concurrency = int(os.environ.get("MEMBOX_INGEST_CONCURRENCY", "1"))
 
     return MemoryAgent(
         extractor=extractor,
         embedder=embedder,
         db_path=db_path,
         disambiguation_threshold=disambiguation_threshold,
+        ingest_concurrency=ingest_concurrency,
     )
 
 

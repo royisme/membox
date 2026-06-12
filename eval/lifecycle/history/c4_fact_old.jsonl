@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c4-old","project":"membox-lifecycle","title":"old fact","started_at":"2026-06-11T09:25:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"Fact snapshot: membox query currently uses graph-only retrieval by default.","created_at":"2026-06-11T09:25:10Z"}

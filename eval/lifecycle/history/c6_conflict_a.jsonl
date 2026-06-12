@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c6-conflict-a","project":"membox-lifecycle","title":"first conflicting preference","started_at":"2026-06-11T09:45:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"For this repo, always branch feature work from develop and open PRs back to develop.","created_at":"2026-06-11T09:45:10Z"}

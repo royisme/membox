@@ -37,6 +37,136 @@ class HistoryEventKind(StrEnum):
     OTHER = "other"
 
 
+class MemoryUnitType(StrEnum):
+    """Closed Phase C memory unit taxonomy."""
+
+    PREFERENCE = "preference"
+    DECISION = "decision"
+    PROCEDURE = "procedure"
+    FACT = "fact"
+    LEARNING = "learning"
+    PLAN = "plan"
+    EVENT = "event"
+    CONTEXT = "context"
+
+
+class MemoryUnitStatus(StrEnum):
+    """Lifecycle status values stored on ``memory_units``."""
+
+    UNIT_CANDIDATE = "unit_candidate"
+    ACTIVE_UNIT = "active_unit"
+    CRYSTAL_CANDIDATE = "crystal_candidate"
+    CRYSTAL = "crystal"
+    SUPERSEDED = "superseded"
+    ARCHIVED = "archived"
+    RETRACTED = "retracted"
+
+
+class MemoryTemporalType(StrEnum):
+    """Temporal semantics for a triage decision or memory unit."""
+
+    POINT = "point"
+    RANGE = "range"
+    ONGOING = "ongoing"
+    UNKNOWN = "unknown"
+
+
+class MemoryUserIntent(StrEnum):
+    """Whether capture was user-initiated or automatic."""
+
+    MANUAL = "manual"
+    AUTO = "auto"
+
+
+class MemorySourceKind(StrEnum):
+    """Valid source kinds for ``memory_unit_sources``."""
+
+    HISTORY_MESSAGE = "history_message"
+    HISTORY_EVENT = "history_event"
+    DOCUMENT = "document"
+    RELATION = "relation"
+    UNIT = "unit"
+    MANUAL = "manual"
+
+
+class TraceKind(StrEnum):
+    """Trace row kinds consumed by the Phase C triage table."""
+
+    MESSAGE = "message"
+    EVENT = "event"
+
+
+MEMORY_LABELS: frozenset[str] = frozenset(
+    {
+        "architecture",
+        "storage",
+        "retrieval",
+        "cli",
+        "testing",
+        "tooling",
+        "workflow",
+        "conventions",
+        "dependencies",
+        "performance",
+        "security",
+    }
+)
+"""Closed Phase C memory label set."""
+
+
+class HistoryTriageRecord(BaseModel):
+    """A persisted deterministic triage decision for one trace item."""
+
+    id: int | None = None
+    project: str = ""
+    trace_kind: TraceKind
+    trace_id: str
+    should_extract: bool
+    unit_type: MemoryUnitType
+    importance_score: float = 0.0
+    confidence_score: float = 0.0
+    temporal_type: MemoryTemporalType = MemoryTemporalType.UNKNOWN
+    user_intent: MemoryUserIntent = MemoryUserIntent.AUTO
+    extraction_hint: str = ""
+    reason: str = ""
+    gate_version: str
+    consumed_at: str | None = None
+    created_at: str = ""
+
+
+class MemoryUnitSource(BaseModel):
+    """One source reference attached to a memory unit."""
+
+    source_kind: MemorySourceKind
+    source_ref: str
+    source_message_id: str = ""
+    quote: str = ""
+
+
+class MemoryUnitRecord(BaseModel):
+    """A Phase C memory unit row plus labels and source references."""
+
+    id: int | None = None
+    project: str = ""
+    unit_type: MemoryUnitType
+    status: MemoryUnitStatus = MemoryUnitStatus.UNIT_CANDIDATE
+    title: str
+    content: str
+    context: str = ""
+    importance_score: float = 0.0
+    confidence_score: float = 0.0
+    temporal_type: MemoryTemporalType = MemoryTemporalType.UNKNOWN
+    valid_from: str | None = None
+    valid_to: str | None = None
+    superseded_by: int | None = None
+    labels: list[str] = Field(default_factory=list)
+    sources: list[MemoryUnitSource] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str | None = None
+    recall_count: int = 0
+    last_recalled_at: str | None = None
+
+
 class HistorySessionRecord(BaseModel):
     """A normalized history session as produced by an importer.
 

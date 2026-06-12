@@ -187,6 +187,8 @@ def create_default_extractor(
                 embed_client,
                 model=config.embedding.model,
                 dim=config.embedding.dimensions,
+                cache_size=config.embedding.cache_size,
+                batch_size=config.embedding.batch_size,
             ),
         )
     return DummyExtractor(), None

@@ -18,6 +18,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `.crew/state/metrics/`
       - `.crew/state/metrics/2026-06-10.jsonl`
       - `.crew/state/metrics/2026-06-11.jsonl`
+      - `.crew/state/metrics/2026-06-12.jsonl`
 - `.github/`
   - `.github/workflows/`
     - `.github/workflows/auto-merge.yml`
@@ -46,6 +47,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/plans/plan_01_phase_c_triage_memory_units.md`
     - `docs/plans/plan_02_eval_corpus_resnapshot.md`
     - `docs/plans/plan_03_ingest_performance.md`
+    - `docs/plans/plan_04_phase_d_consolidation.md`
   - `docs/spec/`
     - `docs/spec/spec_01_core.md`
     - `docs/spec/spec_02_memory_lifecycle.md`
@@ -67,6 +69,26 @@ Functional Python files include their module header so tools can reuse the file 
     - `eval/corpus/pika--HANDOFF_STT_COHERENT_PROFILE.md`
     - `eval/corpus/playfun--EVENTS.md`
     - `eval/corpus/playfun--HANDOFF.md`
+  - `eval/corpus-pre-resnapshot/`
+    - `eval/corpus-pre-resnapshot/china-zhouyi-app--HANDOFF.md`
+    - `eval/corpus-pre-resnapshot/easymem--HANDOFF.md`
+    - `eval/corpus-pre-resnapshot/membox--HANDOFF.md`
+    - `eval/corpus-pre-resnapshot/playfun--HANDOFF.md`
+  - `eval/lifecycle/`
+    - `eval/lifecycle/history/`
+      - `eval/lifecycle/history/c1_explicit_rules.jsonl`
+      - `eval/lifecycle/history/c2_ephemeral_chatter.jsonl`
+      - `eval/lifecycle/history/c3_decision.jsonl`
+      - `eval/lifecycle/history/c3_plan.jsonl`
+      - `eval/lifecycle/history/c4_fact_new.jsonl`
+      - `eval/lifecycle/history/c4_fact_old.jsonl`
+      - `eval/lifecycle/history/c5_repeated_failure.jsonl`
+      - `eval/lifecycle/history/c6_conflict_a.jsonl`
+      - `eval/lifecycle/history/c6_conflict_b.jsonl`
+      - `eval/lifecycle/history/c7_correction_new.jsonl`
+      - `eval/lifecycle/history/c7_correction_old.jsonl`
+    - `eval/lifecycle/expectations.yaml`
+    - `eval/lifecycle/README.md`
   - `eval/gold.yaml`
   - `eval/README.md`
 - `examples/`
@@ -85,6 +107,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace import and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
+        - `src/membox/cli/commands/memory.py` — `membox memory` commands for lifecycle Phase C units.
         - `src/membox/cli/commands/query.py` — `membox query` command.
         - `src/membox/cli/commands/queue.py` — `membox process` and `membox queue` commands (M6 async ingestion).
         - `src/membox/cli/commands/version.py` — `membox version` command.
@@ -98,6 +121,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/documents.py` — Document persistence for evidence lineage.
         - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
         - `src/membox/core/store/history.py` — History trace storage operations (lifecycle Phase B).
+        - `src/membox/core/store/memory_units.py` — Memory-unit storage operations for lifecycle Phase C.
         - `src/membox/core/store/meta_guard.py` — Embedding-model guard for the membox meta table.
         - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
         - `src/membox/core/store/queue.py` — Asynchronous ingestion queue operations (spec §3.9, M6).
@@ -150,7 +174,10 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_history_importers.py` — Tests for the Phase B history importer utilities and format parsers.
   - `tests/test_history_store.py` — Tests for the Phase B History Trace Index — KnowledgeStore-level operations.
   - `tests/test_ingestion.py` — Phase 7.5 M2 ingestion-hardening tests.
+  - `tests/test_lifecycle_acceptance.py` — C5 acceptance harness for the Phase C heuristic triage gate.
+  - `tests/test_lifecycle_eval_fixtures.py` — Tests for committed Phase C lifecycle eval fixtures.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
+  - `tests/test_memory_units.py` — Lifecycle Phase C memory-unit storage tests.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_queue.py` — Phase 7.5 M6 asynchronous-ingestion-queue tests.
   - `tests/test_release_scripts.py` — Tests for release automation helper scripts.

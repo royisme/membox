@@ -47,9 +47,37 @@ _SEED_DEPTH = 0
 _CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 _CJK_TRIGRAM_LIMIT = 64
 _CJK_ANCHOR_LIMIT = 96
-_CJK_EXCERPT_BEFORE_CHARS = 260
-_CJK_EXCERPT_AFTER_CHARS = 520
+_CJK_EXCERPT_BEFORE_CHARS = 80
+_CJK_EXCERPT_AFTER_CHARS = 260
 _CJK_EXCERPT_WINDOWS = 2
+_LEXICAL_EXCERPT_THRESHOLD_TOKENS = 700
+_LEXICAL_EXCERPT_BEFORE_CHARS = 320
+_LEXICAL_EXCERPT_AFTER_CHARS = 680
+_LEXICAL_EXCERPT_WINDOWS = 2
+_LEXICAL_STOPWORDS = {
+    "about",
+    "after",
+    "are",
+    "and",
+    "core",
+    "does",
+    "for",
+    "have",
+    "into",
+    "its",
+    "main",
+    "part",
+    "projects",
+    "project",
+    "their",
+    "the",
+    "use",
+    "uses",
+    "using",
+    "what",
+    "which",
+    "with",
+}
 
 
 class RetrievalOps:
@@ -560,8 +588,9 @@ class RetrievalOps:
         params: list[object] = [match_expr]
         if project_filter is not None:
             params.append(project_filter)
-        # Over-fetch so version deduplication can still fill `limit` rows.
-        params.append(limit * 4)
+        # Over-fetch so version deduplication and source diversification can
+        # still fill `limit` rows when one long source dominates BM25.
+        params.append(limit * 16)
 
         try:
             rows = conn.execute(
@@ -578,7 +607,16 @@ class RetrievalOps:
         except Exception:
             return []
 
-        return _dedup_chunk_rows(rows, limit=limit, query=None)
+        anchors = _lexical_anchor_terms(query)
+        if anchors:
+            rows = [
+                row
+                for _idx, row in sorted(
+                    enumerate(rows),
+                    key=lambda item: (-_lexical_row_score(item[1], anchors), item[0]),
+                )
+            ]
+        return _dedup_chunk_rows(rows, limit=limit, query=query)
 
     def _cjk_fts_chunks(
         self,
@@ -634,7 +672,7 @@ class RetrievalOps:
         reranked = sorted(
             rows,
             key=lambda row: (
-                -_cjk_content_score(str(row[1]), anchors),
+                -_cjk_row_score(row, anchors),
                 float(row[7]),
             ),
         )
@@ -669,7 +707,7 @@ class RetrievalOps:
             params,
         ).fetchall()
         focus_query = _cjk_focus_query(query)
-        reranked = sorted(rows, key=lambda row: -_cjk_content_score(str(row[1]), terms))
+        reranked = sorted(rows, key=lambda row: -_cjk_row_score(row, terms))
         return _dedup_chunk_rows(reranked, limit=limit, query=focus_query)
 
     def fts_fallback_output(
@@ -1005,11 +1043,18 @@ def _dedup_chunk_rows(
         elif ver > chosen[key][1]:
             chosen[key] = (chosen[key][0], ver, tuple(row[:7]))
 
+    ranked_rows = [row for _, _, row in sorted(chosen.values(), key=lambda item: item[0])]
+    diversified_rows = _round_robin_by_source(ranked_rows, limit=limit)
+
     result: list[tuple[int, str, str | None, str | None, str | None, str | None]] = []
-    for _, _, row in sorted(chosen.values(), key=lambda item: item[0]):
+    for row in diversified_rows:
         content = str(row[1])
         if query is not None:
-            content = _cjk_excerpt(query, content)
+            content = (
+                _cjk_excerpt(query, content)
+                if _contains_cjk(query)
+                else _lexical_excerpt(query, content)
+            )
         result.append(
             (
                 int(row[0]),  # type: ignore[call-overload]
@@ -1020,7 +1065,113 @@ def _dedup_chunk_rows(
                 row[5] if row[5] is None else str(row[5]),
             )
         )
-    return result[:limit]
+    return result
+
+
+def _lexical_excerpt(query: str, content: str) -> str:
+    """Return a compact excerpt around lexical query anchors for long chunks."""
+    if est_tokens(content) <= _LEXICAL_EXCERPT_THRESHOLD_TOKENS:
+        return content
+
+    anchors = _lexical_anchor_terms(query)
+    if not anchors:
+        return content
+
+    lowered = content.lower()
+    windows: list[tuple[int, int, set[str], int]] = []
+    for anchor in anchors:
+        pos = lowered.find(anchor)
+        while pos != -1:
+            start = max(0, pos - _LEXICAL_EXCERPT_BEFORE_CHARS)
+            end = min(len(content), pos + len(anchor) + _LEXICAL_EXCERPT_AFTER_CHARS)
+            covered = {term for term in anchors if term in lowered[start:end]}
+            windows.append((start, end, covered, len(covered)))
+            pos = lowered.find(anchor, pos + len(anchor))
+
+    if not windows:
+        return content
+
+    windows.sort(key=lambda item: (-item[3], item[0]))
+    selected: list[tuple[int, int, set[str], int]] = []
+    covered_terms: set[str] = set()
+    for window in windows:
+        new_terms = window[2] - covered_terms
+        if not selected or new_terms:
+            selected.append(window)
+            covered_terms.update(window[2])
+        if len(selected) >= _LEXICAL_EXCERPT_WINDOWS:
+            break
+
+    spans = _merge_spans((start, end) for start, end, _covered, _score in selected)
+    excerpts = [content[start:end].strip() for start, end in spans]
+    if not excerpts:
+        return content
+    return "[excerpt]\n" + "\n...\n".join(excerpts)
+
+
+def _lexical_anchor_terms(query: str, limit: int = 24) -> list[str]:
+    """Return lowercase lexical terms useful for excerpt windows."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in re.findall(r"[A-Za-z0-9_#.+/-]+", query.lower()):
+        term = raw.strip("._/-")
+        if len(term) < 3 or term in _LEXICAL_STOPWORDS or term in seen:
+            continue
+        terms.append(term)
+        seen.add(term)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
+def _lexical_row_score(row: tuple[object, ...], terms: list[str]) -> int:
+    """Score a non-CJK FTS row by distinct lexical anchor coverage."""
+    content = str(row[1]).lower()
+    return sum(len(term) for term in terms if term in content)
+
+
+def _merge_spans(spans: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge overlapping excerpt spans."""
+    ordered = sorted(spans)
+    if not ordered:
+        return []
+    merged = [ordered[0]]
+    for start, end in ordered[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _round_robin_by_source(rows: list[tuple[object, ...]], limit: int) -> list[tuple[object, ...]]:
+    """Preserve ranking while preventing one source from monopolising chunks."""
+    if limit <= 0 or len(rows) <= limit:
+        return rows[:limit]
+
+    buckets: OrderedDict[object, list[tuple[object, ...]]] = OrderedDict()
+    for row in rows:
+        source_key: object = row[3] if row[3] is not None else (row[2], row[0])
+        buckets.setdefault(source_key, []).append(row)
+
+    if len(buckets) <= 1:
+        return rows[:limit]
+
+    result: list[tuple[object, ...]] = []
+    while len(result) < limit and buckets:
+        empty_keys: list[object] = []
+        for key, bucket in buckets.items():
+            if not bucket:
+                empty_keys.append(key)
+                continue
+            result.append(bucket.pop(0))
+            if len(result) >= limit:
+                break
+        for key in empty_keys:
+            buckets.pop(key, None)
+
+    return result
 
 
 def _contains_cjk(text: str) -> bool:
@@ -1101,6 +1252,15 @@ def _cjk_content_score(content: str, terms: list[str]) -> int:
     )
 
 
+def _cjk_row_score(row: tuple[object, ...], terms: list[str]) -> int:
+    """Score a CJK row, lightly preferring current-state handoff sections."""
+    score = _cjk_content_score(str(row[1]), terms)
+    section = "" if row[4] is None else str(row[4]).lower()
+    if score > 0 and ("current state" in section or "当前" in section):
+        score += 3
+    return score
+
+
 def _cjk_excerpt(query: str, content: str) -> str:
     """Return a compact CJK query-centered excerpt for an FTS chunk."""
     text = content.strip()
@@ -1109,6 +1269,14 @@ def _cjk_excerpt(query: str, content: str) -> str:
         return text
 
     candidates: list[tuple[int, int, int, int]] = []
+    lower_text = text.lower()
+    if "当前阶段" in query and (phase_pos := lower_text.find("current phase")) >= 0:
+        start = max(0, phase_pos - _CJK_EXCERPT_BEFORE_CHARS)
+        end = min(len(text), phase_pos + _CJK_EXCERPT_AFTER_CHARS)
+        start, end = _expand_cjk_span(text, start, end)
+        score = _cjk_content_score(text[start:end], anchors) + 12
+        candidates.append((score, start, end, phase_pos))
+
     for term in anchors:
         start_at = 0
         while True:
@@ -1117,6 +1285,7 @@ def _cjk_excerpt(query: str, content: str) -> str:
                 break
             start = max(0, pos - _CJK_EXCERPT_BEFORE_CHARS)
             end = min(len(text), pos + _CJK_EXCERPT_AFTER_CHARS)
+            start, end = _expand_cjk_span(text, start, end)
             window = text[start:end]
             score = _cjk_content_score(window, anchors)
             candidates.append((score, start, end, pos))
@@ -1163,6 +1332,22 @@ def _cjk_excerpt(query: str, content: str) -> str:
 
     excerpt = "\n\n[excerpt]\n" + "\n\n...\n\n".join(parts)
     return excerpt if est_tokens(excerpt) < est_tokens(text) else text
+
+
+def _expand_cjk_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Expand a CJK excerpt window to nearby sentence or line boundaries."""
+    left_candidates = [text.rfind(mark, 0, start) for mark in ("\n", "。", "\uff1b", ";")]
+    left = max(left_candidates)
+    if left >= 0:
+        start = left + 1
+
+    right_candidates = [
+        pos for mark in ("。", "\uff1b", ";", "\n") if (pos := text.find(mark, end)) >= 0
+    ]
+    if right_candidates:
+        end = min(right_candidates) + 1
+
+    return start, end
 
 
 def _best_doc_date(

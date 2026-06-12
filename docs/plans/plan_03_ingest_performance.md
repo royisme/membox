@@ -20,6 +20,8 @@ Consistency note: the cache sits on the embed step itself, so disambiguation (`f
 
 Tests: cache hit avoids client call (count calls on the fake embedder), cap eviction, model-key separation.
 
+Review refinement: the first implementation should cache inside the concrete `EmbeddingService` used by provider-backed embedders, not require every test fake to implement a new cache interface. Use a small ordered-dict/LRU-style cap. The cache key should include the concrete service's `model` string when present and fall back to an empty model key for legacy wrappers.
+
 ### P2 — Batched embed calls (medium risk: touches the ingest loop shape)
 
 Restructure `ingest_extracted` to collect embed-needing texts per chunk and issue them in one (or few) `OpenAIEmbedClient.embed(list)` calls:
@@ -31,6 +33,10 @@ Restructure `ingest_extracted` to collect embed-needing texts per chunk and issu
 This keeps `find_or_create_entity`'s signature and the disambiguation cascade untouched — the storage layer still calls `embedder.embed(name)`, it just resolves from cache. Add `embed_batch_size` to `EmbeddingConfig` (provider limits: Gemini and OpenAI accept large batches; Ollama handles lists too) and chunk the batch accordingly.
 
 Caveat to verify in implementation: `OpenAIEmbedClient.embed` sends a scalar for len-1 lists — confirm response parsing handles both shapes for every supported provider (gemini, ollama). Eval gate: `--offline` run produces identical results pre/post (the SemanticDummyEmbedder is deterministic, so vectors must be byte-identical).
+
+Review refinement: add the batch method to concrete provider-backed services, but keep the public single-text `Embedder.embed(text)` path as the stable domain contract. The ingest loop can detect batch-capable embedders and prewarm their cache; fakes and non-batch embedders fall back to repeated `embed(text)` calls, preserving compatibility.
+
+Important semantic guard: prewarming must happen before storage writes, but relation triple text must be rendered exactly as today (`canonical source`, normalized predicate, `canonical target`) before final `upsert_relation`. If a relation endpoint aliases into an existing canonical entity, the final relation embedding must use the canonical names returned by the store, not only the raw extracted names collected in pass 1.
 
 ### P3 — Chunk-level concurrency (highest risk; do last, separately)
 

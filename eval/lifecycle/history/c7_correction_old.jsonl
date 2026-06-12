@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c7-correction-old","project":"membox-lifecycle","title":"old incorrect memory","started_at":"2026-06-11T10:00:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"记住：eval/corpus contains the lifecycle fixtures and should be committed.","created_at":"2026-06-11T10:00:10Z"}

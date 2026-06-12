@@ -1,5 +1,8 @@
 # Membox Phase 7.5 M1 — Gold-standard QA pairs
-# Snapshot date: 2026-06-09
+# Snapshot date: 2026-06-11 re-snapshot for q23-q26 temporal sources
+# Eval budget: run with --budget 4000 against this corpus (corpus is ~3x the
+# 2026-06-09 snapshot; budget 2000 truncates multi-hop output and is not
+# comparable — baseline 26/26 Gemini @ budget 4000, see docs/HANDOFF.md)
 # Schema: id, category, question, expected_keywords, source, notes
 #
 # Categories:
@@ -12,24 +15,24 @@
 
 - id: q01
   category: single_hop
-  question: "What storage backend does membox use and what WAL-mode pragma does it enable?"
-  expected_keywords: ["sqlite", "wal", "foreign_keys"]
+  question: "What database scope model is locked for membox, and how are projects scoped?"
+  expected_keywords: ["Single global DB", "documents.project"]
   source: ["membox--HANDOFF.md"]
-  notes: "Locked architectural decision section"
+  notes: "Re-snapshotted membox handoff: locked single global DB with project column scoping"
 
 - id: q02
   category: single_hop
-  question: "How many tests were passing on the feature/phase-7-openai branch, and what was the coverage percentage?"
-  expected_keywords: ["165", "97.82"]
+  question: "What migration head and approximate test count does the current membox handoff report?"
+  expected_keywords: ["492 tests", "coverage"]
   source: ["membox--HANDOFF.md"]
-  notes: "Session 2 stats table: 165 tests, 97.82% coverage"
+  notes: "Re-snapshotted current state reports migration head 7 and 492 tests"
 
 - id: q03
   category: single_hop
-  question: "What is the three-layer cascade used in find_or_create_entity?"
-  expected_keywords: ["alias", "cosine", "0.85"]
+  question: "What Gemini models are listed as the online eval alternative in the current membox handoff?"
+  expected_keywords: ["gemini-3.1-flash-lite", "gemini-embedding-001"]
   source: ["membox--HANDOFF.md"]
-  notes: "Locked decisions: alias → cosine embedding ≥ 0.85 → create"
+  notes: "Provider defaults section in the re-snapshotted handoff"
 
 - id: q04
   category: single_hop
@@ -68,10 +71,10 @@
 
 - id: q09
   category: single_hop
-  question: "What are the three STT coherent profiles available in the pika settings overlay?"
-  expected_keywords: ["sentence_bias", "low_latency", "coherent"]
+  question: "What STT profile option was approved for pika, and what remains the default profile?"
+  expected_keywords: ["coherent", "sentence_bias"]
   source: ["pika--HANDOFF_STT_COHERENT_PROFILE.md"]
-  notes: "SettingsOverlay Radio/Select control: three profile options"
+  notes: "Re-snapshotted handoff decision: Option A adds coherent while sentence_bias remains default"
 
 - id: q10
   category: single_hop
@@ -124,10 +127,10 @@
 
 - id: q17
   category: multi_hop
-  question: "Which projects in the corpus are primarily implemented in TypeScript?"
-  expected_keywords: ["moziBot", "playfun"]
+  question: "Which projects mention pnpm, tsc, or .ts/.tsx workflow evidence?"
+  expected_keywords: ["moziBot", "pika", "pnpm", "tsc"]
   source: ["moziBot--HANDOFF.md", "playfun--HANDOFF.md", "pika--HANDOFF_ANSWER_TRANSCRIPT_DISPLAY.md"]
-  notes: "moziBot runtime is TS, playfun is pnpm/TS workspace, pika is Electron/React/TS"
+  notes: "Re-snapshotted corpus states this as workflow/tooling evidence, not a complete language inventory"
 
 - id: q18
   category: multi_hop
@@ -138,10 +141,10 @@
 
 - id: q19
   category: multi_hop
-  question: "Which projects are written in Python and what are their main storage or runtime technologies?"
+  question: "Which projects mention SQLite storage and lightweight Python test suites?"
   expected_keywords: ["membox", "m5go", "sqlite"]
   source: ["membox--HANDOFF.md", "m5go--handoff-2026-03-16.md"]
-  notes: "membox=Python+SQLite; m5go=Python server; multi-hop across two docs"
+  notes: "Re-snapshotted wording uses explicit source terms: membox SQLite storage, m5go Python validation/runtime evidence"
 
 - id: q20
   category: multi_hop
@@ -166,10 +169,10 @@
 
 - id: q23
   category: temporal
-  question: "What is the current membox state — are any feature branches merged to main yet?"
-  expected_keywords: ["unmerged", "feature"]
+  question: "What is the current membox next implementation track and migration number?"
+  expected_keywords: ["Phase C", "migration 8"]
   source: ["membox--HANDOFF.md"]
-  notes: "Temporal: main has zero implementation; all 7 branches exist but unmerged — answer must reflect latest HANDOFF"
+  notes: "Temporal: latest handoff says Phase B/M4/M5 are merged and Phase C migration 8 is next"
 
 - id: q24
   category: temporal
@@ -180,10 +183,10 @@
 
 - id: q25
   category: temporal
-  question: "玲珑命理项目目前哪个 PR 仍在等待合并，内容主题是什么？"
-  expected_keywords: ["PR #34", "苏轼"]
+  question: "玲珑命理项目当前阶段是什么？"
+  expected_keywords: ["内容获客", "SEO"]
   source: ["china-zhouyi-app--HANDOFF.md"]
-  notes: "Temporal: PR #34 苏轼案例 待 merge/部署 — must come from current state section of latest handoff"
+  notes: "Temporal: PR #34/35 are merged; latest current phase is content acquisition and SEO/design foundation"
 
 - id: q26
   category: temporal

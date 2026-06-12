@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ from membox.core.store.migrations import (
     get_user_version,
     latest_version,
 )
-from membox.model.schema import IngestMetadata
+from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation, IngestMetadata
 from membox.services.extraction import DummyExtractor
 
 runner = CliRunner()
@@ -41,13 +42,13 @@ class TestMigration0002:
 
     def test_latest_version_is_2(self) -> None:
         # Latest is now 6 (M4 supersession semantics adds superseded_by column).
-        assert latest_version() == 7
+        assert latest_version() == 8
 
     def test_fresh_db_reaches_version_2(self, tmp_path: Path) -> None:
         # Fresh DB is migrated through all versions; current latest is 6.
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
         version = get_user_version(store._conn())
-        assert version == 7
+        assert version == 8
 
     def test_fresh_db_has_all_new_columns(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
@@ -82,7 +83,7 @@ class TestMigration0002:
         # Open via KnowledgeStore — should trigger all current migrations.
         store = KnowledgeStore(db_path)
         conn2 = store._conn()
-        assert get_user_version(conn2) == 7
+        assert get_user_version(conn2) == 8
         cols_v2 = {row[1] for row in conn2.execute("PRAGMA table_info(documents);").fetchall()}
         assert {"project", "source_path", "section", "doc_date", "version"}.issubset(cols_v2)
 
@@ -399,9 +400,121 @@ class TestIngestFile:
         row = agent.store._conn().execute("SELECT project FROM documents;").fetchone()
         assert row[0] == "worktreerepo"
 
+    def test_ingest_content_can_extract_chunks_concurrently_but_write_in_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Concurrent extraction does not make SQLite materialization concurrent."""
+
+        class _BarrierExtractor(DummyExtractor):
+            """Waits for two chunks to prove extraction calls are concurrent."""
+
+            def __init__(self) -> None:
+                self.barrier = threading.Barrier(2)
+
+            def extract(self, text: str) -> ExtractedGraph:
+                self.barrier.wait(timeout=2)
+                name = text.split()[0]
+                return ExtractedGraph(
+                    entities=[ExtractedEntity(name=name, type="Section", description="")],
+                    relations=[],
+                )
+
+        agent = MemoryAgent(
+            extractor=_BarrierExtractor(),
+            db_path=str(tmp_path / "concurrent.db"),
+            ingest_concurrency=2,
+        )
+        results = agent.ingest_content(
+            "## Alpha\nAlpha body.\n\n## Beta\nBeta body.\n",
+            source_path="doc.md",
+        )
+
+        assert all("error" not in result for result in results)
+        rows = agent.store._conn().execute("SELECT section FROM documents ORDER BY id;").fetchall()
+        assert [row[0] for row in rows] == ["Alpha", "Beta"]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. CLI ingest-file flags
+# 5. Batched embed prewarm
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _FakeEmbeddingData:
+    """Stub for one element of the embeddings response ``data`` list."""
+
+    def __init__(self, embedding: list[float]) -> None:
+        self.embedding = embedding
+
+
+class _FakeEmbeddingResponse:
+    """Stub for an OpenAI-compatible embeddings response."""
+
+    def __init__(self, texts: list[str], dim: int) -> None:
+        self.data = [_FakeEmbeddingData([float(len(text))] * dim) for text in texts]
+
+
+class _FakeEmbeddingsAPI:
+    """Records embedding API calls made by provider-backed embedders."""
+
+    def __init__(self, dim: int) -> None:
+        self.dim = dim
+        self.calls: list[object] = []
+
+    def create(self, **kwargs: object) -> _FakeEmbeddingResponse:
+        payload = kwargs["input"]
+        self.calls.append(payload)
+        texts = payload if isinstance(payload, list) else [str(payload)]
+        return _FakeEmbeddingResponse(texts, self.dim)
+
+
+class _FakeOpenAIClient:
+    """Network-boundary fake for OpenAI embeddings."""
+
+    def __init__(self, dim: int) -> None:
+        self.embeddings = _FakeEmbeddingsAPI(dim)
+
+
+class TestIngestEmbeddingPrewarm:
+    """ingest_extracted prewarms embed cache before storage writes."""
+
+    def test_ingest_extracted_batches_entities_and_canonical_relation_texts(
+        self, tmp_path: Path
+    ) -> None:
+        from membox.services.embedding import OpenAIEmbedder
+
+        client = _FakeOpenAIClient(dim=4)
+        embedder = OpenAIEmbedder(
+            client=client,  # type: ignore[arg-type]
+            model="test-embedding",
+            dim=4,
+            cache_size=100,
+        )
+        agent = MemoryAgent(
+            extractor=DummyExtractor(),
+            embedder=embedder,
+            db_path=str(tmp_path / "batch.db"),
+        )
+        graph = ExtractedGraph(
+            entities=[
+                ExtractedEntity(name="Alice", type="Person", description=""),
+                ExtractedEntity(name="Acme", type="Org", description=""),
+            ],
+            relations=[
+                ExtractedRelation(source="Alice", predicate="developed", target="Acme"),
+                ExtractedRelation(source="Alice", predicate="developed", target="Acme"),
+            ],
+        )
+
+        agent.ingest_extracted("Alice developed Acme twice.", graph)
+
+        assert client.embeddings.calls == [
+            ["Alice", "Acme"],
+            "Alice develops Acme",
+        ]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. CLI ingest-file flags
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -466,7 +579,7 @@ class TestCLIIngestFileFlags:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. _infer_project helper unit tests
+# 7. _infer_project helper unit tests
 # ──────────────────────────────────────────────────────────────────────────────
 
 

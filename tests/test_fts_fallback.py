@@ -98,6 +98,49 @@ class TestFallbackChunks:
         chunks = store.fts_fallback_chunks("membox retrieval", limit=3)
         assert len(chunks) == 3
 
+    def test_results_keep_source_diversity(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        for i in range(6):
+            store.insert_document(
+                f"project language TypeScript runtime chunk {i}",
+                project="membox",
+                source_path="membox--HANDOFF.md",
+                section=f"Section {i}",
+            )
+        store.insert_document(
+            "project language TypeScript runtime playfun Kishima",
+            project="playfun",
+            source_path="playfun--HANDOFF.md",
+            section="Status",
+        )
+
+        chunks = store.fts_fallback_chunks("Which projects use TypeScript runtime?", limit=3)
+
+        source_paths = {chunk[3] for chunk in chunks}
+        assert "membox--HANDOFF.md" in source_paths
+        assert "playfun--HANDOFF.md" in source_paths
+
+    def test_long_non_cjk_chunks_are_excerpted_around_query_terms(self, tmp_path: Path) -> None:
+        store = KnowledgeStore(str(tmp_path / "s.db"))
+        filler = "background details unrelated to the answer. " * 120
+        store.insert_document(
+            f"{filler}\nOpen question: PR #1 review and merge remains pending.\n{filler}",
+            project="easymem",
+            source_path="easymem--HANDOFF.md",
+            section="Open questions",
+        )
+
+        chunks = store.fts_fallback_chunks(
+            "Which projects have an open question about merging a pull request?",
+            limit=1,
+        )
+
+        assert len(chunks) == 1
+        excerpt = chunks[0][1]
+        assert "[excerpt]" in excerpt
+        assert "review and merge remains pending" in excerpt
+        assert est_tokens(excerpt) < 700
+
     def test_version_dedup_keeps_latest(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "s.db"))
         store.insert_document(

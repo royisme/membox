@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c7-correction-new","project":"membox-lifecycle","title":"user correction","started_at":"2026-06-11T10:10:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"更正：eval/corpus is gitignored private handoff data. Lifecycle fixtures go in eval/lifecycle and are committed.","created_at":"2026-06-11T10:10:10Z"}

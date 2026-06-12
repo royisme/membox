@@ -29,8 +29,8 @@ class _FakeEmbeddingData:
 class _FakeEmbeddingResponse:
     """Stub for the OpenAI embeddings API response."""
 
-    def __init__(self, embedding: list[float]) -> None:
-        self.data = [_FakeEmbeddingData(embedding)]
+    def __init__(self, embeddings: list[list[float]]) -> None:
+        self.data = [_FakeEmbeddingData(embedding) for embedding in embeddings]
 
 
 class _FakeEmbeddingsAPI:
@@ -42,7 +42,10 @@ class _FakeEmbeddingsAPI:
 
     def create(self, **kwargs: Any) -> _FakeEmbeddingResponse:
         self.calls.append(kwargs)
-        return _FakeEmbeddingResponse([0.1] * self.dim)
+        payload = kwargs["input"]
+        texts = payload if isinstance(payload, list) else [payload]
+        embeddings = [[float(len(str(text)))] * self.dim for text in texts]
+        return _FakeEmbeddingResponse(embeddings)
 
 
 class _FakeOpenAIClient:
@@ -82,7 +85,7 @@ class TestCreateDefaultExtractor:
 
 
 class TestOpenAIEmbedderDimensions:
-    """OpenAIEmbedder must forward its dim to the embeddings API."""
+    """OpenAIEmbedder dimensions, cache, and batching behavior."""
 
     def test_embed_passes_dimensions_to_api(self) -> None:
         client = _FakeOpenAIClient(dim=256)
@@ -98,6 +101,42 @@ class TestOpenAIEmbedderDimensions:
         embedder = OpenAIEmbedder(client=client)  # type: ignore[arg-type]
         embedder.embed("hi")
         assert client.embeddings.calls[0]["dimensions"] == 1536
+
+    def test_embed_cache_avoids_duplicate_api_calls(self) -> None:
+        client = _FakeOpenAIClient(dim=4)
+        embedder = OpenAIEmbedder(client=client, dim=4, cache_size=10)  # type: ignore[arg-type]
+
+        assert embedder.embed("repeat") == [6.0] * 4
+        assert embedder.embed("repeat") == [6.0] * 4
+
+        assert len(client.embeddings.calls) == 1
+
+    def test_embed_cache_evicts_oldest_entry_at_cap(self) -> None:
+        client = _FakeOpenAIClient(dim=4)
+        embedder = OpenAIEmbedder(client=client, dim=4, cache_size=1)  # type: ignore[arg-type]
+
+        embedder.embed("a")
+        embedder.embed("b")
+        embedder.embed("a")
+
+        assert [call["input"] for call in client.embeddings.calls] == ["a", "b", "a"]
+
+    def test_embed_many_batches_unique_cache_misses(self) -> None:
+        client = _FakeOpenAIClient(dim=4)
+        embedder = OpenAIEmbedder(
+            client=client,  # type: ignore[arg-type]
+            dim=4,
+            cache_size=10,
+            batch_size=2,
+        )
+
+        vectors = embedder.embed_many(["alpha", "beta", "alpha", "gamma"])
+
+        assert vectors == [[5.0] * 4, [4.0] * 4, [5.0] * 4, [5.0] * 4]
+        assert [call["input"] for call in client.embeddings.calls] == [
+            ["alpha", "beta"],
+            "gamma",
+        ]
 
 
 class TestCliIngest:
@@ -201,6 +240,102 @@ class TestCliIngest:
         result = runner.invoke(app, ["ingest-file", str(doc), "--db", str(db), "--sync"])
         assert result.exit_code == 0
         assert "no-op extractor" in result.stderr
+
+    def test_ingest_concurrency_flag_is_accepted_and_used(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--concurrency 2 is accepted and the agent is created with that value."""
+        import membox.cli.commands.ingest as _ingest_mod
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        captured: list[int | None] = []
+
+        from membox.cli._common import make_agent as orig_make_agent
+
+        def _spy_make_agent(
+            db_path: str,
+            no_llm: bool = False,
+            warn: bool = False,
+            concurrency: int | None = None,
+        ) -> object:
+            captured.append(concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+
+        monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
+        result = runner.invoke(
+            app, ["ingest", "hello world", "--db", str(db), "--concurrency", "2", "--sync"]
+        )
+        assert result.exit_code == 0
+        assert captured == [2], f"expected concurrency=2, got {captured}"
+
+    def test_ingest_omitting_concurrency_flag_falls_back_to_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Omitting --concurrency passes None to make_agent; env var is honoured."""
+        import membox.cli.commands.ingest as _ingest_mod
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MEMBOX_INGEST_CONCURRENCY", "3")
+        db = tmp_path / "memory.db"
+
+        from membox.cli._common import make_agent as orig_make_agent
+
+        captured: list[int | None] = []
+
+        def _spy_make_agent(
+            db_path: str,
+            no_llm: bool = False,
+            warn: bool = False,
+            concurrency: int | None = None,
+        ) -> object:
+            captured.append(concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+
+        monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
+        result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--sync"])
+        assert result.exit_code == 0
+        # The CLI does not set the flag, so make_agent receives concurrency=None;
+        # make_agent internally reads the env var via MemboxConfig.
+        assert captured == [None]
+        # Verify the sync path completed successfully (document row written).
+        conn = sqlite3.connect(db)
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        finally:
+            conn.close()
+        assert count == 1
+
+    def test_ingest_file_concurrency_flag_is_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--concurrency is accepted on ingest-file and forwarded to make_agent."""
+        import membox.cli.commands.ingest as _ingest_mod
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        doc = tmp_path / "doc.md"
+        doc.write_text("membox is a memory layer", encoding="utf-8")
+        captured: list[int | None] = []
+
+        from membox.cli._common import make_agent as orig_make_agent
+
+        def _spy_make_agent(
+            db_path: str,
+            no_llm: bool = False,
+            warn: bool = False,
+            concurrency: int | None = None,
+        ) -> object:
+            captured.append(concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+
+        monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
+        result = runner.invoke(
+            app,
+            ["ingest-file", str(doc), "--db", str(db), "--concurrency", "4", "--sync"],
+        )
+        assert result.exit_code == 0
+        assert captured == [4], f"expected concurrency=4, got {captured}"
 
 
 class TestCliQueryAndListing:

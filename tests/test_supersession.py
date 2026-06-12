@@ -63,7 +63,7 @@ class TestMigration0007:
     def test_fresh_db_at_version_7(self, tmp_path: Path) -> None:
         """A freshly opened store must be at user_version 7."""
         store = KnowledgeStore(str(tmp_path / "db.db"))
-        assert get_user_version(store._conn()) == 7
+        assert get_user_version(store._conn()) == 8
 
     def test_superseded_by_column_present(self, tmp_path: Path) -> None:
         """relations table must have a superseded_by column."""
@@ -97,7 +97,7 @@ class TestMigration0007:
 
         # Opening via KnowledgeStore triggers migration 7.
         store = KnowledgeStore(db_path)
-        assert get_user_version(store._conn()) == 7
+        assert get_user_version(store._conn()) == 8
         cols_v7 = {
             row[1] for row in store._conn().execute("PRAGMA table_info(relations);").fetchall()
         }

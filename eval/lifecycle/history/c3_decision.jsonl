@@ -1,0 +1,2 @@
+{"type":"session","id":"life-c3-decision","project":"membox-lifecycle","title":"plan became decision","started_at":"2026-06-11T09:20:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"Decision: we decided migration 8 owns history_triage, memory_units, memory_unit_sources, memory_unit_labels, status log, and memory_units FTS.","created_at":"2026-06-11T09:20:10Z"}

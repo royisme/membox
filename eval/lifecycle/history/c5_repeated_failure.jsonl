@@ -1,0 +1,4 @@
+{"type":"session","id":"life-c5-failure","project":"membox-lifecycle","title":"repeated failure becomes procedure","started_at":"2026-06-11T09:40:00Z","source_kind":"membox-capture"}
+{"type":"message","id":"m1","role":"user","text":"We hit the stale worktree migration-numbering failure again. Always verify latest_version() before adding a migration.","created_at":"2026-06-11T09:40:10Z"}
+{"type":"event","message_id":"m1","kind":"tool_result","call_id":"failed-migration-check","body":"Error: expected migration head 7 but worktree had head 6","is_error":true,"created_at":"2026-06-11T09:40:20Z"}
+{"type":"message","id":"m2","role":"assistant","text":"Fixed by rebasing to the current base and rerunning the migration-head check before editing migrations.py.","created_at":"2026-06-11T09:41:00Z"}

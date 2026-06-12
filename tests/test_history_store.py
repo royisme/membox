@@ -95,7 +95,7 @@ def _row_counts(db_path: Path) -> dict[str, int]:
 
 
 def test_migration_user_version(tmp_path: Path) -> None:
-    """Fresh KnowledgeStore gets user_version=6."""
+    """Fresh KnowledgeStore gets user_version=8."""
     db = tmp_path / "mem.db"
     _store = KnowledgeStore(str(db))
     conn = sqlite3.connect(str(db))

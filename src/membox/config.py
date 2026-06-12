@@ -105,6 +105,10 @@ class EmbeddingConfig(ProviderConfig):
 
     Attributes:
         dimensions: Embedding vector dimensionality requested from the API.
+        cache_size: Maximum number of process-local embedding vectors cached
+            per embedder instance. Set to 0 to disable caching.
+        batch_size: Maximum number of cache-miss texts sent in one provider
+            embedding request.
     """
 
     provider: str = Field(default_factory=lambda: _env("MEMBOX_EMBEDDING_PROVIDER", "openai"))
@@ -115,6 +119,10 @@ class EmbeddingConfig(ProviderConfig):
         default_factory=lambda: os.environ.get("MEMBOX_EMBEDDING_BASE_URL")
     )
     dimensions: int = Field(default_factory=lambda: int(_env("MEMBOX_EMBEDDING_DIM", "1536")))
+    cache_size: int = Field(
+        default_factory=lambda: int(_env("MEMBOX_EMBEDDING_CACHE_SIZE", "10000"))
+    )
+    batch_size: int = Field(default_factory=lambda: int(_env("MEMBOX_EMBEDDING_BATCH_SIZE", "128")))
 
 
 class RetrievalConfig(BaseModel):
@@ -180,6 +188,18 @@ class HistoryConfig(BaseModel):
     text_cap_bytes: int = 16384
 
 
+class IngestConfig(BaseModel):
+    """Settings for synchronous chunk materialization.
+
+    Attributes:
+        concurrency: Maximum number of chunk extraction calls to run
+            concurrently before serial SQLite materialization. Default 1 keeps
+            the original single-threaded behaviour.
+    """
+
+    concurrency: int = Field(default_factory=lambda: int(_env("MEMBOX_INGEST_CONCURRENCY", "1")))
+
+
 class MemboxConfig(BaseModel):
     """Top-level membox runtime configuration.
 
@@ -188,9 +208,11 @@ class MemboxConfig(BaseModel):
         embedding: Provider settings for text embedding.
         retrieval: Hybrid retrieval scoring and token-budget settings.
         history: History trace import/preview settings.
+        ingest: Synchronous ingestion pipeline settings.
     """
 
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
+    ingest: IngestConfig = Field(default_factory=IngestConfig)
