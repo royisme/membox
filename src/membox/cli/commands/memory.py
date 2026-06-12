@@ -9,6 +9,11 @@ import typer
 
 from membox.cli._common import console
 from membox.core.agent import _infer_project
+from membox.core.consolidate import (
+    ConsolidationPlan,
+    ConsolidationTransition,
+    build_consolidation_plan,
+)
 from membox.core.store import KnowledgeStore
 from membox.core.triage import GATE_VERSION, activation_passes, triage_trace
 from membox.model.schema import (
@@ -145,6 +150,53 @@ def memory_extract(
     console.print(f"[green]{'Would create' if dry_run else 'Created'}[/green] {created} units.")
 
 
+@memory_app.command("consolidate")
+def memory_consolidate(
+    project: str | None = typer.Option(None, "--project", help="Project scope"),
+    since: str | None = typer.Option(None, "--since", help="ISO-8601 updated_at lower bound"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview consolidation without writing"),
+    apply: bool = typer.Option(False, "--apply", help="Apply consolidation transitions"),
+    limit: int = typer.Option(500, "--limit", help="Maximum units to inspect"),
+    db: str = _DB_OPTION,
+) -> None:
+    """Promote crystals, surface conflicts, supersede stale units, and run decay."""
+    if dry_run == apply:
+        typer.echo("Error: pass exactly one of --dry-run or --apply", err=True)
+        raise typer.Exit(1)
+    effective_project = _default_project(project)
+    store = KnowledgeStore(db)
+    units = store.list_units_for_consolidation(
+        project=effective_project,
+        since=since,
+        limit=limit,
+    )
+    counts = {
+        unit.id: store.count_independent_sources(unit.id) for unit in units if unit.id is not None
+    }
+    plan = build_consolidation_plan(units, counts)
+    _print_consolidation_plan(plan, dry_run=dry_run)
+    if dry_run:
+        return
+    _take_lease(store, effective_project)
+    applied = 0
+    try:
+        for action in _ordered_transitions(plan):
+            ok = store.transition_memory_unit(
+                action.unit_id,
+                action.to_status,
+                command="memory consolidate",
+                reason=action.reason,
+                superseded_by=action.superseded_by,
+            )
+            applied += int(ok)
+    except Exception:
+        console.print(f"[red]Aborted[/red] after applying {applied} consolidation transitions.")
+        raise
+    finally:
+        store.release_lifecycle_lease(effective_project)
+    console.print(f"[green]Applied[/green] {applied} consolidation transitions.")
+
+
 @memory_app.command("list")
 def memory_list(
     project: str | None = typer.Option(None, "--project", help="Project scope"),
@@ -265,6 +317,54 @@ def _transition(
         typer.echo(f"Error: no such unit: {unit_id}", err=True)
         raise typer.Exit(1)
     console.print(f"[green]Updated[/green] {unit_id} -> {status.value}.")
+
+
+def _ordered_transitions(plan: ConsolidationPlan) -> list[ConsolidationTransition]:
+    """Return transitions in a deterministic apply order."""
+    return [
+        *plan.supersessions,
+        *plan.decay_archives,
+        *plan.promotions,
+        *plan.candidates,
+        *plan.demotions,
+    ]
+
+
+def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None:
+    """Render a consolidation plan as script-friendly lines."""
+    prefix = "would " if dry_run else ""
+    for issue in plan.validator_rejections:
+        typer.echo(f"validator reject {issue.unit_id} title={issue.title!r} reason={issue.reason}")
+    for conflict in plan.conflicts:
+        typer.echo(
+            f"conflict review {conflict.left_id}<->{conflict.right_id} "
+            f"left={conflict.left_title!r} right={conflict.right_title!r} "
+            f"reason={conflict.reason} sources={','.join(conflict.source_refs)}"
+        )
+    for issue in plan.decay_reviews:
+        typer.echo(f"decay review {issue.unit_id} title={issue.title!r} reason={issue.reason}")
+    for group_name, transitions in (
+        ("supersede", plan.supersessions),
+        ("archive", plan.decay_archives),
+        ("promote", plan.promotions),
+        ("candidate", plan.candidates),
+        ("demote", plan.demotions),
+    ):
+        for action in transitions:
+            target = (
+                f" superseded_by={action.superseded_by}" if action.superseded_by is not None else ""
+            )
+            typer.echo(
+                f"{prefix}{group_name} {action.unit_id} -> {action.to_status.value}"
+                f"{target} title={action.title!r} reason={action.reason}"
+            )
+    transition_count = len(_ordered_transitions(plan))
+    conflict_count = len(plan.conflicts)
+    issue_count = len(plan.validator_rejections) + len(plan.decay_reviews)
+    console.print(
+        f"[green]{'Would apply' if dry_run else 'Planned'}[/green] "
+        f"{transition_count} transitions, {conflict_count} conflicts, {issue_count} issues."
+    )
 
 
 def _unit_from_trace(

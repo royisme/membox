@@ -130,6 +130,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
+      - `src/membox/core/consolidate.py` — Pure consolidation policy for lifecycle Phase D memory units.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
@@ -165,6 +166,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
+  - `tests/test_consolidation.py` — Lifecycle Phase D memory-consolidation tests.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.
   - `tests/test_extraction_length_limits.py` — Tests for extraction-length-limit fixes (fix/extraction-length-limits).

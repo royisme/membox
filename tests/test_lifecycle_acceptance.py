@@ -252,6 +252,82 @@ def test_c5_gate_acceptance_precision_and_dup_rate(tmp_path: Path) -> None:
     )
 
 
+def test_phase_d_consolidation_acceptance_statuses(tmp_path: Path) -> None:
+    """Consolidation matches Phase D lifecycle fixture expectations."""
+    db = str(tmp_path / "phase_d.db")
+    store = KnowledgeStore(db)
+    imported: set[str] = set()
+    for entry in _load_expectations():
+        for fixture_name in entry["fixtures"]:
+            fixture = LIFECYCLE_DIR / str(fixture_name)
+            if str(fixture) not in imported:
+                import_history(store, fixture, "membox-history-jsonl", project=_PROJECT)
+                imported.add(str(fixture))
+
+    cli = CliRunner()
+    for command in (
+        ["memory", "triage", "--db", db, "--project", _PROJECT, "--apply"],
+        ["memory", "extract", "--db", db, "--project", _PROJECT, "--apply"],
+    ):
+        result = cli.invoke(app, command)
+        assert result.exit_code == 0, result.output
+    dry_run = cli.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", _PROJECT, "--dry-run"],
+    )
+    assert dry_run.exit_code == 0, dry_run.output
+    assert "conflict review" in dry_run.output
+    assert "life-c6-conflict-a" in dry_run.output
+    assert "life-c6-conflict-b" in dry_run.output
+    assert (
+        store._conn()
+        .execute("SELECT COUNT(*) FROM meta WHERE key=?;", (f"lifecycle_lease:{_PROJECT}",))
+        .fetchone()[0]
+        == 0
+    )
+
+    apply = cli.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", _PROJECT, "--apply"],
+    )
+    assert apply.exit_code == 0, apply.output
+
+    by_source = _memory_status_by_source(store)
+    assert by_source["membox-capture:life-c4-old:msg:m1"][0] == "superseded"
+    assert by_source["membox-capture:life-c4-new:msg:m1"][0] == "active_unit"
+    assert by_source["membox-capture:life-c5-failure:msg:m1"][0] == "crystal_candidate"
+    assert by_source["membox-capture:life-c6-conflict-a:msg:m1"][0] == "active_unit"
+    assert by_source["membox-capture:life-c6-conflict-b:msg:m1"][0] == "active_unit"
+    assert by_source["membox-capture:life-c7-correction-old:msg:m1"][0] == "superseded"
+    assert by_source["membox-capture:life-c7-correction-new:msg:m1"][0] == "active_unit"
+
+    old_fact = by_source["membox-capture:life-c4-old:msg:m1"]
+    new_fact = by_source["membox-capture:life-c4-new:msg:m1"]
+    old_correction = by_source["membox-capture:life-c7-correction-old:msg:m1"]
+    new_correction = by_source["membox-capture:life-c7-correction-new:msg:m1"]
+    assert old_fact[1] == new_fact[2]
+    assert old_correction[1] == new_correction[2]
+
+
+def _memory_status_by_source(store: KnowledgeStore) -> dict[str, tuple[str, int | None, int]]:
+    """Return memory unit status metadata keyed by source_ref."""
+    rows = (
+        store._conn()
+        .execute(
+            """
+            SELECT mus.source_ref, mu.status, mu.superseded_by, mu.id
+            FROM memory_unit_sources mus
+            JOIN memory_units mu ON mu.id=mus.unit_id
+            """
+        )
+        .fetchall()
+    )
+    return {
+        str(row[0]): (str(row[1]), None if row[2] is None else int(row[2]), int(row[3]))
+        for row in rows
+    }
+
+
 # ---------------------------------------------------------------------------
 # Per-entry regression tests for the heuristic-v1 disagreements fixed in v2
 # ---------------------------------------------------------------------------
