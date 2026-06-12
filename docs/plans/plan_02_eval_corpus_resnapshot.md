@@ -1,7 +1,7 @@
 # Plan 02 — Re-snapshot Eval Corpus + Update Temporal Gold Answers
 
-> **Status**: Ready for execution · **Context**: HANDOFF "Next concrete steps" #2; queued since M4 ("Re-snapshotting is an M4-era task paired with updating temporal gold answers"). M4 supersession is now live (migration 7).
-> **Baseline at risk**: 24/26 (92.3%) — gemini-3.1-flash-lite + gemini-embedding-001, `chunk_share=0.4`, `fts_fallback_k=10`, CJK sidecar. Changing the eval model invalidates baseline comparability (owner decision 2026-06-12).
+> **Status**: ✅ Completed 2026-06-11 — re-snapshot done, gold updated, full Gemini run **26/26 (100%) @ `--budget 4000`**, temporal 4/4, multi-hop 7/7; baseline recorded in `docs/HANDOFF.md`. **Resolution note**: the re-snapshot tripled corpus volume (~309 → ~912 lines), so the old default `--budget 2000` truncates multi-hop output on the new corpus (Gemini 18/26, multi-hop 2/7 — a benchmark-scale artifact, not a retrieval regression; confirmed by offline budget sweep 2000→21/26 vs 4000→24/26). Owner decision: post-resnapshot eval runs use `--budget 4000`; gates unchanged (overall ≥80%, temporal 4/4, multi-hop ≥6/7); no retrieval-algorithm change pursued.
+> **Baseline at risk**: 24/26 (92.3%) — gemini-3.1-flash-lite + gemini-embedding-001, `chunk_share=0.4`, `fts_fallback_k=10`, CJK sidecar. Changing the eval model invalidates baseline comparability (owner decision 2026-06-12). [Superseded: 24/26 is now the historical pre-resnapshot baseline @ budget 2000.]
 
 ## Why now
 
@@ -16,11 +16,15 @@ The 4 temporal gold questions (q23–q26) ask "current status" questions whose a
 
 ## Steps
 
+Execution dependency: land plan_03 P1+P2 before the final paid Gemini rerun unless a cheap smoke check is enough. Re-snapshot and gold editing can happen earlier, but the expensive full-run sign-off should use the batched/cached ingest path.
+
 ### Step 1 — Re-snapshot (requires user's machine; cannot be fully delegated to an isolated worktree agent)
 
 For each of the 4 source projects whose handoff docs back temporal questions (membox, playfun, china-zhouyi-app, easymem): copy the current handoff doc over the old corpus file, **keeping the existing filename** (so `gold.yaml` `source` fields and `test_source_files_exist` stay valid). The other 5 files may be refreshed opportunistically but are not required. Source paths to check: sibling dirs under `~/software/myproject/` (e.g. `python/easymem`, the playfun/pika/moziBot/m5go/china-zhouyi-app project roots — locate each project's HANDOFF.md before copying; if a project no longer has one, keep the old snapshot and note it).
 
 Keep a copy of the OLD 4 files (e.g. `eval/corpus-pre-resnapshot/`, gitignored) — needed for the supersession test in Step 3.
+
+Review refinement: source discovery is read-only until every target file is located. Use `find ~/software/myproject -name HANDOFF.md -o -name EVENTS.md` or narrower `rg --files ~/software/myproject | rg '/(HANDOFF|EVENTS).*\\.md$'`, then copy only the four confirmed source documents. If a source file is missing or ambiguous, leave the old snapshot untouched and record the exact path gap instead of synthesizing corpus content.
 
 ### Step 2 — Update temporal gold answers
 
@@ -36,6 +40,8 @@ On a throwaway DB: ingest the OLD membox handoff snapshot, then re-ingest the NE
 
 This can be an offline scripted check (DummyExtractor won't produce matching triples — use the Gemini provider for this one ingest pair, or assert at the storage layer with a crafted fixture if API cost is a concern; prefer the real-pipeline check since this is the first real-world supersession exercise).
 
+Review refinement: run the storage-layer crafted fixture first so supersession semantics are proven without network/API cost. The real-pipeline Gemini pair is the acceptance check for the actual corpus; if it fails, the failure is either extraction quality or corpus/gold drift, not basic M4 storage behavior.
+
 ### Step 4 — Full eval rerun + baseline record
 
 `uv run python scripts/eval_memory.py --provider gemini --check-gates` on a fresh DB with the re-snapshotted corpus. Gates: overall ≥ 80%, temporal 4/4, multi-hop ≥ 6/7 (do not regress below the shipped 24/26 hit set except where a gold answer legitimately changed). Record the new baseline numbers in `docs/HANDOFF.md` (Notes section reference points) and note the snapshot date in `eval/gold.yaml`'s header comment. The old 24/26 number stays in HANDOFF history as the pre-resnapshot baseline.
@@ -48,6 +54,7 @@ Cost note: one full run ingests ~58+ chunks (~35 min serial on Gemini — see pl
 - Supersession behavior verified per Step 3 (new answer wins by default, old evidence retained, `--include-superseded` exposes history).
 - Full Gemini eval ≥ 80% with temporal 4/4; new baseline recorded in HANDOFF.
 - No gold entry references a corpus file that doesn't exist; category minimums hold.
+- The full-run report states the provider/model pair and snapshot date. Do not compare a run using a different eval model against the 24/26 baseline as if it were the same benchmark.
 
 ## Constraints
 

@@ -11,13 +11,13 @@ Create typed memory-unit candidates from history trace with strict provenance: h
 
 **The lifecycle eval fixture corpus is the FIRST deliverable** (owner decision, spec_02). The heuristic gate's keyword table and thresholds cannot be tuned blind; C2+ acceptance is measured against the fixtures. Do not start migration or gate code before C1 is merged.
 
-## Current state (do not redo)
+## Current state (verify before execution)
 
-- Migration head is **7** (`core/store/migrations.py` — verify `MIGRATIONS` list at implementation time; Phase C adds entry 8). Pattern: `_DDL_NNNN` string constant for pure DDL, `_migrate_NNNN(conn)` callable when Python logic is needed; each migration runs in its own `BEGIN IMMEDIATE` + `user_version` bump.
+- Migration head is **7** (`core/store/migrations.py` — verify `latest_version() == 7` in the target worktree before editing; Phase C adds entry 8 only on that base). If the worktree head is not 7, stop and rebase/re-plan instead of auto-renumbering. Pattern: `_DDL_NNNN` string constant for pure DDL, `_migrate_NNNN(conn)` callable when Python logic is needed; each migration runs in its own `BEGIN IMMEDIATE` + `user_version` bump.
 - `core/triage.py` exists from Phase B but contains **only** the secret-redaction scrubber (`redact_secrets`, `REDACTION_MARKER`). The gate, keyword tables, and all lifecycle constants are added here.
 - History trace tables (`history_sessions/messages/events` + 4 FTS sidecars) and the `membox history` CLI group are live (migration 6).
 - `worker_lease` pattern lives in `core/worker.py` / the `meta` table — `lifecycle_lease:<project>` reuses this mechanism, NOT the in-process RLock.
-- 492 tests, ~93% coverage, ruff/mypy/pre-commit green on main.
+- Do not trust the historical test count or coverage number in this plan. Re-run the milestone gates in the actual worktree and report the current numbers.
 
 ## Milestones
 
@@ -39,6 +39,8 @@ Each fixture entry must declare expected outcomes for: triage decision, extracte
 
 Deliverable includes a loader/assertion harness in `tests/` (offline, deterministic) that later milestones run against. Gate: pytest + ruff + mypy green.
 
+Review refinement: keep the fixture schema intentionally boring YAML/JSON, not a bespoke mini-language. The harness should prove trace import, triage expectations, expected unit metadata, and expected future Phase D outcomes without requiring migration 8 yet. After adding the new committed fixture files, run `uv run python scripts/update_repository_map.py`.
+
 ### C2 — Migration 8 + storage ops
 
 Tables per spec_02 Proposed Data Model (DDL is normative there):
@@ -50,6 +52,8 @@ Tables per spec_02 Proposed Data Model (DDL is normative there):
 - `memory_units_fts` — CJK-aware, same unicode61 + trigram sidecar pattern as `documents_fts`; never pass raw user MATCH strings.
 
 Storage ops in new `core/store/memory_units.py` on the `KnowledgeStore` facade (same pattern as `history.py`): triage row upsert (gate-version aware), unit CRUD, source/label attach, status transition with `memory_unit_status_log` write, source-identity lookup (`find unit covering (trace_kind, trace_id)` across gate versions, excluding retracted), FTS search. Supersession guard: `UPDATE ... WHERE status = ?`, zero rows affected = lost race, skip.
+
+Review refinement: migration 8 must include both unicode61 and trigram FTS sidecars for `memory_units`, mirroring the existing documents/history CJK pattern. Do not expose raw user strings to MATCH; reuse or mirror the existing sanitized query construction approach.
 
 ### C3 — Heuristic gate in `core/triage.py`
 
@@ -71,6 +75,8 @@ Keyword tables are tuned against C1 fixtures — record precision/recall numbers
 - Unit management: `membox memory list/show/supersede/retract/restore` (status transitions logged to `memory_unit_status_log`; restore recovers prior status from the log).
 - `lifecycle_lease:<project>`: acquired by every mutating apply command (`triage --apply`, `extract --apply`, `supersede`, `retract`, `restore`); same meta-table row protocol as `worker_lease`; concurrent apply waits briefly or exits with "another apply is running". Dry-runs and searches never take the lease.
 - CLI modules under `cli/commands/memory.py`, presentation only.
+
+Review refinement: `--dry-run` must not acquire `lifecycle_lease` and must not update `consumed_at`; tests should assert both. Apply commands should fail fast with a clear message when another live lease exists, and should take over only expired leases using the same timestamp/host/pid semantics as `worker_lease`.
 
 ### C5 — Acceptance run
 

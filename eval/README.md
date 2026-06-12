@@ -75,7 +75,14 @@ terms from bilingual docs).
 3. For each retrieval result, check whether **all** `expected_keywords` appear
    (case-insensitive) in the combined output string.
 4. Report per-category hit rates and estimated output token counts.
-5. Acceptance threshold: hit rate ≥ 80% within the default 2000-token budget.
+5. Acceptance threshold: hit rate ≥ 80% within the eval token budget.
+   **Budget is corpus-scale-dependent**: the pre-resnapshot corpus (2026-06-09,
+   ~309 lines) was baselined at the default `--budget 2000` (24/26). The
+   2026-06-11 re-snapshot corpus is ~3x larger (~912 lines); runs against it
+   must use `--budget 4000` (baseline 26/26, temporal 4/4, multi-hop 7/7 on
+   Gemini). At budget 2000 the new corpus structurally fails multi-hop
+   (output truncation, not retrieval regression) — such runs are not
+   comparable to either baseline.
 
 The temporal category additionally tests re-ingestion: the test runner ingests an
 updated version of the source document and verifies the retrieval now returns the
