@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -547,6 +548,7 @@ def test_distill_cli_rejects_invalid_since_value(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "Invalid --since value" in result.output or (
+    plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "Invalid --since value" in plain_output or (
         result.exception is not None and "Invalid --since value" in str(result.exception)
     )
