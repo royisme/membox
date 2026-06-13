@@ -2,8 +2,8 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-13 (session 14 — four approved issue designs implemented as stacked PRs #9→#12; zero-external-service end-to-end chain verified)
-**Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F are on main; Phase 8 (tree-sitter AST) deferred. Session 14 implemented the four `docs/issue/*` designs (claude adapter, checkpoint, agent-as-provider, dream side) as **four stacked, green, smoke-verified PRs awaiting owner merge** (#9→#12). The Claude adapter was the S1 dogfooding co-requisite, so the full real-session chain now runs with **no API key**. Migration head is now **0009** (on the M4 branch).
+**Last updated**: 2026-06-13 (session 14 — four approved issue designs implemented and **merged to main** (#9→#12); zero-external-service end-to-end chain verified on main)
+**Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F + the four `docs/issue/*` designs (claude adapter, checkpoint, agent-as-provider, dream side) are on main; Phase 8 (tree-sitter AST) deferred. Session 14 merged #9→#12 in order (main `fdfc2f0`), **migration head now 0009**, full gate green on main (641 tests). The Claude adapter was the S1 dogfooding co-requisite, so the full real-session chain now runs on main with **no API key**.
 
 ### Pending user decisions before next work item
 - Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
@@ -120,7 +120,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Current state
 
-- **Session 14 — four stacked PRs open, awaiting owner merge (NOT yet on main)**: #9 `feature/claude-adapter` → #10 `feature/checkpoint-command` → #11 `feature/agent-as-provider` → #12 `feature/dream-consolidation`. Each is based on the previous; **merge order is #9 → #10 → #11 → #12** (each retargets to main as its parent lands). All green; migration head on the M4 branch is **0009**. Orchestrator did NOT self-merge to main — owner review pending. Two items for the owner to confirm in review: the M4-A2 FULL approach (agent produces units, gate live) and the two A2 calibrations (vague floor 8→3; agent-unit source DOCUMENT not MANUAL).
+- **Session 14 — four PRs merged to main in order (#9→#10→#11→#12, main `fdfc2f0`)**: M1 claude adapter, M2 checkpoint, M3 agent-as-provider, M4 dream side. A Windows-path hardening fix (`ad68183`, `_claude_project_dirname` normalizes Windows drive paths) was folded in during the merge. **Migration head on main is now 0009**; full gate green on main (641 tests, ruff/format/mypy clean). The four `feature/*` branches are deletable (cleaned up session 14). Carried-forward decisions now live on main: the M4-A2 FULL approach (agent-as-provider produces memory units, rationale gate live) and the two A2 calibrations (vague-content floor 8→3; agent-unit `source_kind=DOCUMENT` not `MANUAL`).
 - **main**: as of session 11 (`d6e6c99` merge) — Phases 1-7 + 7.5, lifecycle design v2.3, Phase B (migration 6), M4 + M5 (migration 7), spec reorg, Phase C (migration 8, gate v2, `membox memory` CLI, C5 harness), plan_03 ingest perf, eval re-snapshot baseline. Migration head on main: 8.
 - **`feature/phase-d-consolidation` merged to main** (`1861b8d`): Phase D consolidation (plan_04 D1–D5 + review-fix pass + gate v3) — `core/consolidate.py`, store consolidation ops, `membox memory consolidate --dry-run/--apply`, c8/c9 fixtures, Phase D acceptance tests. 535 tests, all gates green. No new migration (head stays 8). Branch deletable after owner confirms.
 - `docs/design/agent-memory-lifecycle.md` is a tombstone pointer; the normative chapter is `docs/spec/spec_02_memory_lifecycle.md`.
@@ -155,7 +155,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 10. ~~`feature/phase-c-eval-ingest-plans` → main merge~~ — **resolved session 11** (`d6e6c99`, merge --no-ff).
 11. ~~Plan_04 / Phase D~~ — **resolved session 12**: D0 NEEDS-v3-TUNING → v3 round → owner final OK → merged to main (`1861b8d`). Accepted residual risks recorded in plan_04's D0 package (--help-dump events, instruction blobs, C5 type-accuracy semantics).
 12. **Conflict-detector calibration**: first cut is a deterministic word-list signal, fixture-correct but real-trace recall uncalibrated/expected low. LLM-backed comparator via injectable Protocol is the planned follow-up (post-D0, likely alongside Phase E).
-13. **Merge the session-14 stack (#9→#12)** — owner review/merge in order. Not self-merged; this is the immediate gating decision. Confirm the M4-A2 FULL approach + the two A2 calibrations during review of #12.
+13. ~~Merge the session-14 stack (#9→#12)~~ — **resolved 2026-06-13**: merged to main in order (`fdfc2f0`), gate green on main, migration head 0009, four feature branches deleted. M4-A2 FULL approach + the two A2 calibrations are now on main.
 14. **Pre-existing `query` recall defect (S1-D2)** — recall works for matched terms, but the known "no hits for known text" sharpness gap remains; out of scope for the session-14 milestones, still tracked under S1.
 
 ---
@@ -164,8 +164,8 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 0. **Lifecycle Track A–F complete** — all phases merged to main via PR #5 (`feature/history-pull`, 2026-06-12). ~~Phase E merged to main `f274d27`.~~ ~~plan_06 (Phase F distill workflow + skill file) — done PR #5.~~
 0b. **Phase 8 (tree-sitter AST) deferred** — owner decision 2026-06-12. Stabilization and v0.1.0 release take priority. See `docs/roadmap.md` Stabilization Track and Phase 8 deferral note.
-1. **Merge the session-14 stack** — review and merge #9 → #10 → #11 → #12 (in order). This is the immediate next action; everything below assumes it lands. After merge, delete the four `feature/*` branches and re-confirm migration head 0009 on main.
-1b. **S1 Dogfooding** — the Claude adapter (the missing co-requisite) is now delivered, so the full real-session chain runs with no API key and was verified in session 14 (checkpoint → query --include-memory → extract-prompt/ingest-graph → memory export). Remaining: a broader dogfooding pass on representative real sessions and folding any findings into S1.
+1. ~~Merge the session-14 stack~~ — **done 2026-06-13**: #9→#12 merged in order (main `fdfc2f0`), gate green, migration head 0009; the four merged `feature/*` branches deleted.
+1b. **S1 Dogfooding** — the Claude adapter (the missing co-requisite) is now on main, so the full real-session chain runs with no API key and was verified in session 14 (checkpoint → query --include-memory → extract-prompt/ingest-graph → memory export). Remaining: a broader dogfooding pass on representative real sessions and folding any findings into S1. The known `query` recall sharpness gap (S1-D2) is still open and worth a pass.
 2. ~~S2 Robustness~~ — complete in current code: malformed JSONL reporting, idempotent re-import, worker crash recovery, and clean missing-session-root errors.
 3. ~~S3 Deferred review items from PR #5 / plan_06~~ — complete in current code: batched source counts, atomic apply, FTS review pairs, injectable comparator protocol, and `heuristic-v4`.
 4. **S4 Performance sanity** — import + process timing on a large real history; document baseline.
