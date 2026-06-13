@@ -110,7 +110,9 @@ def _run_case(raw: dict[str, Any], threshold: float) -> tuple[str, Label, Label,
 
     counts = {unit.id or 0: int(raw.get("independent_sources", 1)) for unit in units}
     default_plan = build_consolidation_plan(units, counts)
-    default_transition_ids = {transition.unit_id for transition in _plan_transitions(default_plan)}
+    default_transition_ids = {
+        transition.unit_id for transition in default_plan.ordered_transitions()
+    }
     if subject_id not in default_transition_ids:
         return case_id, expected, "drop", "no default transition before comparator"
 
@@ -120,20 +122,9 @@ def _run_case(raw: dict[str, Any], threshold: float) -> tuple[str, Label, Label,
         comparator=ReplayComparator({subject_id: float(raw["llm_score"])}),
         comparator_threshold=threshold,
     )
-    transition_ids = {transition.unit_id for transition in _plan_transitions(plan)}
+    transition_ids = {transition.unit_id for transition in plan.ordered_transitions()}
     predicted: Label = "keep" if subject_id in transition_ids else "drop"
     return case_id, expected, predicted, f"score={float(raw['llm_score']):.2f}"
-
-
-def _plan_transitions(plan: Any) -> list[Any]:
-    """Return consolidation transitions from a plan in apply order."""
-    return [
-        *plan.supersessions,
-        *plan.decay_archives,
-        *plan.promotions,
-        *plan.candidates,
-        *plan.demotions,
-    ]
 
 
 def main(argv: list[str] | None = None) -> int:

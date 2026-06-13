@@ -8,12 +8,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
 from membox.core.consolidate import ConsolidationTransition, evolved_confidence
-from membox.core.store.retrieval import (
-    _cjk_trigram_terms,
-    _contains_cjk,
-    _fts5_or_query,
-    _fts5_query_from_terms,
+from membox.core.store.fts import (
+    cjk_trigram_terms,
+    contains_cjk,
+    fts5_or_query,
+    fts5_query_from_terms,
 )
+from membox.core.store.leases import lease_is_live, lease_is_mine, parse_lease, render_lease
 from membox.model.schema import (
     MEMORY_LABELS,
     HistoryTriageRecord,
@@ -808,17 +809,7 @@ class MemoryUnitOps:
         if not query.strip() or limit <= 0:
             return []
         conn = self._cm.connection()
-        if _contains_cjk(query):
-            terms = _cjk_trigram_terms(query)
-            if terms:
-                fts_name = "memory_units_fts_trigram"
-                match_expr = _fts5_query_from_terms(terms)
-            else:
-                fts_name = "memory_units_fts"
-                match_expr = _fts5_or_query(query)
-        else:
-            fts_name = "memory_units_fts"
-            match_expr = _fts5_or_query(query)
+        fts_name, match_expr = _memory_fts_table_and_query(query)
         if match_expr == '""':
             return []
         clauses = [f"{fts_name} MATCH ?"]
@@ -966,20 +957,13 @@ class MemoryUnitOps:
 
     def acquire_lifecycle_lease(self, project: str) -> bool:
         """Acquire the lifecycle lease for one project."""
-        from membox.core.store.queue import (
-            _lease_is_live,
-            _lease_is_mine,
-            _parse_lease,
-            _render_lease,
-        )
-
         key = f"lifecycle_lease:{project}"
-        payload = _render_lease()
+        payload = render_lease()
         with self._cm.transaction() as c:
             row = c.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
             if row:
-                lease = _parse_lease(str(row[0]))
-                if lease is not None and _lease_is_live(lease, 30.0) and not _lease_is_mine(lease):
+                lease = parse_lease(str(row[0]))
+                if lease is not None and lease_is_live(lease, 30.0) and not lease_is_mine(lease):
                     return False
             c.execute(
                 """
@@ -992,13 +976,11 @@ class MemoryUnitOps:
 
     def release_lifecycle_lease(self, project: str) -> None:
         """Release the lifecycle lease for one project when owned by this process."""
-        from membox.core.store.queue import _lease_is_mine, _parse_lease
-
         key = f"lifecycle_lease:{project}"
         with self._cm.transaction() as c:
             row = c.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
-            lease = _parse_lease(str(row[0])) if row else None
-            if lease is None or _lease_is_mine(lease):
+            lease = parse_lease(str(row[0])) if row else None
+            if lease is None or lease_is_mine(lease):
                 c.execute("DELETE FROM meta WHERE key=?;", (key,))
 
     def _independent_source_keys(
@@ -1100,11 +1082,11 @@ def _trace_session_key(source_ref: str) -> str:
 
 def _memory_fts_table_and_query(query: str) -> tuple[str, str]:
     """Choose memory-unit FTS sidecar and MATCH expression for a query."""
-    if _contains_cjk(query):
-        terms = _cjk_trigram_terms(query)
+    if contains_cjk(query):
+        terms = cjk_trigram_terms(query)
         if terms:
-            return "memory_units_fts_trigram", _fts5_query_from_terms(terms)
-    return "memory_units_fts", _fts5_or_query(query)
+            return "memory_units_fts_trigram", fts5_query_from_terms(terms)
+    return "memory_units_fts", fts5_or_query(query)
 
 
 def _normalized_bm25(rank: float, best: float, worst: float) -> float:

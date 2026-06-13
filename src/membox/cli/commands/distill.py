@@ -9,12 +9,12 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
-from membox.core.agent import _infer_project
 from membox.core.distill import (
     DistillCandidate,
     FilesystemAssetInventory,
     build_distill_plan,
 )
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 
 _DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
@@ -52,7 +52,7 @@ def distill(
         typer.echo(f"Error: --root does not exist: {scanned_root}", err=True)
         raise typer.Exit(1)
 
-    effective_project = project or _infer_project(scanned_root / "_")
+    effective_project = project or infer_project(scanned_root / "_")
     since_lower_bound = _since_lower_bound(since)
     store = KnowledgeStore(db)
     units = store.list_units_for_distill(

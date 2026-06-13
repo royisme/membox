@@ -94,6 +94,30 @@ class ConsolidationPlan:
     decay_reviews: list[ConsolidationIssue] = field(default_factory=list)
     validator_rejections: list[ConsolidationIssue] = field(default_factory=list)
 
+    def ordered_transitions(self) -> list[ConsolidationTransition]:
+        """Return status transitions in the deterministic apply order."""
+        return [
+            *self.supersessions,
+            *self.decay_archives,
+            *self.promotions,
+            *self.candidates,
+            *self.demotions,
+        ]
+
+    def transition_groups(self) -> tuple[tuple[str, list[ConsolidationTransition]], ...]:
+        """Return labelled transition groups in render/apply order."""
+        return (
+            ("supersede", self.supersessions),
+            ("archive", self.decay_archives),
+            ("promote", self.promotions),
+            ("candidate", self.candidates),
+            ("demote", self.demotions),
+        )
+
+    def review_pairs(self) -> list[ConsolidationConflict]:
+        """Return deterministic conflicts and FTS review pairs for presentation."""
+        return [*self.conflicts, *self.fts_pairs]
+
 
 def crystal_policy(unit: MemoryUnitRecord, independent_source_count: int) -> CrystalPolicyResult:
     """Return whether a unit satisfies the accepted Phase D crystal policy."""
@@ -419,7 +443,7 @@ def _apply_llm_comparator(
     threshold: float,
 ) -> ConsolidationPlan:
     """Drop low-scoring candidate transitions from a consolidation plan."""
-    candidate_ids = {transition.unit_id for transition in _plan_transitions(plan)}
+    candidate_ids = {transition.unit_id for transition in plan.ordered_transitions()}
     candidates = [unit for unit in eligible_units if unit.id in candidate_ids]
     if not candidates:
         return plan
@@ -443,17 +467,6 @@ def _apply_llm_comparator(
         decay_reviews=plan.decay_reviews,
         validator_rejections=plan.validator_rejections,
     )
-
-
-def _plan_transitions(plan: ConsolidationPlan) -> list[ConsolidationTransition]:
-    """Return all status transitions in deterministic plan order."""
-    return [
-        *plan.supersessions,
-        *plan.decay_archives,
-        *plan.promotions,
-        *plan.candidates,
-        *plan.demotions,
-    ]
 
 
 def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:

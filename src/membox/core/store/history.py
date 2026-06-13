@@ -23,11 +23,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, TypedDict
 
-from membox.core.store.retrieval import (
-    _cjk_trigram_terms,
-    _contains_cjk,
-    _fts5_or_query,
-    _fts5_query_from_terms,
+from membox.core.store.fts import (
+    cjk_trigram_terms,
+    contains_cjk,
+    fts5_or_query,
+    fts5_query_from_terms,
 )
 from membox.core.triage import redact_secrets
 
@@ -113,8 +113,8 @@ def _history_match(conn: sqlite3.Connection, base: str, query: str) -> tuple[str
     """Choose the FTS sidecar and MATCH expression for a history search.
 
     Dispatches CJK queries to the trigram sidecar (3-char terms) and
-    everything else to the unicode61 sidecar, reusing the sanitizers from
-    :mod:`membox.core.store.retrieval` — raw user strings never reach MATCH.
+    everything else to the unicode61 sidecar, reusing the shared FTS
+    sanitizers — raw user strings never reach MATCH.
 
     Args:
         conn: Open SQLite connection.
@@ -125,11 +125,11 @@ def _history_match(conn: sqlite3.Connection, base: str, query: str) -> tuple[str
         ``(fts_table, match_expr)`` or None when the query sanitizes to
         nothing.
     """
-    if _contains_cjk(query):
-        terms = _cjk_trigram_terms(query)
+    if contains_cjk(query):
+        terms = cjk_trigram_terms(query)
         if terms:
-            return f"{base}_fts_trigram", _fts5_query_from_terms(terms)
-    match_expr = _fts5_or_query(query)
+            return f"{base}_fts_trigram", fts5_query_from_terms(terms)
+    match_expr = fts5_or_query(query)
     if match_expr == '""':
         return None
     return f"{base}_fts", match_expr

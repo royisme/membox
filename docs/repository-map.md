@@ -112,13 +112,16 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/connection.py` — SQLite connection management: per-thread connections, PRAGMAs, transactions, locking.
         - `src/membox/core/store/documents.py` — Document persistence for evidence lineage.
         - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
+        - `src/membox/core/store/fts.py` — SQLite FTS query helpers shared by store operation mixins.
         - `src/membox/core/store/history.py` — History trace storage operations (lifecycle Phase B).
+        - `src/membox/core/store/leases.py` — JSON lease helpers for meta-table ownership records.
         - `src/membox/core/store/memory_units.py` — Memory-unit storage operations for lifecycle Phase C.
         - `src/membox/core/store/meta_guard.py` — Embedding-model guard for the membox meta table.
         - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
         - `src/membox/core/store/queue.py` — Asynchronous ingestion queue operations (spec §3.9, M6).
         - `src/membox/core/store/relations.py` — Relation persistence: relation CRUD and evidence links.
         - `src/membox/core/store/retrieval.py` — BFS multi-hop graph retrieval with hybrid scoring, token-budget truncation, and compact output.
+        - `src/membox/core/store/vectors.py` — Vector encoding and similarity helpers shared by store operation mixins.
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
@@ -126,6 +129,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/distill.py` — Pure workflow-distillation policy for lifecycle Phase F memory units.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
+      - `src/membox/core/project.py` — Project-scope inference helpers shared by core and CLI code.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
       - `src/membox/core/triage.py` — membox triage — pure domain logic for the memory lifecycle gates.
       - `src/membox/core/worker.py` — Ingestion queue worker — drain loop, lease management, crash recovery (M6).

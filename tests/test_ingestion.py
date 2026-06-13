@@ -18,7 +18,8 @@ import pytest
 from typer.testing import CliRunner
 
 from membox.cli import app
-from membox.core.agent import MemoryAgent, _infer_project
+from membox.core.agent import MemoryAgent
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 from membox.core.store.migrations import (
     MIGRATIONS,
@@ -374,7 +375,7 @@ class TestIngestFile:
             agent.ingest_file(tmp_path / "nonexistent.md")
 
     def test_explicit_project_overrides_git_root(self, tmp_path: Path) -> None:
-        """Explicit project metadata always wins over _infer_project."""
+        """Explicit project metadata always wins over inferred project."""
         repo = tmp_path / "myrepo"
         docs = repo / "docs"
         docs.mkdir(parents=True)
@@ -581,12 +582,12 @@ class TestCLIIngestFileFlags:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. _infer_project helper unit tests
+# 7. infer_project helper unit tests
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestInferProject:
-    """Unit tests for the _infer_project() helper in core/agent.py."""
+    """Unit tests for the infer_project() helper."""
 
     def test_git_dir_at_repo_root(self, tmp_path: Path) -> None:
         """File inside <repo>/docs/ with a .git directory → project = repo dir name."""
@@ -594,7 +595,7 @@ class TestInferProject:
         docs = repo / "docs"
         docs.mkdir(parents=True)
         (repo / ".git").mkdir()
-        result = _infer_project((docs / "HANDOFF.md").resolve())
+        result = infer_project((docs / "HANDOFF.md").resolve())
         assert result == "myrepo"
 
     def test_git_file_worktree(self, tmp_path: Path) -> None:
@@ -603,7 +604,7 @@ class TestInferProject:
         docs = repo / "docs"
         docs.mkdir(parents=True)
         (repo / ".git").write_text("gitdir: /some/other/path/.git/worktrees/wt\n", encoding="utf-8")
-        result = _infer_project((docs / "HANDOFF.md").resolve())
+        result = infer_project((docs / "HANDOFF.md").resolve())
         assert result == "worktreerepo"
 
     def test_no_git_root_falls_back_to_parent_dir(self, tmp_path: Path) -> None:
@@ -612,11 +613,11 @@ class TestInferProject:
         sub.mkdir()
         md = sub / "note.txt"
         md.write_text("hello", encoding="utf-8")
-        result = _infer_project(md.resolve())
+        result = infer_project(md.resolve())
         assert result == "scratch"
 
     def test_explicit_project_overrides_inferred(self, tmp_path: Path) -> None:
-        """Explicit metadata.project always wins; _infer_project is never called."""
+        """Explicit metadata.project always wins over inferred project."""
         repo = tmp_path / "myrepo"
         docs = repo / "docs"
         docs.mkdir(parents=True)

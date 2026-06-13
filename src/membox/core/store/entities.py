@@ -2,44 +2,23 @@
 
 from __future__ import annotations
 
-import math
 import sqlite3
-import struct
 from typing import TYPE_CHECKING
+
+from membox.core.store.vectors import (
+    blob_to_vec,
+    cosine,
+    vec_to_blob,
+)
 
 if TYPE_CHECKING:
     from membox.core.store.connection import ConnectionManager
     from membox.model.schema import Entity
     from membox.services.embedding import Embedder
 
-
-# ---- vector helpers --------------------------------------------------------
-
-
-def _vec_to_blob(v: list[float]) -> bytes:
-    return struct.pack(f"{len(v)}f", *v)
-
-
-def _blob_to_vec(b: bytes) -> list[float]:
-    n = len(b) // 4
-    return list(struct.unpack(f"{n}f", b))
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Return the cosine similarity of two equal-length vectors.
-
-    Raises:
-        ValueError: If the vectors have different dimensions.
-    """
-    if len(a) != len(b):
-        msg = f"Vector dimension mismatch: {len(a)} != {len(b)}"
-        raise ValueError(msg)
-    s = sum(x * y for x, y in zip(a, b, strict=True))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return s / (na * nb)
+_blob_to_vec = blob_to_vec
+_cosine = cosine
+_vec_to_blob = vec_to_blob
 
 
 class EntityOps:
@@ -93,12 +72,12 @@ class EntityOps:
         best_id: int | None = None
         best_sim = threshold
         for eid, blob in rows:
-            vec = _blob_to_vec(blob)
+            vec = blob_to_vec(blob)
             # Rows written by an older embedder may have a different dimension;
             # skip them rather than letting one stale row break every lookup.
             if len(vec) != len(embedding):
                 continue
-            sim = _cosine(embedding, vec)
+            sim = cosine(embedding, vec)
             if sim > best_sim:
                 best_id, best_sim = int(eid), sim
         return best_id
@@ -123,7 +102,7 @@ class EntityOps:
         """
         from membox.core.normalize import normalize_name
 
-        blob = _vec_to_blob(embedding) if embedding else None
+        blob = vec_to_blob(embedding) if embedding else None
         with self._cm.transaction() as c:
             cur = c.execute(
                 "INSERT INTO entities(canonical_name, type, description, embedding) "

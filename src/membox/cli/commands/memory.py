@@ -8,12 +8,11 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
-from membox.core.agent import _infer_project
 from membox.core.consolidate import (
     ConsolidationPlan,
-    ConsolidationTransition,
     build_consolidation_plan,
 )
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 from membox.core.triage import GATE_VERSION, LEGACY_GATE_VERSIONS, activation_passes, triage_trace
 from membox.model.schema import (
@@ -36,7 +35,7 @@ _DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database fil
 
 def _default_project(project: str | None) -> str:
     """Return explicit project or infer it from the current working directory."""
-    return project or _infer_project(Path.cwd() / "_")
+    return project or infer_project(Path.cwd() / "_")
 
 
 def _take_lease(store: KnowledgeStore, project: str) -> None:
@@ -206,7 +205,7 @@ def memory_consolidate(
     _take_lease(store, effective_project)
     try:
         applied = store.transition_memory_units_atomically(
-            _ordered_transitions(plan),
+            plan.ordered_transitions(),
             command="memory consolidate",
         )
     except ValueError as exc:
@@ -339,23 +338,12 @@ def _transition(
     console.print(f"[green]Updated[/green] {unit_id} -> {status.value}.")
 
 
-def _ordered_transitions(plan: ConsolidationPlan) -> list[ConsolidationTransition]:
-    """Return transitions in a deterministic apply order."""
-    return [
-        *plan.supersessions,
-        *plan.decay_archives,
-        *plan.promotions,
-        *plan.candidates,
-        *plan.demotions,
-    ]
-
-
 def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None:
     """Render a consolidation plan as script-friendly lines."""
     prefix = "would " if dry_run else ""
     for issue in plan.validator_rejections:
         typer.echo(f"validator reject {issue.unit_id} title={issue.title!r} reason={issue.reason}")
-    for conflict in [*plan.conflicts, *plan.fts_pairs]:
+    for conflict in plan.review_pairs():
         typer.echo(
             f"conflict review {conflict.left_id}<->{conflict.right_id} "
             f"left={conflict.left_title!r} right={conflict.right_title!r} "
@@ -363,13 +351,7 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
         )
     for issue in plan.decay_reviews:
         typer.echo(f"decay review {issue.unit_id} title={issue.title!r} reason={issue.reason}")
-    for group_name, transitions in (
-        ("supersede", plan.supersessions),
-        ("archive", plan.decay_archives),
-        ("promote", plan.promotions),
-        ("candidate", plan.candidates),
-        ("demote", plan.demotions),
-    ):
+    for group_name, transitions in plan.transition_groups():
         for action in transitions:
             target = (
                 f" superseded_by={action.superseded_by}" if action.superseded_by is not None else ""
@@ -378,8 +360,8 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
                 f"{prefix}{group_name} {action.unit_id} -> {action.to_status.value}"
                 f"{target} title={action.title!r} reason={action.reason}"
             )
-    transition_count = len(_ordered_transitions(plan))
-    conflict_count = len(plan.conflicts) + len(plan.fts_pairs)
+    transition_count = len(plan.ordered_transitions())
+    conflict_count = len(plan.review_pairs())
     issue_count = len(plan.validator_rejections) + len(plan.decay_reviews)
     console.print(
         f"[green]{'Would apply' if dry_run else 'Planned'}[/green] "

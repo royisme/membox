@@ -20,8 +20,8 @@ import typer
 
 from membox.cli._common import console
 from membox.config import HistoryConfig
-from membox.core.agent import _infer_project
 from membox.core.history_import import fetch_payload, history_pull, import_history
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 from membox.core.triage import redact_secrets
 from membox.services.importers import IMPORTER_FORMATS
@@ -53,9 +53,9 @@ def _resolve_project(project: str | None, all_projects: bool) -> str | None:
         return None
     if project is not None:
         return project
-    # _infer_project walks up from the path's parent, so hand it a synthetic
+    # infer_project walks up from the path's parent, so hand it a synthetic
     # child of the working directory.
-    return _infer_project(Path.cwd() / "_")
+    return infer_project(Path.cwd() / "_")
 
 
 def _print_hits(rows: list[dict[str, object]], empty_msg: str) -> None:
