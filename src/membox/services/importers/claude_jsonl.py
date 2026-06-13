@@ -27,7 +27,7 @@ snippet); ``project`` is the override or the basename of the line ``cwd``.
 from __future__ import annotations
 
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 
 from membox.model.schema import (
     HistoryEventKind,
@@ -53,7 +53,7 @@ _CONTROL_LINE_TYPES: frozenset[str] = frozenset(
 )
 
 
-def _claude_project_dirname(project_cwd: Path) -> str:
+def _claude_project_dirname(project_cwd: PurePath) -> str:
     """Encode ``project_cwd`` to Claude's per-project directory name.
 
     Claude Code stores sessions in
@@ -67,8 +67,15 @@ def _claude_project_dirname(project_cwd: Path) -> str:
     Returns:
         The encoded directory name, e.g. ``-Users-royzhu-proj``.
     """
-    absolute = Path(project_cwd).expanduser().resolve()
-    return str(absolute).replace("/", "-")
+    raw = str(project_cwd).replace("\\", "/")
+    if raw.startswith("~"):
+        raw = str(Path(raw).expanduser()).replace("\\", "/")
+    elif not (raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":")):
+        raw = str(Path(raw).resolve()).replace("\\", "/")
+    normalized = raw
+    if len(normalized) >= 2 and normalized[1] == ":":
+        normalized = normalized[2:]
+    return normalized.replace("/", "-")
 
 
 def _message_text_from_obj(content: object) -> str:
