@@ -9,8 +9,14 @@ import typer
 
 from membox.cli._common import console
 from membox.core.consolidate import (
+    ConsolidationIssue,
     ConsolidationPlan,
     build_consolidation_plan,
+)
+from membox.core.export import (
+    EXPORT_SECTIONS,
+    SECTION_OTHER,
+    categorize_for_export,
 )
 from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
@@ -216,6 +222,62 @@ def memory_consolidate(
     console.print(f"[green]Applied[/green] {applied} consolidation transitions.")
 
 
+@memory_app.command("export")
+def memory_export(
+    as_: str = typer.Option("memory-md", "--as", help="Export format (memory-md)"),
+    crystals_only: bool = typer.Option(False, "--crystals-only", help="Only export crystal units"),
+    project: str | None = typer.Option(None, "--project", help="Project scope"),
+    limit: int = typer.Option(500, "--limit", help="Maximum units to inspect"),
+    db: str = _DB_OPTION,
+) -> None:
+    """Emit a categorized MEMORY.md view of durable memory units.
+
+    This is a DERIVED VIEW — the knowledge graph and memory units remain the
+    source of record. The Markdown is regenerated from current store state on
+    every invocation; there is no cache to invalidate.
+    """
+    if as_ != "memory-md":
+        typer.echo(
+            f"Error: unsupported export format {as_!r}; only 'memory-md' is supported",
+            err=True,
+        )
+        raise typer.Exit(1)
+    effective_project = _default_project(project)
+    store = KnowledgeStore(db)
+    units = store.list_units_for_consolidation(project=effective_project, limit=limit)
+    if crystals_only:
+        units = [unit for unit in units if unit.status == MemoryUnitStatus.CRYSTAL]
+    grouped = categorize_for_export(units)
+    typer.echo(f"# Memory — {effective_project}")
+    for section in EXPORT_SECTIONS:
+        if section == SECTION_OTHER and not grouped.get(section):
+            continue
+        items = grouped.get(section, [])
+        if not items:
+            continue
+        typer.echo(f"## {section}")
+        for unit in items:
+            typer.echo(_render_export_bullet(unit))
+
+
+def _render_export_bullet(unit: MemoryUnitRecord) -> str:
+    """Return one Markdown bullet line for a memory unit in MEMORY.md form."""
+    content = unit.content.strip()
+    context = unit.context.strip()
+    body = f"**{unit.title}**"
+    if content:
+        body += f" — {content}"
+    if context:
+        body += f" ({context})"
+    if unit.sources:
+        provenance = ", ".join(
+            f"{source.source_kind.value}:{source.source_ref}" for source in unit.sources
+        )
+    else:
+        provenance = "none"
+    return f"- {body}  \n  *provenance*: {provenance}"
+
+
 @memory_app.command("list")
 def memory_list(
     project: str | None = typer.Option(None, "--project", help="Project scope"),
@@ -367,6 +429,21 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
         f"[green]{'Would apply' if dry_run else 'Planned'}[/green] "
         f"{transition_count} transitions, {conflict_count} conflicts, {issue_count} issues."
     )
+    n_promoted = len(plan.promotions)
+    n_rejected = len(plan.validator_rejections)
+    rejection_breakdown = _summarize_rejections(plan.validator_rejections)
+    summary_suffix = f" ({rejection_breakdown})" if rejection_breakdown else ""
+    console.print(
+        f"[bold]summary:[/bold] promoted {n_promoted} / rejected {n_rejected}{summary_suffix}"
+    )
+
+
+def _summarize_rejections(rejections: list[ConsolidationIssue]) -> str:
+    """Return a short `reason=count, ...` string grouped by reason."""
+    counts: dict[str, int] = {}
+    for issue in rejections:
+        counts[issue.reason] = counts.get(issue.reason, 0) + 1
+    return ", ".join(f"{reason}={count}" for reason, count in sorted(counts.items()))
 
 
 def _unit_from_trace(

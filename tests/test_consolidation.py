@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from typer.testing import CliRunner
 
 from membox.cli import app
 from membox.core.consolidate import (
+    CRYSTAL_MAX_CONTENT_LENGTH,
     ConsolidationConflict,
     ConsolidationPlan,
     ConsolidationTransition,
     build_consolidation_plan,
     crystal_policy,
+    validate_units,
 )
 from membox.core.store import KnowledgeStore
 from membox.model.schema import (
@@ -54,10 +57,14 @@ class LowScoreComparator:
 
 
 def _source(
-    ref: str = "manual:1", kind: MemorySourceKind = MemorySourceKind.MANUAL
+    ref: str = "manual:1",
+    kind: MemorySourceKind = MemorySourceKind.MANUAL,
+    *,
+    quote: str | None = None,
 ) -> MemoryUnitSource:
     """Return one valid memory-unit source."""
-    return MemoryUnitSource(source_kind=kind, source_ref=ref, source_message_id=ref, quote=ref)
+    text = ref if quote is None else quote
+    return MemoryUnitSource(source_kind=kind, source_ref=ref, source_message_id=ref, quote=text)
 
 
 def _unit(
@@ -71,6 +78,7 @@ def _unit(
     labels: list[str] | None = None,
     sources: list[MemoryUnitSource] | None = None,
     valid_to: str | None = None,
+    context: str = "",
 ) -> MemoryUnitRecord:
     """Return a valid memory unit for Phase D tests."""
     return MemoryUnitRecord(
@@ -79,6 +87,7 @@ def _unit(
         status=status,
         title=title,
         content=content,
+        context=context,
         importance_score=importance,
         confidence_score=confidence,
         temporal_type=MemoryTemporalType.UNKNOWN,
@@ -174,9 +183,18 @@ def test_consolidate_dry_run_does_not_write_or_take_lease(tmp_path: Path) -> Non
     unit_id = store.create_memory_unit(
         _unit(
             title="Confirmed decision",
-            content="Owner confirmed this decision.",
+            content=(
+                "Owner confirmed this decision during the planning review meeting "
+                "with explicit user confirmation recorded in the project log."
+            ),
             confidence=0.90,
-            sources=[_source("history:1", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[
+                _source(
+                    "history:1",
+                    MemorySourceKind.HISTORY_MESSAGE,
+                    quote="owner explicitly confirmed this decision during review meeting",
+                )
+            ],
         )
     )
 
@@ -204,9 +222,18 @@ def test_optional_llm_comparator_filters_low_scoring_transitions(tmp_path: Path)
     unit_id = store.create_memory_unit(
         _unit(
             title="Confirmed decision",
-            content="Owner confirmed this decision.",
+            content=(
+                "Owner confirmed this decision during the planning review meeting "
+                "with explicit user confirmation recorded in the project log."
+            ),
             confidence=0.90,
-            sources=[_source("history:1", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[
+                _source(
+                    "history:1",
+                    MemorySourceKind.HISTORY_MESSAGE,
+                    quote="owner explicitly confirmed this decision during review meeting",
+                )
+            ],
         )
     )
     units = store.list_units_for_consolidation(project="membox")
@@ -264,20 +291,38 @@ def test_consolidate_apply_promotes_candidates_and_logs(tmp_path: Path) -> None:
     crystal_id = store.create_memory_unit(
         _unit(
             title="Confirmed decision",
-            content="Owner confirmed this decision.",
+            content=(
+                "Owner confirmed this decision during the planning review meeting "
+                "with explicit user confirmation recorded in the project log."
+            ),
             confidence=0.90,
-            sources=[_source("history:1", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[
+                _source(
+                    "history:1",
+                    MemorySourceKind.HISTORY_MESSAGE,
+                    quote="owner explicitly confirmed this decision during review meeting",
+                )
+            ],
         )
     )
     candidate_id = store.create_memory_unit(
         _unit(
             title="Verify migration head",
-            content="Failure happened. Always verify latest_version before migrations.",
+            content=(
+                "Failure happened during the last migration. Always verify the "
+                "latest_version before applying any database migration in CI."
+            ),
             unit_type=MemoryUnitType.PROCEDURE,
             importance=0.65,
             confidence=0.65,
             labels=["testing"],
-            sources=[_source("history:2", MemorySourceKind.HISTORY_MESSAGE)],
+            sources=[
+                _source(
+                    "history:2",
+                    MemorySourceKind.HISTORY_MESSAGE,
+                    quote="failure happened during last migration verify latest version",
+                )
+            ],
         )
     )
 
@@ -517,7 +562,10 @@ def test_consolidation_decay_archives_expired_non_plan_units(tmp_path: Path) -> 
     fact_id = store.create_memory_unit(
         _unit(
             title="Expired fact",
-            content="A factual unit with expired validity.",
+            content=(
+                "A factual unit documenting a snapshot whose validity window "
+                "closed before the current consolidation run began processing it."
+            ),
             unit_type=MemoryUnitType.FACT,
             valid_to="2000-01-01T00:00:00Z",
         )
@@ -525,7 +573,10 @@ def test_consolidation_decay_archives_expired_non_plan_units(tmp_path: Path) -> 
     plan_id = store.create_memory_unit(
         _unit(
             title="Expired plan",
-            content="A plan whose review horizon passed.",
+            content=(
+                "A plan whose review horizon passed; relevant context for the "
+                "next planning iteration should be captured separately."
+            ),
             unit_type=MemoryUnitType.PLAN,
             valid_to="2000-01-01T00:00:00Z",
         )
@@ -544,3 +595,176 @@ def test_consolidation_decay_archives_expired_non_plan_units(tmp_path: Path) -> 
     assert plan is not None
     assert fact.status == MemoryUnitStatus.ARCHIVED
     assert plan.status == MemoryUnitStatus.ACTIVE_UNIT
+
+
+def test_crystal_budget_blocks_oversized_content() -> None:
+    """Units whose content exceeds the crystal cap are rejected from promotion."""
+    oversized_content = "x" * (CRYSTAL_MAX_CONTENT_LENGTH + 100)
+    sources = [
+        _source("history:a", MemorySourceKind.HISTORY_MESSAGE, quote=oversized_content),
+        _source("history:b", MemorySourceKind.HISTORY_MESSAGE, quote=oversized_content),
+        _source("history:c", MemorySourceKind.HISTORY_MESSAGE, quote=oversized_content),
+    ]
+    unit = _unit(
+        title="Oversized content",
+        content=oversized_content,
+        sources=sources,
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    reasons = [issue.reason for issue in issues]
+    assert any("content exceeds crystal budget" in reason for reason in reasons)
+
+    counts = {1: 3}
+    plan = build_consolidation_plan([unit], counts)
+    assert plan.promotions == []
+
+
+def test_crystal_budget_negative_clean_unit_under_cap_passes() -> None:
+    """A compact unit with three sources clears the crystal budget gate."""
+    sources = [
+        _source("history:a", MemorySourceKind.HISTORY_MESSAGE),
+        _source("history:b", MemorySourceKind.HISTORY_MESSAGE),
+        _source("history:c", MemorySourceKind.HISTORY_MESSAGE),
+    ]
+    unit = _unit(
+        title="Compact decision",
+        content="Owner confirmed this compact decision with three independent sources.",
+        sources=sources,
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    assert not any("content exceeds crystal budget" in issue.reason for issue in issues)
+
+
+def test_provenance_strength_blocks_thin_sources() -> None:
+    """A unit with a single source and no quote fails the provenance gate."""
+    unit = _unit(
+        title="Thin source",
+        content="A claim supported by only one source and no quote.",
+        sources=[_source("history:only", MemorySourceKind.HISTORY_MESSAGE, quote="")],
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    reasons = [issue.reason for issue in issues]
+    assert "insufficient provenance for crystal (needs a quote or ≥2 sources)" in reasons
+
+
+def test_provenance_strength_negative_passes_with_quote() -> None:
+    """A single source with a non-empty quote satisfies the provenance gate."""
+    unit = _unit(
+        title="Quoted source",
+        content="A claim with a source that carries an actual quote.",
+        sources=[
+            _source(
+                "history:quoted",
+                MemorySourceKind.HISTORY_MESSAGE,
+                quote="some meaningful quote attached to this source",
+            )
+        ],
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    assert not any("insufficient provenance for crystal" in issue.reason for issue in issues)
+
+
+def test_provenance_strength_negative_passes_with_two_refs() -> None:
+    """Two distinct source_refs satisfy the provenance gate even without a quote."""
+    unit = _unit(
+        title="Two refs",
+        content="A claim backed by two distinct references without quoted text.",
+        sources=[
+            _source("history:ref-a", MemorySourceKind.HISTORY_MESSAGE, quote=""),
+            _source("history:ref-b", MemorySourceKind.HISTORY_MESSAGE, quote=""),
+        ],
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    assert not any("insufficient provenance for crystal" in issue.reason for issue in issues)
+
+
+def test_vague_content_flags_short_content() -> None:
+    """A unit whose content is too thin is flagged as vague."""
+    unit = _unit(
+        title="Friendly acknowledgement",
+        content="ok thanks",
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    assert "vague content (insufficient signal)" in [issue.reason for issue in issues]
+
+
+def test_vague_content_negative_passes_meaningful() -> None:
+    """A unit with at least MIN_MEANINGFUL_TOKENS meaningful tokens is not vague."""
+    unit = _unit(
+        title="Detailed decision",
+        content=(
+            "We migrated retrieval from graph-only to graph plus FTS fusion after "
+            "evaluating recall precision on the eval corpus."
+        ),
+    )
+    unit.id = 1
+    issues = validate_units([unit])
+    assert not any("vague content (insufficient signal)" in issue.reason for issue in issues)
+
+
+def test_stale_path_extended_to_non_document(tmp_path: Path) -> None:
+    """Absolute-path stale check now applies to non-DOCUMENT source kinds too."""
+    missing_dir = tmp_path / "missing-history-fixture"
+    missing_path = str(missing_dir / f"nonexistent-{uuid4().hex}.txt")
+    non_document_unit = _unit(
+        title="History with missing file",
+        content="History source pointing at a deleted local file.",
+        sources=[_source(missing_path, MemorySourceKind.HISTORY_MESSAGE)],
+    )
+    non_document_unit.id = 1
+    issues = validate_units([non_document_unit])
+    assert any(issue.reason == f"stale source path: {missing_path}" for issue in issues)
+
+    present_path = tmp_path / "exists.txt"
+    present_path.write_text("hi")
+    present_unit = _unit(
+        title="History with present file",
+        content="History source pointing at a file that still exists.",
+        sources=[_source(str(present_path), MemorySourceKind.HISTORY_MESSAGE)],
+    )
+    present_unit.id = 2
+    issues_present = validate_units([present_unit])
+    assert not any("stale source path" in issue.reason for issue in issues_present)
+
+
+def test_consolidate_summary_counts_promoted_and_rejected(tmp_path: Path) -> None:
+    """CLI dry-run output includes a promoted/rejected summary with reason counts."""
+    db = str(tmp_path / "memory.db")
+    store = KnowledgeStore(db)
+    promotable_id = store.create_memory_unit(
+        _unit(
+            title="Confirmed promotion",
+            content="Owner confirmed this decision with explicit user confirmation.",
+            confidence=0.90,
+            sources=[_source("history:promote", MemorySourceKind.HISTORY_MESSAGE)],
+        )
+    )
+    rejected_id = store.create_memory_unit(
+        _unit(
+            title="Thanks",
+            content="ok thanks",
+        )
+    )
+
+    result = runner.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", "membox", "--dry-run"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "summary:" in result.output
+    assert "promoted 1" in result.output
+    assert "rejected 1" in result.output
+    assert "vague content" in result.output
+    promotable_unit = store.get_memory_unit(promotable_id)
+    assert promotable_unit is not None
+    assert promotable_unit.status == MemoryUnitStatus.ACTIVE_UNIT
+    rejected_unit = store.get_memory_unit(rejected_id)
+    assert rejected_unit is not None
+    assert rejected_unit.status == MemoryUnitStatus.ACTIVE_UNIT

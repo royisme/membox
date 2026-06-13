@@ -33,6 +33,32 @@ MIN_CONTENT_LENGTH = 3
 MAX_CONTENT_LENGTH = 4000
 """Conservative upper bound for compact unit/crystal content."""
 
+CRYSTAL_MAX_CONTENT_LENGTH = 1500
+"""Crystal-specific content cap (half of MAX_CONTENT_LENGTH).
+
+Crystal units are the durable set recalled repeatedly; keeping them compact
+(<=1500 chars) ensures each fits cleanly into recall context without burning
+the per-query budget. Distinct from MAX_CONTENT_LENGTH (4000) which guards the
+general unit cap.
+"""
+
+MIN_MEANINGFUL_TOKENS = 8
+"""Vague-content floor for crystal promotion.
+
+A claim worth promoting should carry at least ~8 meaningful (>=4-letter)
+tokens. Below that we flag as vague: short labels or pure restatements of the
+title cannot bear their own weight in recall context.
+"""
+
+_VAGUE_CONTENT_LENGTH_CEILING = 80
+"""Maximum raw content length to apply the vague-content heuristic.
+
+Conservative ceiling: only short claims (under 80 chars) are evaluated for
+"thin Latin token" vagueness. Substantial content (e.g. CJK-heavy but long
+claims) is not flagged, since the heuristic is Latin-token-based and would
+otherwise misclassify legitimate long-form claims in other scripts.
+"""
+
 _CORRECTION_TERMS = ("correction", "corrected", "updated", "stale", "instead", "更正")
 _CONTRAST_TERMS = ("instead of", "rather than", "conflict", "conflicting", "而不是", "冲突")
 _STRONG_CORRECTION_TERMS = ("correction", "corrected", "stale", "supersede", "更正", "作废")
@@ -271,8 +297,59 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
         if not unit.sources:
             issues.append(ConsolidationIssue(unit.id, unit.title, "no source"))
         content_len = len(unit.content.strip())
-        if content_len < MIN_CONTENT_LENGTH or content_len > MAX_CONTENT_LENGTH:
+        content_in_bounds = MIN_CONTENT_LENGTH <= content_len <= MAX_CONTENT_LENGTH
+        if not content_in_bounds:
             issues.append(ConsolidationIssue(unit.id, unit.title, "content length out of bounds"))
+        # Vague-content heuristic: only meaningful when content is in-bounds
+        # (length check already handled the empty/oversized case). Flag units
+        # whose content is too thin to carry durable signal — either fewer than
+        # MIN_MEANINGFUL_TOKENS 4-letter tokens, or content that essentially
+        # restates the title (strict fewer tokens than the title and <12 total).
+        # Skip entirely when content is non-Latin-heavy (CJK or other scripts):
+        # the Latin-tokenizer can't evaluate "meaningfulness" on scripts it
+        # doesn't recognize, and we'd over-flag legitimate CJK claims.
+        if content_in_bounds:
+            meaningful = claim_tokens(unit.content)
+            if (
+                meaningful
+                and content_len < _VAGUE_CONTENT_LENGTH_CEILING
+                and not _has_non_latin_content(unit.content)
+            ):
+                title_tokens = claim_tokens(unit.title)
+                too_few = len(meaningful) < MIN_MEANINGFUL_TOKENS
+                # Title-echo: content has FEWER tokens than the title AND
+                # the total is small. A strict-less-than comparison avoids
+                # false positives where content and title were derived from
+                # the same source text and happen to share identical token
+                # counts. The heuristic still catches true restatements
+                # ("ok thanks" / title="Thanks" → 2 content tokens, 1 title).
+                title_echo = (
+                    len(title_tokens) > 0
+                    and len(meaningful) < len(title_tokens)
+                    and len(meaningful) < 12
+                )
+                if too_few or title_echo:
+                    issues.append(
+                        ConsolidationIssue(
+                            unit.id, unit.title, "vague content (insufficient signal)"
+                        )
+                    )
+        if content_in_bounds and content_len > CRYSTAL_MAX_CONTENT_LENGTH:
+            issues.append(
+                ConsolidationIssue(
+                    unit.id,
+                    unit.title,
+                    f"content exceeds crystal budget ({content_len} > {CRYSTAL_MAX_CONTENT_LENGTH} chars)",
+                )
+            )
+        if unit.sources and not _has_strong_provenance(unit):
+            issues.append(
+                ConsolidationIssue(
+                    unit.id,
+                    unit.title,
+                    "insufficient provenance for crystal (needs a quote or ≥2 sources)",
+                )
+            )
         title_key = (unit.project, unit.title.strip().casefold())
         previous = seen_titles.get(title_key)
         if previous is not None:
@@ -281,28 +358,48 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
             )
         else:
             seen_titles[title_key] = unit.id
+        # Stale-path check now applies to ANY source whose source_ref is an
+        # absolute filesystem path (DOCUMENT and beyond). The absolute-path
+        # guard ensures non-path refs like "manual:1" or
+        # "history_message:membox-capture:..." are not misclassified.
+        seen_stale_refs: set[str] = set()
         for source in unit.sources:
-            if source.source_kind in {
-                MemorySourceKind.MANUAL,
-                MemorySourceKind.HISTORY_MESSAGE,
-                MemorySourceKind.HISTORY_EVENT,
-                MemorySourceKind.RELATION,
-                MemorySourceKind.UNIT,
-            }:
+            ref = source.source_ref
+            if not ref or ref in seen_stale_refs:
                 continue
-            if source.source_kind == MemorySourceKind.DOCUMENT:
-                ref = source.source_ref
-                if ref and Path(ref).is_absolute() and not Path(ref).exists():
-                    issues.append(
-                        ConsolidationIssue(
-                            unit.id,
-                            unit.title,
-                            f"stale source path: {ref}",
-                        )
-                    )
+            if Path(ref).is_absolute() and not Path(ref).exists():
+                issues.append(ConsolidationIssue(unit.id, unit.title, f"stale source path: {ref}"))
+                seen_stale_refs.add(ref)
         if unit.sources and _unsupported_claim(unit):
             issues.append(ConsolidationIssue(unit.id, unit.title, "unsupported claim heuristic"))
     return issues
+
+
+def _has_non_latin_content(text: str) -> bool:
+    """Return whether *text* contains any non-Latin characters.
+
+    Used to gate the vague-content heuristic so CJK or other-script content
+    isn't evaluated against a Latin-only tokenizer. Any single non-Latin
+    character is enough — the heuristic is Latin-token based and would
+    otherwise over-flag legitimate multilingual claims.
+    """
+    if not text:
+        return False
+    return any(ord(char) > 0x02FF for char in text)
+
+
+def _has_strong_provenance(unit: MemoryUnitRecord) -> bool:
+    """Return whether a unit has enough evidence to deserve crystal promotion.
+
+    Strong provenance requires EITHER one source carrying a non-empty quote
+    (i.e. the agent saw the actual claim text), OR at least two distinct
+    source_refs (independent observations). A single thin source — no quote,
+    one ref — is treated as too weak to anchor a durable crystal.
+    """
+    if any((s.quote or "").strip() for s in unit.sources):
+        return True
+    distinct_refs = {s.source_ref for s in unit.sources if s.source_ref}
+    return len(distinct_refs) >= 2
 
 
 def detect_conflicts(units: list[MemoryUnitRecord]) -> list[ConsolidationConflict]:
