@@ -4,18 +4,24 @@
 
 **Severity legend**: Major = blocks a Stabilization Track work item or corrupts user-visible data; Minor = UX/copy/wording that does not block but should be fixed before v0.1.0.
 
-**Ordering rationale**: D3 (lifecycle chain breaks) is the most upstream — without it, S1 cannot produce any memory units, so D1 / D2 / FTS work / distill work / PR5-deferred review items all have no substrate to verify against. D1 + D2 share a file with D6; D4 is independent; D5 is one-line.
+**Current status**: current code has regression coverage for D1–D6. This
+directory remains as the discovery record from the initial dogfooding pass.
+
+**Ordering rationale used**: D3 (lifecycle chain breaks) was the most upstream
+item — without it, S1 could not produce any memory units, so D1 / D2 / FTS work
+/ distill work / PR5-deferred review items had no substrate to verify against.
+D1 + D2 shared a file with D6; D4 was independent; D5 was one-line.
 
 | ID | Severity | Title | File |
 |---|---|---|---|
-| [D1](./D1-history-around-msgid-not-found.md) | Major | `membox history around <msg_id>` returns "no such message" for an id returned by SQLite | `src/membox/cli/commands/history.py` |
-| [D2](./D2-history-search-no-hits-on-known-text.md) | Major | `membox history search <q>` returns "No history hits" for words that exist in the imported text | `src/membox/cli/commands/history.py` (likely) |
-| [D3](./D3-memory-extract-creates-zero-units.md) | Major | `membox memory extract --apply` reports "Created 0 units" even when triage produced N trace rows — lifecycle chain breaks in the offline path | `src/membox/core/memory_extractor.py` (or equivalent) |
-| [D4](./D4-corrupt-jsonl-silently-loses-records.md) | Major | Corrupted JSONL line is silently absorbed; importer reports success with reduced counts, no warning | `src/membox/core/history_import.py` |
-| [D5](./D5-distill-apply-error-message-stale.md) | Minor | `membox distill` without `--dry-run` errors with stale message inconsistent with `--apply` help | `src/membox/cli/commands/distill.py` |
-| [D6](./D6-session-root-error-msg-conflates-cases.md) | Minor | `MEMBOX_SESSION_ROOT` required-error conflates "no path" with "no session_root" | `src/membox/cli/commands/history.py` |
+| [D1](./D1-history-around-msgid-not-found.md) | Major | Done — `history around <id_from_sqlite>` resolves the exact message id | `tests/test_history_cli.py` |
+| [D2](./D2-history-search-no-hits-on-known-text.md) | Major | Done — search path is covered, and scoped misses explain `--project` / `--all-projects` | `tests/test_history_cli.py` |
+| [D3](./D3-memory-extract-creates-zero-units.md) | Major | Done — deterministic triage → extract creates units without an LLM | `tests/test_lifecycle_acceptance.py` |
+| [D4](./D4-corrupt-jsonl-silently-loses-records.md) | Major | Done — malformed JSONL lines are reported and produce a visible failure | `tests/test_history_cli.py`, `tests/test_history_importers.py` |
+| [D5](./D5-distill-apply-error-message-stale.md) | Minor | Done — `distill` uses the `--apply is not yet implemented` wording | `tests/test_distill.py` |
+| [D6](./D6-session-root-error-msg-conflates-cases.md) | Minor | Done — missing session root error lists path/env/flag options | `tests/test_history_cli.py` |
 
-**Execution order proposed for S2 / S3 work** (informs PR sequencing, not contract):
+**Execution order used for S2 / S3 work** (historical record):
 
 1. D3 — restores the lifecycle chain. Without it S1 has no substrate.
 2. D1 + D2 — read-path regressions on the same CLI file; one fixup PR after the read path is traced.

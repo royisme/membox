@@ -3,7 +3,7 @@
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
 **Last updated**: 2026-06-12 (PR #5 squash-merged — Lifecycle Track Phases A–F complete; Phase 8 deferred; Stabilization Track S1–S5 is the active focus)
-**Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F are complete and on main. Phase 8 (tree-sitter AST analysis) is deferred to the next milestone. Next step: S1 Dogfooding — end-to-end history pull → process → triage → consolidate → distill → `query --include-memory` on membox's own dev sessions.
+**Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F are complete and on main. Phase 8 (tree-sitter AST analysis) is deferred to the next milestone. S2 robustness and S3 deferred PR #5 items are complete in the current code; next step is the remaining S1 full real-session dogfooding run — end-to-end history pull → process → triage → consolidate → distill → `query --include-memory` on membox's own dev sessions.
 
 ### Pending user decisions before next work item
 - Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
@@ -150,11 +150,11 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 0. **Lifecycle Track A–F complete** — all phases merged to main via PR #5 (`feature/history-pull`, 2026-06-12). ~~Phase E merged to main `f274d27`.~~ ~~plan_06 (Phase F distill workflow + skill file) — done PR #5.~~
 0b. **Phase 8 (tree-sitter AST) deferred** — owner decision 2026-06-12. Stabilization and v0.1.0 release take priority. See `docs/roadmap.md` Stabilization Track and Phase 8 deferral note.
-1. **S1 Dogfooding** (first) — end-to-end run: `history import` → `process` → `memory triage/extract/consolidate` → `distill` → `query --include-memory` on membox's own dev sessions. File defects found.
-2. S2 Robustness — corrupt/partial JSONL lines, idempotent re-import, interrupted worker recovery, empty/missing session roots.
-3. S3 Deferred review items from PR #5 / plan_06: consolidate CLI N+1 source counts, atomic apply batching, FTS-based conflict candidate pairing, LLM-backed conflict comparator (injectable Protocol), gate v4 (--help-dump event family).
-4. S4 Performance sanity — import + process timing on a large real history; document baseline.
-5. S5 Release — README quickstart (history pull/distill), changelog via `scripts/generate_changelog.py`, version bump via `scripts/bump_version.py`, tag v0.1.0.
+1. **S1 Dogfooding** — initial fixture-based pass filed D1–D6 and those defects now have regression coverage. Remaining work: run the full end-to-end flow on representative real membox sessions: `history pull` → `process` → `memory triage/extract/consolidate` → `distill` → `query --include-memory`.
+2. ~~S2 Robustness~~ — complete in current code: malformed JSONL reporting, idempotent re-import, worker crash recovery, and clean missing-session-root errors.
+3. ~~S3 Deferred review items from PR #5 / plan_06~~ — complete in current code: batched source counts, atomic apply, FTS review pairs, injectable comparator protocol, and `heuristic-v4`.
+4. **S4 Performance sanity** — import + process timing on a large real history; document baseline.
+5. **S5 Release** — README quickstart (history pull/distill), changelog via `scripts/generate_changelog.py`, version bump via `scripts/bump_version.py`, tag v0.1.0.
 6. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms.
 7. ~~Phase C~~ — done session 11. ~~Phase D~~ — done session 12. ~~Re-snapshot eval corpus~~ — done 2026-06-11.
 
