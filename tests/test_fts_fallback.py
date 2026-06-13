@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 from membox.config import RetrievalConfig
 from membox.core.agent import MemoryAgent
 from membox.core.store import KnowledgeStore
-from membox.core.store.retrieval import _cjk_trigram_terms, _fts5_or_query
+from membox.core.store.fts import (
+    CJK_TRIGRAM_LIMIT,
+    cjk_anchor_terms,
+    cjk_trigram_terms,
+    fts5_or_query,
+)
 from membox.core.tokens import est_tokens
 from membox.model.schema import ExtractedEntity, ExtractedGraph, ExtractedRelation
 from membox.services.extraction import DummyExtractor
@@ -41,24 +46,24 @@ class TestFts5OrQuery:
     """Tokenisation of natural-language questions into OR-of-tokens MATCH."""
 
     def test_multi_token(self) -> None:
-        assert _fts5_or_query("storage backend") == '"storage" OR "backend"'
+        assert fts5_or_query("storage backend") == '"storage" OR "backend"'
 
     def test_strips_fts_specials_and_punctuation(self) -> None:
-        assert _fts5_or_query('what is "the" backend?') == '"what" OR "is" OR "the" OR "backend"'
+        assert fts5_or_query('what is "the" backend?') == '"what" OR "is" OR "the" OR "backend"'
 
     def test_empty_query(self) -> None:
-        assert _fts5_or_query("   ") == '""'
+        assert fts5_or_query("   ") == '""'
 
     def test_cjk_punctuation_stripped(self) -> None:
-        assert _fts5_or_query("存储后端是什么?") == '"存储后端是什么"'
+        assert fts5_or_query("存储后端是什么?") == '"存储后端是什么"'
 
     def test_cjk_trigram_terms_for_sidecar(self) -> None:
-        assert _cjk_trigram_terms("苏轼八字") == ["苏轼八", "轼八字"]
+        assert cjk_trigram_terms("苏轼八字") == ["苏轼八", "轼八字"]
 
     def test_cjk_content_score_counts_maximal_terms_only(self) -> None:
-        from membox.core.store.retrieval import _cjk_anchor_terms, _cjk_content_score
+        from membox.core.store.retrieval import _cjk_content_score
 
-        anchors = _cjk_anchor_terms("苏轼八字案例")
+        anchors = cjk_anchor_terms("苏轼八字案例")
         # Document covering the full phrase scores its maximal terms only:
         # the 4-gram matches subsume every contained 2/3-gram.
         full = _cjk_content_score("文中提到苏轼八字案例上线。", anchors)
@@ -172,7 +177,7 @@ class TestFallbackChunks:
             store._conn()
             .execute(
                 "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?;",
-                (_fts5_or_query(query),),
+                (fts5_or_query(query),),
             )
             .fetchall()
         )
@@ -385,7 +390,7 @@ class TestCjkFallbackBehavior:
     def test_trigram_terms_empty_for_short_cjk_runs(self) -> None:
         """_cjk_trigram_terms returns [] when all CJK runs are 1-2 chars long."""
         # "苏轼" is a 2-char run — no 3-char trigram can be formed.
-        assert _cjk_trigram_terms("苏轼") == []
+        assert cjk_trigram_terms("苏轼") == []
 
     def test_cjk_no_sidecar_falls_through_to_unicode61(self, tmp_path: Path) -> None:
         """CJK query with trigram terms on a DB without the sidecar uses unicode61.
@@ -470,11 +475,9 @@ class TestCjkFallbackBehavior:
 
     def test_cjk_trigram_term_cap(self) -> None:
         """A very long CJK query emits at most _CJK_TRIGRAM_LIMIT (64) terms."""
-        from membox.core.store.retrieval import _CJK_TRIGRAM_LIMIT
-
         # Build a run of 100 distinct CJK ideographs (U+4E00..U+4E63).
         # A 100-char run yields 98 unique trigrams before dedup, so the cap
         # at 64 is always reached.  Use chr() so the literal stays ASCII.
         long_query = "".join(chr(c) for c in range(0x4E00, 0x4E00 + 100))
-        terms = _cjk_trigram_terms(long_query)
-        assert len(terms) == _CJK_TRIGRAM_LIMIT
+        terms = cjk_trigram_terms(long_query)
+        assert len(terms) == CJK_TRIGRAM_LIMIT

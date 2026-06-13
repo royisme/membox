@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
 from membox.core.consolidate import ConsolidationTransition, evolved_confidence
-from membox.core.store.retrieval import (
-    _cjk_trigram_terms,
-    _contains_cjk,
-    _fts5_or_query,
-    _fts5_query_from_terms,
+from membox.core.store.fts import (
+    cjk_trigram_terms,
+    contains_cjk,
+    fts5_or_query,
+    fts5_query_from_terms,
 )
 from membox.model.schema import (
     MEMORY_LABELS,
@@ -808,17 +808,17 @@ class MemoryUnitOps:
         if not query.strip() or limit <= 0:
             return []
         conn = self._cm.connection()
-        if _contains_cjk(query):
-            terms = _cjk_trigram_terms(query)
+        if contains_cjk(query):
+            terms = cjk_trigram_terms(query)
             if terms:
                 fts_name = "memory_units_fts_trigram"
-                match_expr = _fts5_query_from_terms(terms)
+                match_expr = fts5_query_from_terms(terms)
             else:
                 fts_name = "memory_units_fts"
-                match_expr = _fts5_or_query(query)
+                match_expr = fts5_or_query(query)
         else:
             fts_name = "memory_units_fts"
-            match_expr = _fts5_or_query(query)
+            match_expr = fts5_or_query(query)
         if match_expr == '""':
             return []
         clauses = [f"{fts_name} MATCH ?"]
@@ -1100,11 +1100,11 @@ def _trace_session_key(source_ref: str) -> str:
 
 def _memory_fts_table_and_query(query: str) -> tuple[str, str]:
     """Choose memory-unit FTS sidecar and MATCH expression for a query."""
-    if _contains_cjk(query):
-        terms = _cjk_trigram_terms(query)
+    if contains_cjk(query):
+        terms = cjk_trigram_terms(query)
         if terms:
-            return "memory_units_fts_trigram", _fts5_query_from_terms(terms)
-    return "memory_units_fts", _fts5_or_query(query)
+            return "memory_units_fts_trigram", fts5_query_from_terms(terms)
+    return "memory_units_fts", fts5_or_query(query)
 
 
 def _normalized_bm25(rank: float, best: float, worst: float) -> float:
