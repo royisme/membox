@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from membox.core.history_import import fetch_payload, import_history
 from membox.core.store import KnowledgeStore
@@ -41,6 +41,11 @@ def test_claude_project_dirname_handles_repo() -> None:
         _claude_project_dirname(Path("/Users/royzhu/software/myproject/python/membox"))
         == "-Users-royzhu-software-myproject-python-membox"
     )
+
+
+def test_claude_project_dirname_normalizes_windows_drive() -> None:
+    """Windows drive paths do not leak the drive letter or backslashes."""
+    assert _claude_project_dirname(PureWindowsPath("D:/Users/royzhu/proj")) == "-Users-royzhu-proj"
 
 
 # ---------------------------------------------------------------------------
