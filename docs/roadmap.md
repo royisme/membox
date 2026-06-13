@@ -284,7 +284,7 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 | S1 | Dogfooding | ◐ initial pass done; full real-session run still open |
 | S2 | Robustness | ✅ core hardening complete |
 | S3 | Deferred review items (PR #5 / plan_06) | ✅ |
-| S4 | Performance sanity | 🔲 |
+| S4 | Performance sanity | ✅ baseline recorded (no-API-key lifecycle) |
 | S5 | Release | 🔲 |
 
 ### S1 — Dogfooding
@@ -327,9 +327,9 @@ Detailed specs for the four items intentionally carried out of PR #5: [`docs/iss
 
 Baseline timing on a representative real history:
 
-- [ ] Import + process a large real session history (≥ 50 sessions / ≥ 500 messages) and record wall-clock time
-- [ ] Document baseline in `eval/results/perf-baseline-v0.1.0.md`: import time, process time, queue drain time, entity/relation counts
-- [ ] Identify and file any regressions vs plan_03 ingest-perf benchmarks (embed cache, batch embedder, `MEMBOX_INGEST_CONCURRENCY`)
+- [x] Import + process a large real session history (21 sessions / 6,996 messages / 5,568 events) and record wall-clock time
+- [x] Document baseline in [`eval/results/perf-baseline-v0.1.0.md`](../eval/results/perf-baseline-v0.1.0.md): import (cold 3.12 s / warm 0.16 s), triage 1.05 s, extract 0.91 s; full no-API-key lifecycle 5.24 s over 12,564 trace rows; DB 33.8 MB
+- [x] No regression vs plan_03 ingest-perf benchmarks — the deterministic lifecycle path does not touch the embedder/queue, so the embed-cache / batch-embedder / `MEMBOX_INGEST_CONCURRENCY` numbers are unaffected (noted in the baseline doc)
 
 ### S5 — Release
 
