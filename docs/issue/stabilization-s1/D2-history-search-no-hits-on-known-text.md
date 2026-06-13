@@ -51,3 +51,27 @@ Three candidates — verify by reading the code, not by guessing:
 - After importing the smoke fixture, `history search "membox"` returns ≥ 1 hit.
 - The contract — does the search default to the current project, or is `--project` mandatory? — is documented in the `history search` help text.
 - A test pins the FTS-vs-table path against future drift.
+
+## Resolution (2026-06-13)
+
+**The FTS index was never the problem.** Verified on current `main`: a real
+`membox history pull --adapt claude` (21 sessions, 6875 messages, no
+`--project` override) followed by `history search` returns hits at default
+scope for every known word. The original "No history hits" repro was a
+**test asymmetry** — the fixture was imported with `--project smoke` but searched
+with the CWD-inferred project (`membox`), so the scope filter dropped every row.
+
+The real latent defect was a **write/read project-inference divergence**: the
+Claude importer labelled sessions with `basename(session.cwd)`
+(`services/importers/claude_jsonl.py`), while `history search` infers scope via
+`infer_project` = the **git-root** name (`cli/commands/history.py`). These agree
+only when a session's cwd *is* the git root; for work done in a **subdirectory of
+a larger repo / monorepo** they diverge and search silently returns nothing.
+
+**Fix**: `core/history_import.py::history_pull` now resolves the project once via
+`project or infer_project(project_cwd / "_")` and passes that to every
+`import_history`, so the write path and the read path use the *same* function by
+construction. Regression test:
+`tests/test_history_importers.py::test_history_pull_project_label_matches_infer_project`
+constructs a session whose recorded cwd basename (`subdir`) differs from the
+git-root name (`gitroot`) and asserts search at default scope still finds it.

@@ -2,7 +2,7 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-13 (session 14 — four approved issue designs implemented and **merged to main** (#9→#12); zero-external-service end-to-end chain verified on main)
+**Last updated**: 2026-06-13 (session 15 — S1-D2 investigated: not an FTS bug; the real write/read project-inference divergence fixed on `fix/d2-history-search-project-scope`, gate green 642 tests)
 **Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F + the four `docs/issue/*` designs (claude adapter, checkpoint, agent-as-provider, dream side) are on main; Phase 8 (tree-sitter AST) deferred. Session 14 merged #9→#12 in order (main `fdfc2f0`), **migration head now 0009**, full gate green on main (641 tests). The Claude adapter was the S1 dogfooding co-requisite, so the full real-session chain now runs on main with **no API key**.
 
 ### Pending user decisions before next work item
@@ -16,6 +16,12 @@
 - **The Phase E strict eval gate (`--expect-hits 24`) is local/agent-only, not CI-enforced**: it needs `eval/corpus`, which is gitignored private data (plan_02), so `tests/test_m3_retrieval.py::test_offline_eval_exact_hit_gate` skips on CI. The E0 byte-stability contract is guarded by whoever runs the milestone gate locally — do not assume CI covers it.
 
 ---
+
+### Session 15 (2026-06-13) — S1-D2 root-caused (not an FTS bug) + write/read project-inference unified
+- **Verdict: D2 does not reproduce in the real flow.** A genuine `membox history pull --adapt claude` (21 sessions / 6875 msgs, no `--project` override) stores everything under project `membox`, and `history search` at default scope returns hits for every known word. The original "No history hits" repro was a **test asymmetry** (imported with `--project smoke`, searched with CWD-inferred `membox`). The FTS index is populated correctly — none of the issue doc's three "likely causes" held.
+- **Real latent defect found + fixed** (`fix/d2-history-search-project-scope`, unmerged): write-side and read-side inferred the project label by *different* functions — Claude importer used `basename(session.cwd)` (`services/importers/claude_jsonl.py`), `history search` uses `infer_project` = git-root name (`cli/commands/history.py`). They diverge only when a session's cwd ≠ git root (subdir/monorepo). Fix: `core/history_import.py::history_pull` resolves `effective_project = project or infer_project(project_cwd / "_")` **once** and passes it to every `import_history`, so both paths use the same function by construction. Single-file `import_history(path)` left as-is (explicit/foreign-file path).
+- **Regression test** `tests/test_history_importers.py::test_history_pull_project_label_matches_infer_project` builds a session whose recorded cwd basename (`subdir`) ≠ git-root name (`gitroot`) and asserts default-scope search still finds it — a true regression (fails pre-fix). Full gate green: **642 passed**, ruff + format + strict mypy clean.
+- Docs synced: `docs/issue/stabilization-s1/D2*.md` Resolution section + README row updated. **Note:** HANDOFF item 14's "`query` recall sharpness gap" referenced `history search`, now resolved; whether `membox query` (the KG retrieval path) has a separate recall concern is still unverified.
 
 ### Session 14 (2026-06-13) — four issue designs implemented as stacked PRs #9→#12 (zero-external-service chain)
 - **Scope**: implemented the four owner-approved designs under `docs/issue/` — claude-adapter, checkpoint-command, agent-as-llm-provider, dream-consolidation. Orchestrated via subagents (sonnet implement / haiku recon); each milestone is its own feature branch + PR, stacked, green on `pytest && ruff check && ruff format --check && mypy src tests`, and smoke-verified against 20 real `~/.claude/projects` sessions. Detail lives in the commit messages + PR bodies (#9–#12); headlines only here.
@@ -156,7 +162,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 11. ~~Plan_04 / Phase D~~ — **resolved session 12**: D0 NEEDS-v3-TUNING → v3 round → owner final OK → merged to main (`1861b8d`). Accepted residual risks recorded in plan_04's D0 package (--help-dump events, instruction blobs, C5 type-accuracy semantics).
 12. **Conflict-detector calibration**: first cut is a deterministic word-list signal, fixture-correct but real-trace recall uncalibrated/expected low. LLM-backed comparator via injectable Protocol is the planned follow-up (post-D0, likely alongside Phase E).
 13. ~~Merge the session-14 stack (#9→#12)~~ — **resolved 2026-06-13**: merged to main in order (`fdfc2f0`), gate green on main, migration head 0009, four feature branches deleted. M4-A2 FULL approach + the two A2 calibrations are now on main.
-14. **Pre-existing `query` recall defect (S1-D2)** — recall works for matched terms, but the known "no hits for known text" sharpness gap remains; out of scope for the session-14 milestones, still tracked under S1.
+14. ~~Pre-existing `query` recall defect (S1-D2)~~ — **resolved session 15**: not an FTS bug. The "no hits for known text" repro was a test scope-asymmetry; the real defect was a write/read project-inference divergence, fixed on `fix/d2-history-search-project-scope` (unmerged) with a true regression test. **New, separate open item**: whether `membox query` (the KG retrieval path, distinct from `history search`) has its own recall concern is unverified — investigate before v0.1.0 if interactive recall matters.
 
 ---
 
@@ -165,7 +171,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 0. **Lifecycle Track A–F complete** — all phases merged to main via PR #5 (`feature/history-pull`, 2026-06-12). ~~Phase E merged to main `f274d27`.~~ ~~plan_06 (Phase F distill workflow + skill file) — done PR #5.~~
 0b. **Phase 8 (tree-sitter AST) deferred** — owner decision 2026-06-12. Stabilization and v0.1.0 release take priority. See `docs/roadmap.md` Stabilization Track and Phase 8 deferral note.
 1. ~~Merge the session-14 stack~~ — **done 2026-06-13**: #9→#12 merged in order (main `fdfc2f0`), gate green, migration head 0009; the four merged `feature/*` branches deleted.
-1b. **S1 Dogfooding** — the Claude adapter (the missing co-requisite) is now on main, so the full real-session chain runs with no API key and was verified in session 14 (checkpoint → query --include-memory → extract-prompt/ingest-graph → memory export). Remaining: a broader dogfooding pass on representative real sessions and folding any findings into S1. The known `query` recall sharpness gap (S1-D2) is still open and worth a pass.
+1b. **S1 Dogfooding** — the Claude adapter (the missing co-requisite) is now on main, so the full real-session chain runs with no API key and was verified in session 14 (checkpoint → query --include-memory → extract-prompt/ingest-graph → memory export). ~~The known `query` recall sharpness gap (S1-D2) is still open~~ — **D2 resolved session 15** (`fix/d2-history-search-project-scope`, needs merge). Remaining: a broader dogfooding pass on representative real sessions; and optionally verify whether `membox query` (KG path) has a recall concern distinct from `history search`.
 2. ~~S2 Robustness~~ — complete in current code: malformed JSONL reporting, idempotent re-import, worker crash recovery, and clean missing-session-root errors.
 3. ~~S3 Deferred review items from PR #5 / plan_06~~ — complete in current code: batched source counts, atomic apply, FTS review pairs, injectable comparator protocol, and `heuristic-v4`.
 4. **S4 Performance sanity** — import + process timing on a large real history; document baseline.

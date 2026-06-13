@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
+from membox.core.project import infer_project
 from membox.model.schema import HistorySessionRecord, SourceKind
 from membox.services.importers import get_importer
 from membox.services.importers.common import count_malformed_jsonl_lines
@@ -100,6 +101,13 @@ def history_pull(
     if not discovered:
         return PullResult(sessions=0, messages=0, events=0, skipped_lines=0, files=[])
 
+    # Resolve the project label with the SAME function the read path uses
+    # (``infer_project`` walks to the git root), so a no-override pull and a
+    # later ``history search`` agree on scope even when the session's recorded
+    # cwd is a subdirectory of the git root.  Importers otherwise fall back to
+    # the basename of the session cwd, which diverges from the read-path scope.
+    effective_project = project or infer_project(project_cwd / "_")
+
     total_msg = 0
     total_evt = 0
     total_skipped_lines = 0
@@ -109,7 +117,7 @@ def history_pull(
             store,
             path,
             format_name,
-            project=project,
+            project=effective_project,
             text_cap_bytes=text_cap_bytes,
         )
         if not result["skipped"]:

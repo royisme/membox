@@ -15,7 +15,7 @@ D1 + D2 shared a file with D6; D4 was independent; D5 was one-line.
 | ID | Severity | Title | File |
 |---|---|---|---|
 | [D1](./D1-history-around-msgid-not-found.md) | Major | Done — `history around <id_from_sqlite>` resolves the exact message id | `tests/test_history_cli.py` |
-| [D2](./D2-history-search-no-hits-on-known-text.md) | Major | Done — search path is covered, and scoped misses explain `--project` / `--all-projects` | `tests/test_history_cli.py` |
+| [D2](./D2-history-search-no-hits-on-known-text.md) | Major | Done — not an FTS bug (test asymmetry); write/read project inference now unified at pull time so subdir/monorepo scopes match | `tests/test_history_cli.py`, `tests/test_history_importers.py` |
 | [D3](./D3-memory-extract-creates-zero-units.md) | Major | Done — deterministic triage → extract creates units without an LLM | `tests/test_lifecycle_acceptance.py` |
 | [D4](./D4-corrupt-jsonl-silently-loses-records.md) | Major | Done — malformed JSONL lines are reported and produce a visible failure | `tests/test_history_cli.py`, `tests/test_history_importers.py` |
 | [D5](./D5-distill-apply-error-message-stale.md) | Minor | Done — `distill` uses the `--apply is not yet implemented` wording | `tests/test_distill.py` |
