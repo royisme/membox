@@ -9,6 +9,8 @@ from typer.testing import CliRunner
 
 from membox.cli import app
 from membox.core.consolidate import (
+    ConsolidationConflict,
+    ConsolidationPlan,
     ConsolidationTransition,
     build_consolidation_plan,
     crystal_policy,
@@ -219,6 +221,40 @@ def test_optional_llm_comparator_filters_low_scoring_transitions(tmp_path: Path)
 
     assert [transition.unit_id for transition in default_plan.promotions] == [unit_id]
     assert filtered_plan.promotions == []
+
+
+def test_consolidation_plan_exposes_order_and_review_pairs() -> None:
+    """Plan helpers keep apply ordering and review aggregation in the core module."""
+    supersede = ConsolidationTransition(
+        1, "supersede", MemoryUnitStatus.SUPERSEDED, "newer unit", superseded_by=2
+    )
+    archive = ConsolidationTransition(3, "archive", MemoryUnitStatus.ARCHIVED, "expired")
+    promote = ConsolidationTransition(4, "promote", MemoryUnitStatus.CRYSTAL, "confirmed")
+    candidate = ConsolidationTransition(
+        5, "candidate", MemoryUnitStatus.CRYSTAL_CANDIDATE, "review"
+    )
+    demote = ConsolidationTransition(6, "demote", MemoryUnitStatus.ACTIVE_UNIT, "rejected")
+    conflict = ConsolidationConflict(7, 8, "left", "right", "hard conflict", ["a"])
+    fts_pair = ConsolidationConflict(9, 10, "fts left", "fts right", "fts pair", ["b"])
+    plan = ConsolidationPlan(
+        supersessions=[supersede],
+        decay_archives=[archive],
+        promotions=[promote],
+        candidates=[candidate],
+        demotions=[demote],
+        conflicts=[conflict],
+        fts_pairs=[fts_pair],
+    )
+
+    assert plan.ordered_transitions() == [supersede, archive, promote, candidate, demote]
+    assert plan.transition_groups() == (
+        ("supersede", [supersede]),
+        ("archive", [archive]),
+        ("promote", [promote]),
+        ("candidate", [candidate]),
+        ("demote", [demote]),
+    )
+    assert plan.review_pairs() == [conflict, fts_pair]
 
 
 def test_consolidate_apply_promotes_candidates_and_logs(tmp_path: Path) -> None:
