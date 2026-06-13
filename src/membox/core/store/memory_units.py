@@ -808,17 +808,7 @@ class MemoryUnitOps:
         if not query.strip() or limit <= 0:
             return []
         conn = self._cm.connection()
-        if contains_cjk(query):
-            terms = cjk_trigram_terms(query)
-            if terms:
-                fts_name = "memory_units_fts_trigram"
-                match_expr = fts5_query_from_terms(terms)
-            else:
-                fts_name = "memory_units_fts"
-                match_expr = fts5_or_query(query)
-        else:
-            fts_name = "memory_units_fts"
-            match_expr = fts5_or_query(query)
+        fts_name, match_expr = _memory_fts_table_and_query(query)
         if match_expr == '""':
             return []
         clauses = [f"{fts_name} MATCH ?"]
