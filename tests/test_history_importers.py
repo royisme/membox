@@ -1,16 +1,24 @@
 """Tests for the Phase B history importer utilities and format parsers.
 
 Covers: synth_external_id stability and dedup, iter_jsonl partial-line
-handling, event ID file-position independence, and the Codex JSONL importer.
+handling, event ID file-position independence, the Codex JSONL importer, and
+the D2 project-scope regression (history_pull project label matches
+infer_project, not basename of the session's recorded cwd).
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from membox.core.history_import import import_history
+from membox.core.history_import import history_pull, import_history
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
+from membox.services.importers.claude_jsonl import (
+    ClaudeJsonlImporter,
+    _claude_project_dirname,
+)
 from membox.services.importers.codex_jsonl import CodexJsonlImporter
 from membox.services.importers.common import iter_jsonl, synth_external_id
 
@@ -313,3 +321,115 @@ def test_codex_importer_via_import_history(tmp_path: Path) -> None:
     session = store.get_history_session(result["session_id"])
     assert session is not None
     assert session["project"] == "myproject"
+
+
+# ---------------------------------------------------------------------------
+# 15. D2 regression — history_pull project label matches infer_project
+# ---------------------------------------------------------------------------
+
+
+def test_history_pull_project_label_matches_infer_project(tmp_path: Path) -> None:
+    """D2 regression: auto-discovery pull stores with the git-root project name.
+
+    Before the fix, ``history_pull`` passed ``project=None`` to each importer,
+    which let the Claude importer fall back to ``basename(session.cwd)`` — the
+    subdirectory name recorded in the log.  The read-side (``history search``)
+    always calls ``infer_project`` which walks to the git root.  When the
+    session's recorded cwd is a *subdirectory* of the git root the two labels
+    diverge: write stores ``"subdir"``, read looks for ``"gitroot"``, and
+    search returns zero hits.
+
+    The fix: ``history_pull`` resolves ``effective_project`` via
+    ``infer_project(Path.cwd() / "_")`` once, before looping, so both sides
+    agree even when ``basename(session.cwd) != git-root-name``.
+
+    Layout::
+
+        tmp_path/
+          gitroot/          ← git root (.git/ lives here); name = "gitroot"
+            .git/
+            subdir/         ← cwd during pull; basename = "subdir" (diverges)
+          session_root/
+            <encoded-subdir>/
+              session.jsonl ← records cwd=gitroot/subdir
+    """
+    # Build a minimal fake git root so infer_project walks up to it.
+    gitroot = tmp_path / "gitroot"
+    subdir = gitroot / "subdir"
+    subdir.mkdir(parents=True)
+    (gitroot / ".git").mkdir()
+
+    git_root_name = gitroot.name  # "gitroot"
+    subdir_basename = subdir.name  # "subdir" — diverges from git_root_name
+
+    # Sanity-check the divergence this test is designed to exercise.
+    assert git_root_name != subdir_basename
+
+    # Verify infer_project resolves to the git root, not the subdir basename.
+    inferred = infer_project(subdir / "_")
+    assert inferred == git_root_name
+
+    # Build the Claude session-root layout.
+    # discover_sessions looks under session_root/<encoded-cwd>/*.jsonl
+    session_root = tmp_path / "session_root"
+    encoded = _claude_project_dirname(subdir)
+    project_dir = session_root / encoded
+    project_dir.mkdir(parents=True)
+
+    session_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    known_text = "xyzzy_unique_d2_regression_marker"
+
+    session_file = project_dir / "session.jsonl"
+    session_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "uuid-msg-1",
+                        "parentUuid": None,
+                        "sessionId": session_id,
+                        "timestamp": "2026-06-13T10:00:00Z",
+                        "cwd": str(subdir),
+                        "message": {
+                            "role": "user",
+                            "content": known_text,
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # Confirm the importer's discover_sessions finds the file when cwd=subdir.
+    importer = ClaudeJsonlImporter()
+    found = importer.discover_sessions(subdir, session_root)
+    assert found == [session_file]
+
+    # Change cwd to subdir (history_pull calls Path.cwd() internally).
+    orig_dir = Path.cwd()
+    try:
+        os.chdir(subdir)
+
+        store = KnowledgeStore(str(tmp_path / "memory.db"))
+        result = history_pull(
+            store,
+            "claude",
+            # No project override — auto-discovery path, same as `membox history pull`
+            session_root=session_root,
+        )
+    finally:
+        os.chdir(orig_dir)
+
+    assert result["sessions"] >= 1, "history_pull should have discovered the session file"
+
+    # The read-side uses infer_project(Path.cwd() / "_") = git_root_name.
+    # The fix ensures the write-side stored with the same label.
+    hits = store.search_history(known_text, project=git_root_name)
+    assert len(hits) >= 1, (
+        f"search_history found no hits for project={git_root_name!r}; "
+        f"the write-side likely stored under project={subdir_basename!r} "
+        "(the pre-fix divergence between basename(session.cwd) and infer_project)"
+    )
