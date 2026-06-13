@@ -7,7 +7,7 @@ import hashlib
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
-from membox.core.consolidate import evolved_confidence
+from membox.core.consolidate import ConsolidationTransition, evolved_confidence
 from membox.core.store.retrieval import (
     _cjk_trigram_terms,
     _contains_cjk,
@@ -422,6 +422,71 @@ class MemoryUnitOps:
             )
         return True
 
+    def transition_memory_units_atomically(
+        self,
+        transitions: list[ConsolidationTransition],
+        *,
+        command: str,
+    ) -> int:
+        """Apply memory-unit status transitions in one SQLite transaction."""
+        if not transitions:
+            return 0
+        with self._cm.transaction() as c:
+            for action in transitions:
+                row = c.execute(
+                    "SELECT status FROM memory_units WHERE id=?",
+                    (action.unit_id,),
+                ).fetchone()
+                if row is None:
+                    msg = f"no such unit: {action.unit_id}"
+                    raise ValueError(msg)
+                if action.superseded_by is not None:
+                    target = c.execute(
+                        "SELECT 1 FROM memory_units WHERE id=?",
+                        (action.superseded_by,),
+                    ).fetchone()
+                    if target is None:
+                        msg = f"no such supersession target: {action.superseded_by}"
+                        raise ValueError(msg)
+                    if action.superseded_by == action.unit_id:
+                        msg = f"unit cannot supersede itself: {action.unit_id}"
+                        raise ValueError(msg)
+                from_status = str(row[0])
+                cursor = c.execute(
+                    """
+                    UPDATE memory_units
+                    SET status=?,
+                        superseded_by=COALESCE(?, superseded_by),
+                        updated_at=datetime('now')
+                    WHERE id=? AND status=?
+                    """,
+                    (
+                        action.to_status.value,
+                        action.superseded_by,
+                        action.unit_id,
+                        from_status,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    msg = f"transition failed for unit: {action.unit_id}"
+                    raise ValueError(msg)
+                c.execute(
+                    """
+                    INSERT INTO memory_unit_status_log
+                        (unit_id, from_status, to_status, command, reason, source_ref)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action.unit_id,
+                        from_status,
+                        action.to_status.value,
+                        command,
+                        action.reason,
+                        "",
+                    ),
+                )
+        return len(transitions)
+
     def list_units_for_consolidation(
         self,
         *,
@@ -452,6 +517,57 @@ class MemoryUnitOps:
             params,
         ).fetchall()
         return [_unit_from_row(conn, row) for row in rows]
+
+    def fts_conflict_pairs_for_units(
+        self,
+        units: list[MemoryUnitRecord],
+        *,
+        top_k: int = 5,
+    ) -> set[tuple[int, int]]:
+        """Return candidate review pairs surfaced by the memory-unit FTS index."""
+        if top_k <= 0:
+            return set()
+        conn = self._cm.connection()
+        active_statuses = {
+            MemoryUnitStatus.ACTIVE_UNIT.value,
+            MemoryUnitStatus.CRYSTAL_CANDIDATE.value,
+            MemoryUnitStatus.CRYSTAL.value,
+        }
+        pairs: set[tuple[int, int]] = set()
+        for unit in units:
+            if unit.id is None or unit.status.value not in active_statuses:
+                continue
+            fts_name, match_expr = _memory_fts_table_and_query(f"{unit.title} {unit.content}")
+            if match_expr == '""':
+                continue
+            rows = conn.execute(
+                f"""
+                SELECT mu.id
+                FROM {fts_name}
+                JOIN memory_units mu ON mu.id={fts_name}.rowid
+                WHERE {fts_name} MATCH ?
+                  AND mu.id != ?
+                  AND mu.project = ?
+                  AND mu.status IN (?, ?, ?)
+                  AND mu.superseded_by IS NULL
+                ORDER BY bm25({fts_name})
+                LIMIT ?
+                """,
+                (
+                    match_expr,
+                    unit.id,
+                    unit.project,
+                    MemoryUnitStatus.ACTIVE_UNIT.value,
+                    MemoryUnitStatus.CRYSTAL_CANDIDATE.value,
+                    MemoryUnitStatus.CRYSTAL.value,
+                    top_k,
+                ),
+            ).fetchall()
+            for row in rows:
+                other_id = int(row[0])
+                left, right = sorted((unit.id, other_id))
+                pairs.add((left, right))
+        return pairs
 
     def list_units_for_distill(
         self,

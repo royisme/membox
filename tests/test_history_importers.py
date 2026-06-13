@@ -64,6 +64,37 @@ def test_iter_jsonl_skips_blank_and_garbage_lines(tmp_path: Path) -> None:
     assert records[1][0] == {"b": 2}
 
 
+def test_import_history_reports_malformed_jsonl_lines(tmp_path: Path) -> None:
+    """History import summary includes malformed line count for operator warnings."""
+    fixture = tmp_path / "bad.jsonl"
+    session_line = json.dumps(
+        {
+            "type": "session",
+            "id": "bad1",
+            "project": "demo",
+            "title": "bad jsonl",
+        }
+    )
+    message_line = json.dumps(
+        {
+            "type": "message",
+            "id": "m1",
+            "role": "user",
+            "text": "valid message after malformed line",
+        }
+    )
+    fixture.write_text(
+        "\n".join([session_line, "this line is not json", message_line]) + "\n",
+        encoding="utf-8",
+    )
+    store = KnowledgeStore(str(tmp_path / "memory.db"))
+
+    result = import_history(store, fixture, "membox", project="demo")
+
+    assert result["messages"] == 1
+    assert result["skipped_lines"] == 1
+
+
 def test_iter_jsonl_partial_trailing_line_not_advanced(tmp_path: Path) -> None:
     """A partial trailing line (no newline) does not advance the offset past it."""
     fixture = tmp_path / "partial.jsonl"

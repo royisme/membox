@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from membox.model.schema import HistorySessionRecord, SourceKind
 from membox.services.importers import get_importer
+from membox.services.importers.common import count_malformed_jsonl_lines
 
 if TYPE_CHECKING:
     from membox.core.store import KnowledgeStore
@@ -41,6 +42,7 @@ class ImportResult(TypedDict):
     session_id: str
     messages: int
     events: int
+    skipped_lines: int
     skipped: bool
 
 
@@ -58,6 +60,7 @@ class PullResult(TypedDict):
     sessions: int
     messages: int
     events: int
+    skipped_lines: int
     files: list[str]
 
 
@@ -94,10 +97,11 @@ def history_pull(
 
     discovered = importer.discover_sessions(project_cwd, session_root)
     if not discovered:
-        return PullResult(sessions=0, messages=0, events=0, files=[])
+        return PullResult(sessions=0, messages=0, events=0, skipped_lines=0, files=[])
 
     total_msg = 0
     total_evt = 0
+    total_skipped_lines = 0
     imported_files: list[str] = []
     for path in discovered:
         result = import_history(
@@ -110,12 +114,14 @@ def history_pull(
         if not result["skipped"]:
             total_msg += result["messages"]
             total_evt += result["events"]
+            total_skipped_lines += result["skipped_lines"]
             imported_files.append(str(path))
 
     return PullResult(
         sessions=len(discovered),
         messages=total_msg,
         events=total_evt,
+        skipped_lines=total_skipped_lines,
         files=imported_files,
     )
 
@@ -165,7 +171,11 @@ def import_history(
     if state is not None:
         if state["mtime"] == stat.st_mtime and state["size_bytes"] == stat.st_size:
             return ImportResult(
-                session_id=state["session_id"] or "", messages=0, events=0, skipped=True
+                session_id=state["session_id"] or "",
+                messages=0,
+                events=0,
+                skipped_lines=0,
+                skipped=True,
             )
         if 0 < state["offset_bytes"] <= stat.st_size and state["session_id"]:
             row = store.get_history_session(state["session_id"])
@@ -192,6 +202,7 @@ def import_history(
         next_seq=next_seq,
         session=prior_session,
     )
+    skipped_lines = count_malformed_jsonl_lines(resolved, offset)
     store.upsert_history_session(batch.session)
     n_msg = store.upsert_history_messages(
         batch.session, batch.messages, text_cap_bytes=text_cap_bytes
@@ -208,7 +219,13 @@ def import_history(
         "next_seq": batch.next_seq,
     }
     store.set_import_state(new_state)
-    return ImportResult(session_id=batch.session.id, messages=n_msg, events=n_evt, skipped=False)
+    return ImportResult(
+        session_id=batch.session.id,
+        messages=n_msg,
+        events=n_evt,
+        skipped_lines=skipped_lines,
+        skipped=False,
+    )
 
 
 def fetch_payload(

@@ -13,7 +13,7 @@ Scaffolding and runtime dependencies are ready.
 - [x] Minimal `cli.py` (`version` command)
 - [x] Optional dependency groups (`openai`, `tree-sitter`)
 
-## Phase 1 — Complete Framework Skeleton
+## Phase 1 — Complete Framework Skeleton ✅
 
 **Goal**: Every module, function signature, and protocol from CLI down to the lowest layer is in place. Function bodies can be stubs, but the **import chain must be fully connected**, and `membox --help` output lists all commands.
 
@@ -70,7 +70,7 @@ cli.py                         ← Typer commands, each calling the agent
 - `uv run pytest tests/` — skeleton tests pass (stubs do not crash)
 - **Import chain is fully connected from cli → agent → store/extract/embed**
 
-## Phase 2 — Storage Implementation
+## Phase 2 — Storage Implementation ✅
 
 **Goal**: Populate all stub methods in `KnowledgeStore` with real implementations.
 
@@ -85,7 +85,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: Running the CLI command `membox ingest "test"` writes to SQLite, and `membox list-entities` reads from it.
 
-## Phase 3 — Predicate Normalization
+## Phase 3 — Predicate Normalization ✅
 
 **Goal**: Populate `normalize_predicate()` with a real implementation.
 
@@ -95,7 +95,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: `membox ingest "A 开发了 B"` → relation predicate is stored as `develops`.
 
-## Phase 4 — Entity Disambiguation
+## Phase 4 — Entity Disambiguation ✅
 
 **Goal**: Populate `find_or_create_entity()` with the three-tier cascading disambiguation strategy.
 
@@ -111,7 +111,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: Ingesting the same entity repeatedly does not create duplicate records.
 
-## Phase 5 — Multi-hop Retrieval
+## Phase 5 — Multi-hop Retrieval ✅
 
 **Goal**: Populate `bfs_query()` with a real implementation.
 
@@ -125,7 +125,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: `membox query "What is the relationship between X and Y?" --max-hops 2` returns results with source evidence.
 
-## Phase 6 — Concurrency Hardening
+## Phase 6 — Concurrency Hardening ✅
 
 **Goal**: Multiple agents can write concurrently without conflict.
 
@@ -138,7 +138,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: Concurrent tests run without errors or deadlocks.
 
-## Phase 7 — OpenAI Integration
+## Phase 7 — OpenAI Integration ✅
 
 **Goal**: Integrate real LLMs to replace the Dummy implementations.
 
@@ -149,50 +149,50 @@ cli.py                         ← Typer commands, each calling the agent
 
 **Validation**: `OPENAI_API_KEY=sk-... uv run python examples/demo.py` runs successfully.
 
-## Phase 7.5 — Memory Quality Validation
+## Phase 7.5 — Memory Quality Validation ✅
 
 **Goal**: Validate that membox functions as memory on real, evolving corpora before advancing to AST analysis. Phases 1–7 exercised mechanics with synthetic text only; this phase ingests session handoff documents to close three gaps: markdown-structured input, temporal evolution (handoffs are rewritten in place each session), and recall over long sentences where pure graph traversal may be insufficient.
 
 ### M1 — Evaluation Corpus & Gold Standard
 
-- [ ] Snapshot ~10 real `HANDOFF.md` files from across the user's projects into `eval/corpus/`
-- [ ] Hand-author 20–30 gold QA pairs covering three categories:
-  - [ ] Single-hop facts
-  - [ ] Multi-hop (cross-document / cross-project)
-  - [ ] Temporal — "current state" questions whose answer must come from the **latest** document version
+- [x] Snapshot ~10 real `HANDOFF.md` files from across the user's projects into `eval/corpus/` (local/private corpus; skipped on CI when absent)
+- [x] Hand-author 20–30 gold QA pairs covering three categories:
+  - [x] Single-hop facts
+  - [x] Multi-hop (cross-document / cross-project)
+  - [x] Temporal — "current state" questions whose answer must come from the **latest** document version
 
 ### M2 — Ingestion Hardening
 
-- [ ] Markdown-aware chunking: split on `##` section boundaries before extraction
-- [ ] Persist document metadata: `project`, `source_path`, `section`, `doc_date` (new columns on `documents`)
-- [ ] Idempotent re-ingest: re-ingesting the same `source_path` creates a new document version instead of duplicating raw content
-- [ ] CLI: `membox ingest-file` accepts and stores metadata fields; `--project` filter on query and listing commands
+- [x] Markdown-aware chunking: split on `##` section boundaries before extraction
+- [x] Persist document metadata: `project`, `source_path`, `section`, `doc_date` (new columns on `documents`)
+- [x] Idempotent re-ingest: re-ingesting the same `source_path` creates a new document version instead of duplicating raw content
+- [x] CLI: `membox ingest-file` accepts and stores metadata fields; `--project` filter on query and listing commands
 
 ### M3 — Baseline Evaluation & Hybrid Retrieval
 
-- [ ] `scripts/eval_memory.py`: ingest corpus → run gold questions → report per-category hit rates
-- [ ] CI smoke variant: offline run using fake extractor/embedder (no Ollama required)
-- [ ] Full evaluation: manual run against local Ollama, results recorded in `eval/results/`
-- [ ] Measure graph-only recall baseline first
-- [ ] Implement SQLite FTS5 BM25 over `documents.content`, fused with graph retrieval (promotes hybrid retrieval from spec's future-options list into committed scope)
-- [ ] **Scored rerank**: implement composite scoring formula `score(t) = decay^hops(t) × (α·sim(t) + (1−α)·bm25(t))` with BFS lineage preservation; add `RetrievalConfig` group to `MemboxConfig` (`hop_decay=0.7`, `alpha=0.6`, `budget=2000`, `top_evidence_k=3`); schema migration adds a relation-embedding column so `sim(t)` is precomputed at ingest time (one embedder call per relation write, not per query); negate raw FTS5 `bm25()` values before min-max normalisation (SQLite returns lower-is-better negatives — inverting this is a known gotcha)
-- [ ] **Token-budget truncation**: implement deterministic token estimator (`est_tokens(s) = CJK_count + ceil(non_CJK_count / 4)`); greedy best-effort knapsack fill sorted by score descending; expose `membox query --budget <tokens>` CLI flag
-- [ ] **Compact subject-grouped output format**: group triples by subject with predicates ordered by score descending; print top-K evidence snippets with `project/source_path/section/doc_date` provenance tags; append honest coverage footer `(returned N/M triples, ~X/Y tokens; raise --budget for more)` — silent truncation is forbidden
-- [ ] **Eval metric — output token count**: extend `scripts/eval_memory.py` to report both hit/miss and output token estimate per gold question; acceptance criterion is hit rate ≥ 80% *within* the default 2000-token budget
+- [x] `scripts/eval_memory.py`: ingest corpus → run gold questions → report per-category hit rates
+- [x] CI smoke variant: offline run using fake extractor/embedder (no Ollama required)
+- [x] Full evaluation: manual run against local Ollama / Gemini, results recorded in handoff/eval notes
+- [x] Measure graph-only recall baseline first
+- [x] Implement SQLite FTS5 BM25 over `documents.content`, fused with graph retrieval (promotes hybrid retrieval from spec's future-options list into committed scope)
+- [x] **Scored rerank**: implement composite scoring formula `score(t) = decay^hops(t) × (α·sim(t) + (1−α)·bm25(t))` with BFS lineage preservation; add `RetrievalConfig` group to `MemboxConfig` (`hop_decay=0.7`, `alpha=0.6`, `budget=2000`, `top_evidence_k=3`); schema migration adds a relation-embedding column so `sim(t)` is precomputed at ingest time (one embedder call per relation write, not per query); negate raw FTS5 `bm25()` values before min-max normalisation (SQLite returns lower-is-better negatives — inverting this is a known gotcha)
+- [x] **Token-budget truncation**: implement deterministic token estimator (`est_tokens(s) = CJK_count + ceil(non_CJK_count / 4)`); greedy best-effort knapsack fill sorted by score descending; expose `membox query --budget <tokens>` CLI flag
+- [x] **Compact subject-grouped output format**: group triples by subject with predicates ordered by score descending; print top-K evidence snippets with `project/source_path/section/doc_date` provenance tags; append honest coverage footer `(returned N/M triples, ~X/Y tokens; raise --budget for more)` — silent truncation is forbidden
+- [x] **Eval metric — output token count**: extend `scripts/eval_memory.py` to report both hit/miss and output token estimate per gold question; acceptance criterion is hit rate ≥ 80% *within* the default 2000-token budget
 
 ### M4 — Supersession Semantics (Schema Migration)
 
-- [ ] `relations` table gains nullable `superseded_by` column (FK → `relations.id`, self-referencing)
-- [ ] When a newer version of the same source document yields a relation with the same subject + predicate but a different object, the old relation is marked `superseded_by = <new_relation_id>`
-- [ ] Retrieval excludes superseded relations by default
-- [ ] `--include-superseded` flag on `membox query` exposes them for auditing
-- [ ] Old evidence is never deleted
-- [ ] Migration delivered via existing `PRAGMA user_version` mechanism (no registry, no schema reset)
+- [x] `relations` table gains nullable `superseded_by` column (FK → `relations.id`, self-referencing)
+- [x] When a newer version of the same source document yields a relation with the same subject + predicate but a different object, the old relation is marked `superseded_by = <new_relation_id>`
+- [x] Retrieval excludes superseded relations by default
+- [x] `--include-superseded` flag on `membox query` exposes them for auditing
+- [x] Old evidence is never deleted
+- [x] Migration delivered via existing `PRAGMA user_version` mechanism (no registry, no schema reset)
 
 ### M5 — Close the Loop
 
-- [ ] `membox ingest-file docs/HANDOFF.md` works end-to-end against local Ollama
-- [ ] This becomes the substrate for Phase 9's skill file (query at session start, ingest at session end)
+- [x] `membox ingest-file docs/HANDOFF.md` works end-to-end against local Ollama
+- [x] This becomes the substrate for Phase 9's skill file (query at session start, ingest at session end)
 
 ### M6 — Asynchronous Ingestion Queue
 
@@ -275,7 +275,75 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 
 ---
 
+## Stabilization Track — v0.1.0 Release (current focus)
+
+> Owner decision 2026-06-12: Phases A–F of the Lifecycle Track are complete (merged via PR #5). The next milestone is stabilization and release of the current feature set. Phase 8 (tree-sitter AST) is deferred until after v0.1.0.
+
+| Step | Description | Status |
+|------|-------------|--------|
+| S1 | Dogfooding | ◐ initial pass done; full real-session run still open |
+| S2 | Robustness | ✅ core hardening complete |
+| S3 | Deferred review items (PR #5 / plan_06) | ✅ |
+| S4 | Performance sanity | 🔲 |
+| S5 | Release | 🔲 |
+
+### S1 — Dogfooding
+
+End-to-end run of the full Lifecycle Track pipeline on membox's own dev sessions:
+
+- [ ] `membox history pull` on real `~/.codex/sessions` (or Claude history) for the membox project
+- [ ] `membox process` — drain the async queue
+- [ ] `membox memory triage --apply` — classify new traces
+- [ ] `membox memory extract --apply` — extract memory units
+- [ ] `membox memory consolidate --apply` — promote crystals, supersede stale units
+- [ ] `membox distill` — generate a distilled Markdown export
+- [ ] `membox query --include-memory "..."` — confirm memory surfaces in answers
+- [x] File defects / gaps discovered during the initial run as backlog docs
+
+Defects surfaced in the initial 2026-06-12 fixture-based dogfooding pass are tracked in [`docs/issue/stabilization-s1/`](issue/stabilization-s1/README.md). Current code has regression coverage for D1–D6 (history around/search scoping, deterministic extract, malformed JSONL reporting, distill apply copy, and session-root copy). The remaining S1 work is a full run on representative real sessions.
+
+### S2 — Robustness
+
+Harden the import and processing pipeline against real-world edge cases:
+
+- [x] Corrupt or partial JSONL lines — malformed lines are counted, reported in CLI summaries, and return a visible non-zero status
+- [x] Idempotent re-import — re-running `history pull` on already-imported sessions produces no duplicate rows
+- [x] Interrupted worker recovery — a killed `membox process` leaves no stale `processing` rows after the next worker start
+- [x] Empty or missing session roots — `membox history pull` with no path and no session root lists the path/env/flag options and exits cleanly, not a traceback
+
+### S3 — Deferred Review Items (PR #5 / plan_06)
+
+Fold in the items deferred during plan_06 code review:
+
+- [x] Consolidate CLI N+1 source counts — batch `count_independent_sources_for_units` calls in `membox memory consolidate` output (same pattern as Phase E's `count_independent_sources_for_units` fix)
+- [x] Atomic apply batching — wrap the per-transition apply loop in a single transaction with abort reporting (implemented as `transition_memory_units_atomically`)
+- [x] FTS-based conflict candidate pairing — use `memory_units_fts` to produce review pairs for `memory consolidate`
+- [x] LLM conflict comparator — injectable `LLMComparator` Protocol with an offline replay eval corpus
+- [x] Gate v4 — default `heuristic-v4` with one-release `--gate heuristic-v3` escape hatch and v4 comparator replay eval
+
+Detailed specs for the four items intentionally carried out of PR #5: [`docs/issue/pr5-deferred/`](issue/pr5-deferred/README.md) (R1 atomic apply → R2 FTS pairing → R3 LLM comparator → R4 gate v4).
+
+### S4 — Performance Sanity
+
+Baseline timing on a representative real history:
+
+- [ ] Import + process a large real session history (≥ 50 sessions / ≥ 500 messages) and record wall-clock time
+- [ ] Document baseline in `eval/results/perf-baseline-v0.1.0.md`: import time, process time, queue drain time, entity/relation counts
+- [ ] Identify and file any regressions vs plan_03 ingest-perf benchmarks (embed cache, batch embedder, `MEMBOX_INGEST_CONCURRENCY`)
+
+### S5 — Release
+
+- [ ] README quickstart covering the history-pull → process → distill → query workflow (end-to-end in ~10 commands)
+- [ ] Changelog: `uv run python scripts/generate_changelog.py --version 0.1.0`
+- [ ] Version bump: `uv run python scripts/bump_version.py 0.1.0`
+- [ ] Tag `v0.1.0` and push; confirm CI green on main
+- [ ] Close or re-milestone any open GitHub issues that are out of scope for v0.1.0
+
+---
+
 ## Phase 8 — Codebase Structural Analysis (tree-sitter)
+
+> **Deferred** (owner decision 2026-06-12): Phase 8 is deferred to the next milestone. Stabilization and v0.1.0 release of the current feature set take priority. The Stabilization Track below is the active focus.
 
 > **Note**: Phase 8 is deliberately sequenced after Phase 7.5. The supersession semantics and hybrid retrieval introduced in 7.5 are load-bearing for the temporal recall patterns that codebase analysis will exercise.
 
@@ -298,7 +366,7 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
   - [x] Installation instructions
   - [x] Command reference
   - [x] Usage examples
-- [ ] Manual validation: agent reads the skill and successfully invokes the CLI commands
+- [x] Manual validation: agent reads the skill and successfully invokes the CLI commands — delivered PR #5 (2026-06-12)
 
 **Validation**: Inject the skill into agent context; the agent can independently perform ingest + query.
 
@@ -330,12 +398,14 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
          └→ Phase 7.5 Memory Quality Validation
               │  (M1+M2+M3 complete → M6 async queue → M4 supersession → M5 close-the-loop)
               │
-              └→ Lifecycle Track A–E ✅ → F ✅ (spec_02)
+              └→ Lifecycle Track A–F ✅ (spec_02)
                    │
-                   ├→ Phase 8 tree-sitter (Can be done in parallel)
-                   ├→ Phase 9 Skill Files (Can be done in parallel)
+                   └→ Stabilization Track S1–S5 ← current focus
                         │
-                        └→ Phase 10 Release
+                        ├→ Phase 8 tree-sitter (deferred — next milestone)
+                        ├→ Phase 9 Skill Files ✅ (merged PR #5)
+                             │
+                             └→ Phase 10 Release
 ```
 
 **Principle**: After Phase 1, each subsequent phase should only focus on one thing—**populating the stubs reserved in Phase 1**. Do not alter signatures, imports, or architecture.
@@ -347,7 +417,7 @@ Phase 1 Complete Framework (Interface-first, all module stubs connected)
 - **Agent memory lifecycle** (Trace → Unit → Crystal): design accepted at v2.3
   in `docs/spec/spec_02_memory_lifecycle.md`. Promoted into this roadmap as the
   Lifecycle Track (Phases A–F); see the "Lifecycle Track — Phases A–F" section
-  above. Phases A–E implemented; Phase F merged.
+  above. Phases A–F are implemented and merged.
 - **HOT working-state tier** (current task, open loops, session focus):
   explicitly excluded from the lifecycle track (see its Rejected Alternatives —
   working state has opposite mechanics from long-term memory). Recorded here as

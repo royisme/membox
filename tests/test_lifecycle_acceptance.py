@@ -25,6 +25,7 @@ accuracy (already counted as a recall miss).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -93,6 +94,63 @@ def _build_consolidated_agent(tmp_path: Path) -> MemoryAgent:
         result = cli.invoke(app, command)
         assert result.exit_code == 0, result.output
     return agent
+
+
+def test_deterministic_extract_creates_units_from_triage_without_llm(tmp_path: Path) -> None:
+    """Offline triage -> extract creates memory units from eligible trace rows."""
+    fixture = tmp_path / "smoke.jsonl"
+    fixture.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "id": "test-session-1",
+                        "project": "smoke",
+                        "title": "Smoke",
+                        "started_at": "2026-06-12T00:00:00Z",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "m1",
+                        "role": "user",
+                        "text": (
+                            "We decided the membox CLI remains the primary entry point "
+                            "for the local knowledge graph workflow."
+                        ),
+                        "created_at": "2026-06-12T00:00:01Z",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "m2",
+                        "role": "user",
+                        "text": "Always verify storage and retrieval behavior with SQLite tests.",
+                        "created_at": "2026-06-12T00:00:02Z",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    db = str(tmp_path / "smoke.db")
+    import_history(KnowledgeStore(db), fixture, "membox", project="smoke")
+    cli = CliRunner()
+
+    triage = cli.invoke(app, ["memory", "triage", "--db", db, "--project", "smoke", "--apply"])
+    extract = cli.invoke(app, ["memory", "extract", "--db", db, "--project", "smoke", "--apply"])
+
+    assert triage.exit_code == 0, triage.output
+    assert "Wrote" in triage.output
+    assert extract.exit_code == 0, extract.output
+    assert "Created 0 units" not in extract.output
+    store = KnowledgeStore(db)
+    unit_count = store._conn().execute("SELECT COUNT(*) FROM memory_units").fetchone()[0]
+    assert unit_count >= 1
 
 
 def _activation_expected(activation_status: str) -> bool:

@@ -15,7 +15,7 @@ from membox.core.consolidate import (
     build_consolidation_plan,
 )
 from membox.core.store import KnowledgeStore
-from membox.core.triage import GATE_VERSION, activation_passes, triage_trace
+from membox.core.triage import GATE_VERSION, LEGACY_GATE_VERSIONS, activation_passes, triage_trace
 from membox.model.schema import (
     HistoryTriageRecord,
     MemorySourceKind,
@@ -46,10 +46,24 @@ def _take_lease(store: KnowledgeStore, project: str) -> None:
         raise typer.Exit(1)
 
 
+def _validate_gate(gate: str) -> None:
+    """Exit unless *gate* names the current or temporary legacy gate."""
+    if gate == GATE_VERSION or gate in LEGACY_GATE_VERSIONS:
+        return
+    allowed = ", ".join((GATE_VERSION, *LEGACY_GATE_VERSIONS))
+    typer.echo(f"Error: unsupported gate {gate!r}; allowed: {allowed}", err=True)
+    raise typer.Exit(1)
+
+
 @memory_app.command("triage")
 def memory_triage(
     project: str | None = typer.Option(None, "--project", help="Project scope"),
     since: str | None = typer.Option(None, "--since", help="ISO-8601 created_at lower bound"),
+    gate: str = typer.Option(
+        GATE_VERSION,
+        "--gate",
+        help="Gate version to write; heuristic-v3 is a temporary escape hatch",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview decisions without writing"),
     apply: bool = typer.Option(False, "--apply", help="Persist triage decisions"),
     limit: int = typer.Option(100, "--limit", help="Maximum trace rows"),
@@ -59,6 +73,7 @@ def memory_triage(
     if dry_run == apply:
         typer.echo("Error: pass exactly one of --dry-run or --apply", err=True)
         raise typer.Exit(1)
+    _validate_gate(gate)
     effective_project = _default_project(project)
     store = KnowledgeStore(db)
     rows = store.trace_rows_for_triage(project=effective_project, since=since, limit=limit)
@@ -89,7 +104,7 @@ def memory_triage(
                     user_intent=decision.user_intent,
                     extraction_hint=decision.extraction_hint,
                     reason=decision.reason,
-                    gate_version=decision.gate_version,
+                    gate_version=gate,
                 )
             )
             written += 1
@@ -106,6 +121,11 @@ def memory_triage(
 @memory_app.command("extract")
 def memory_extract(
     project: str | None = typer.Option(None, "--project", help="Project scope"),
+    gate: str = typer.Option(
+        GATE_VERSION,
+        "--gate",
+        help="Gate version to consume; heuristic-v3 is a temporary escape hatch",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview units without writing"),
     apply: bool = typer.Option(False, "--apply", help="Write units and consume triage rows"),
     limit: int = typer.Option(100, "--limit", help="Maximum triage rows"),
@@ -115,10 +135,11 @@ def memory_extract(
     if dry_run == apply:
         typer.echo("Error: pass exactly one of --dry-run or --apply", err=True)
         raise typer.Exit(1)
+    _validate_gate(gate)
     effective_project = _default_project(project)
     store = KnowledgeStore(db)
     triage_rows = store.pending_triage_rows(
-        project=effective_project, gate_version=GATE_VERSION, limit=limit
+        project=effective_project, gate_version=gate, limit=limit
     )
     if apply:
         _take_lease(store, effective_project)
@@ -156,6 +177,7 @@ def memory_extract(
 def memory_consolidate(
     project: str | None = typer.Option(None, "--project", help="Project scope"),
     since: str | None = typer.Option(None, "--since", help="ISO-8601 updated_at lower bound"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Disable optional LLM comparator pass"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview consolidation without writing"),
     apply: bool = typer.Option(False, "--apply", help="Apply consolidation transitions"),
     limit: int = typer.Option(500, "--limit", help="Maximum units to inspect"),
@@ -175,25 +197,21 @@ def memory_consolidate(
     counts = store.count_independent_sources_for_units(
         [unit.id for unit in units if unit.id is not None]
     )
-    plan = build_consolidation_plan(units, counts)
+    fts_pair_ids = store.fts_conflict_pairs_for_units(units)
+    _ = no_llm
+    plan = build_consolidation_plan(units, counts, fts_pair_ids=fts_pair_ids)
     _print_consolidation_plan(plan, dry_run=dry_run)
     if dry_run:
         return
     _take_lease(store, effective_project)
-    applied = 0
     try:
-        for action in _ordered_transitions(plan):
-            ok = store.transition_memory_unit(
-                action.unit_id,
-                action.to_status,
-                command="memory consolidate",
-                reason=action.reason,
-                superseded_by=action.superseded_by,
-            )
-            applied += int(ok)
-    except Exception:
-        console.print(f"[red]Aborted[/red] after applying {applied} consolidation transitions.")
-        raise
+        applied = store.transition_memory_units_atomically(
+            _ordered_transitions(plan),
+            command="memory consolidate",
+        )
+    except ValueError as exc:
+        console.print(f"[red]Aborted[/red] consolidation apply: {exc}")
+        raise typer.Exit(1) from exc
     finally:
         store.release_lifecycle_lease(effective_project)
     console.print(f"[green]Applied[/green] {applied} consolidation transitions.")
@@ -337,7 +355,7 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
     prefix = "would " if dry_run else ""
     for issue in plan.validator_rejections:
         typer.echo(f"validator reject {issue.unit_id} title={issue.title!r} reason={issue.reason}")
-    for conflict in plan.conflicts:
+    for conflict in [*plan.conflicts, *plan.fts_pairs]:
         typer.echo(
             f"conflict review {conflict.left_id}<->{conflict.right_id} "
             f"left={conflict.left_title!r} right={conflict.right_title!r} "
@@ -361,7 +379,7 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
                 f"{target} title={action.title!r} reason={action.reason}"
             )
     transition_count = len(_ordered_transitions(plan))
-    conflict_count = len(plan.conflicts)
+    conflict_count = len(plan.conflicts) + len(plan.fts_pairs)
     issue_count = len(plan.validator_rejections) + len(plan.decay_reviews)
     console.print(
         f"[green]{'Would apply' if dry_run else 'Planned'}[/green] "

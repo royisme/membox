@@ -36,10 +36,16 @@ def distill(
 ) -> None:
     """Identify repeated workflows worth packaging; read-only, no lifecycle lease."""
     if apply:
-        typer.echo("Error: --apply is not implemented in Phase F", err=True)
+        typer.echo(
+            "Error: --apply is not yet implemented; use --dry-run to preview candidates.",
+            err=True,
+        )
         raise typer.Exit(1)
     if not dry_run:
-        typer.echo("Error: pass --dry-run for Phase F distill", err=True)
+        typer.echo(
+            "Error: --apply is not yet implemented; use --dry-run to preview candidates.",
+            err=True,
+        )
         raise typer.Exit(1)
     scanned_root = root.expanduser().resolve()
     if not scanned_root.exists():

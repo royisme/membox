@@ -1,0 +1,86 @@
+# Synthetic offline corpus for the optional lifecycle LLM comparator path.
+# `llm_score` is a captured/replay score used by scripts/eval_lifecycle_comparator.py
+# so the eval is deterministic and does not call an external model.
+
+score_threshold: 0.5
+min_agreement: 0.8
+cases:
+  - id: keep_owner_confirmed_decision
+    human_label: keep
+    llm_score: 0.92
+    independent_sources: 1
+    unit:
+      id: 1
+      unit_type: decision
+      status: active_unit
+      title: "Keep confirmed CLI decision"
+      content: "Owner confirmed the membox CLI remains the primary entry point."
+      labels: ["cli", "workflow"]
+
+  - id: drop_rephrased_archived_content
+    human_label: drop
+    llm_score: 0.18
+    independent_sources: 1
+    unit:
+      id: 2
+      unit_type: decision
+      status: active_unit
+      title: "Drop repeated CLI decision"
+      content: "Owner confirmed the membox CLI is the main interface."
+      labels: ["cli", "workflow"]
+
+  - id: keep_failure_backed_procedure
+    human_label: keep
+    llm_score: 0.87
+    independent_sources: 1
+    unit:
+      id: 3
+      unit_type: procedure
+      status: active_unit
+      title: "Verify migration head"
+      content: "Failure happened. Always verify latest_version before editing migrations."
+      labels: ["workflow", "testing"]
+
+  - id: drop_weak_failure_rephrase
+    human_label: drop
+    llm_score: 0.21
+    independent_sources: 1
+    unit:
+      id: 4
+      unit_type: procedure
+      status: active_unit
+      title: "Repeat migration check wording"
+      content: "Failure happened. Always verify the migration head before migration edits."
+      labels: ["workflow", "testing"]
+
+  - id: keep_newer_correction_supersession
+    human_label: keep
+    llm_score: 0.82
+    independent_sources: 1
+    unit:
+      id: 5
+      unit_type: fact
+      status: active_unit
+      title: "Old retrieval fact"
+      content: "Fact snapshot: membox query currently uses graph-only retrieval."
+      labels: ["retrieval"]
+    surrounding_units:
+      - id: 6
+        unit_type: fact
+        status: active_unit
+        title: "Updated retrieval fact"
+        content: "Updated fact: membox query now uses graph plus FTS fusion; old statement stale."
+        labels: ["retrieval"]
+
+  - id: drop_low_confidence_decay_archive
+    human_label: drop
+    llm_score: 0.12
+    independent_sources: 1
+    unit:
+      id: 7
+      unit_type: fact
+      status: active_unit
+      title: "Expired but unclear fact"
+      content: "This old fact is too terse to preserve as a lifecycle transition."
+      labels: ["workflow"]
+      valid_to: "2000-01-01T00:00:00Z"

@@ -267,9 +267,15 @@ the default implementation must be deterministic and offline.
 
 ### Default Heuristic Gate
 
-The first implementation should ship a deterministic heuristic gate. LLM-backed
-triage can be added behind the same protocol later, but it must not be required
-for tests or basic use.
+The current shipped gate is `heuristic-v4`. It preserves the deterministic v3
+triage heuristics and adds the Stabilization Track hardening around the gate:
+atomic consolidation apply, FTS-style review pairing, and optional LLM
+comparator re-scoring when a caller injects one. `heuristic-v3` remains
+available through `--gate heuristic-v3` for one release cycle as an escape
+hatch, then should be removed.
+
+LLM-backed triage/comparison can be added behind the same protocol pattern, but
+it must not be required for tests or basic use.
 
 The heuristic gate evaluates a bounded text window: the current trace item plus
 at most one neighboring user/assistant message on each side, truncated to a
@@ -428,8 +434,8 @@ as one. Repeating a statement three times in one conversation is one source.
 Score evolution: when consolidation attaches a new independent source to an
 existing unit, it may raise `confidence_score` by a small documented increment
 (for example +0.05 per independent source, capped at 0.95). This is the only
-automatic path by which scores change after extraction. Under the heuristic
-gate the maximum extraction-time confidence is 0.85, so the
+automatic path by which scores change after extraction. Under the deterministic
+heuristic gate the maximum extraction-time confidence is 0.85, so the
 `confidence_score >= 0.90` decision branch is reachable only through score
 evolution or an LLM-backed gate; this is intentional conservatism, not an
 oversight.
@@ -865,8 +871,10 @@ membox history failures --project X
 # Units
 membox memory triage --project X --since 7d --dry-run
 membox memory triage --project X --since 7d --apply
+membox memory triage --project X --gate heuristic-v3 --apply   # temporary escape hatch
 membox memory extract --project X --dry-run
 membox memory extract --project X --apply
+membox memory extract --project X --gate heuristic-v3 --apply  # temporary escape hatch
 membox memory list --project X --status active_unit
 membox memory show <id>
 membox memory supersede <old-id> <new-id>
@@ -876,6 +884,7 @@ membox memory restore <id>
 # Consolidation
 membox memory consolidate --project X --since 7d --dry-run
 membox memory consolidate --project X --since 7d --apply
+membox memory consolidate --project X --since 7d --no-llm --apply
 
 # Workflow packaging, later phase
 membox distill --project X --since 30d --dry-run
@@ -892,8 +901,11 @@ Command semantics:
 - `memory triage --apply` writes or updates `history_triage`.
 - `memory extract` reads pending `history_triage` rows; it does not rescan the
   raw time window. `--apply` writes units and marks consumed triage rows.
+- `memory triage` and `memory extract` default to `heuristic-v4`; `--gate
+  heuristic-v3` is a temporary compatibility escape hatch.
 - `memory consolidate` reads active units and source trace; it does not run over
-  raw trace directly except to verify sources.
+  raw trace directly except to verify sources. `--no-llm` explicitly disables
+  optional comparator re-scoring; the deterministic path remains the CI default.
 
 ## Implementation Phases
 
@@ -959,6 +971,10 @@ them, and the heuristic gate's keyword table cannot be tuned blind):
 - Optional LLM-backed gate behind existing provider injection.
 - `memory triage` and `memory extract` with explicit `--dry-run` / `--apply`.
 - Unit FTS search.
+- Offline comparator eval harness:
+  `uv run python scripts/eval_lifecycle_comparator.py` replays the committed
+  `eval/lifecycle/comparator_cases.yaml` corpus through the v4 comparator path
+  and requires agreement with human labels of at least 0.80.
 
 Acceptance:
 
@@ -967,6 +983,9 @@ Acceptance:
 - Dry-run explains create/update/skip decisions.
 - Re-running extraction over the same trace is idempotent.
 - Apply path is explicit and testable.
+- The v4 comparator replay eval passes without external LLM calls; live LLM
+  scoring may refresh the captured scores, but CI uses the committed replay
+  corpus.
 
 ### Phase D: Memory Consolidation
 

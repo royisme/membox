@@ -137,6 +137,35 @@ def test_cli_import_and_search_roundtrip(tmp_path: Path) -> None:
     assert "membox" in combined.lower() or "membox-capture" in combined.lower()
 
 
+def test_cli_import_reports_malformed_jsonl_lines(tmp_path: Path) -> None:
+    """Malformed JSONL lines are reported and make pull fail visibly."""
+    fixture = tmp_path / "bad-session.jsonl"
+    db = tmp_path / "mem.db"
+    fixture.write_text(
+        "\n".join([_SESSION_LINE, "this line is not json", _MESSAGE_LINE, _EVENT_LINE]) + "\n",
+        encoding="utf-8",
+    )
+
+    result = _invoke_pull(fixture, db, project="demo")
+
+    assert result.exit_code == 1
+    assert "1 malformed lines skipped" in result.output
+
+
+def test_cli_pull_without_path_or_session_root_lists_all_options(tmp_path: Path) -> None:
+    """Auto-discovery error names positional path, env, and --session-root options."""
+    result = runner.invoke(
+        app,
+        ["history", "pull", "--adapt", _FMT, "--project", "demo", "--db", str(tmp_path / "m.db")],
+        env={"MEMBOX_SESSION_ROOT": ""},
+    )
+
+    assert result.exit_code == 1
+    assert "no path argument and no session root" in result.output
+    assert "pass a file path" in result.output
+    assert "MEMBOX_SESSION_ROOT" in result.output
+
+
 # ---------------------------------------------------------------------------
 # 14. Unknown format → exit 1
 # ---------------------------------------------------------------------------
@@ -335,6 +364,21 @@ def test_cli_search_project_filter(tmp_path: Path) -> None:
         assert "beta" not in output
 
 
+def test_cli_search_scoped_miss_explains_project_override(tmp_path: Path) -> None:
+    """A scoped miss tells the operator how to search the imported project."""
+    fixture = tmp_path / "session.jsonl"
+    db = tmp_path / "mem.db"
+    _write_fixture(fixture)
+    _invoke_pull(fixture, db, project="smoke")
+
+    result = runner.invoke(app, ["history", "search", "membox", "--db", str(db)])
+
+    assert result.exit_code == 0, result.output
+    assert "No history hits in project" in result.output
+    assert "--project" in result.output
+    assert "--all-projects" in result.output
+
+
 # ---------------------------------------------------------------------------
 # 19. around command with known message ID
 # ---------------------------------------------------------------------------
@@ -354,6 +398,21 @@ def test_cli_around_known_id(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert ">>>" in result.output
+
+
+def test_cli_around_sqlite_id_works_without_default_project_match(tmp_path: Path) -> None:
+    """An exact ID returned by SQLite resolves even when cwd project differs."""
+    fixture = tmp_path / "session.jsonl"
+    db = tmp_path / "mem.db"
+    _write_fixture(fixture)
+    _invoke_pull(fixture, db, project="smoke")
+
+    center_id = "membox-capture:cs1:msg:cm1"
+    result = runner.invoke(app, ["history", "around", center_id, "--db", str(db)])
+
+    assert result.exit_code == 0, result.output
+    assert ">>>" in result.output
+    assert "hello world testing storage retrieval membox" in result.output
 
 
 def test_cli_around_project_scope(tmp_path: Path) -> None:

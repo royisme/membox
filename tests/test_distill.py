@@ -201,7 +201,17 @@ def test_distill_cli_rejects_apply_and_missing_root(tmp_path: Path) -> None:
     """Phase F reserves apply and requires an explicit existing root."""
     apply_result = runner.invoke(app, ["distill", "--db", str(tmp_path / "memory.db"), "--apply"])
     assert apply_result.exit_code == 1
-    assert "--apply is not implemented in Phase F" in apply_result.output
+    assert (
+        "--apply is not yet implemented; use --dry-run to preview candidates."
+        in apply_result.output
+    )
+
+    default_result = runner.invoke(app, ["distill", "--db", str(tmp_path / "memory.db")])
+    assert default_result.exit_code == 1
+    assert (
+        "--apply is not yet implemented; use --dry-run to preview candidates."
+        in default_result.output
+    )
 
     root_result = runner.invoke(
         app,

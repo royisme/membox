@@ -2,12 +2,12 @@
 
 > Single source of truth for cross-session context. Read at session start; update before ending.
 
-**Last updated**: 2026-06-12 (session 13 — Phase E query fusion implemented + reviewed on `feature/phase-e-query-fusion`)
-**Current phase**: **Lifecycle Phase E implemented** (plan_05 E1–E5: `--include-memory` query fusion with `memory_share=0.15` partition, ranked memory pool with crystal boost+tie-break, footer crystals/units coverage, read-side `[conflict]` marking, bookkeeping-only reinforcement, lifecycle acceptance harness). All gates green (544 tests, coverage ≥91%, strict eval `--expect-hits 24` @ 4000). Migration head stays 8. Merge to main pending the Gemini 26/26 pre-merge re-verification.
+**Last updated**: 2026-06-12 (PR #5 squash-merged — Lifecycle Track Phases A–F complete; Phase 8 deferred; Stabilization Track S1–S5 is the active focus)
+**Current phase**: **Stabilization Track — v0.1.0 Release** (owner decision 2026-06-12). Lifecycle Phases A–F are complete and on main. Phase 8 (tree-sitter AST analysis) is deferred to the next milestone. S2 robustness and S3 deferred PR #5 items are complete in the current code; next step is the remaining S1 full real-session dogfooding run — end-to-end history pull → process → triage → consolidate → distill → `query --include-memory` on membox's own dev sessions.
 
 ### Pending user decisions before next work item
 - Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
-- `docs/spec-v0.2-draft.md` (per-project DB storage model) — still pending review; listed in the spec index Drafts section.
+- `docs/spec-v0.2-draft.md` (per-project DB storage model) — retired by owner decision on 2026-06-13; the two-DB storage model is rejected, while the surviving global-memory-scope idea is parked in `docs/roadmap.md` Future Tracks.
 
 ### New conventions worth remembering across sessions
 - **Merge into main uses `merge --no-ff` with a `merge: <theme>` message**, then a separate commit for handoff/design-doc syncs on the feature branch. See `git log main --merges` for examples. No PR/CODEOWNERS flow is required.
@@ -138,7 +138,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 5. ~~Residual recall misses (q08, q19)~~ — **resolved session 11** (post-resnapshot budget 4000 covers them; no per-question algorithm change).
 6. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
 7. Old branches + `develop` cleanup — delete after user confirms.
-8. Phase 8 (tree-sitter), Phase 9 (skill file), Phase 10 (release 0.2.0) — queued behind 7.5. Phase 9 depends on M6 (done).
+8. ~~Phase 8 (tree-sitter), Phase 9 (skill file)~~ — **Phase 9 skill file delivered PR #5** (2026-06-12). **Phase 8 deferred** to next milestone by owner decision 2026-06-12 — stabilization/v0.1.0 takes priority. See Stabilization Track in `docs/roadmap.md`.
 9. ~~Lifecycle eval fixture design~~ — **resolved session 11**: 7 committed fixtures at `eval/lifecycle/`, harness in `tests/test_lifecycle_acceptance.py`. C5 metrics at heuristic-v2: precision/recall/type-accuracy 1.00, dup rate 0.00, all hard-asserted. Fixture size is the acknowledged fragility — D0 entry condition of plan_04 is the real-trace validation.
 10. ~~`feature/phase-c-eval-ingest-plans` → main merge~~ — **resolved session 11** (`d6e6c99`, merge --no-ff).
 11. ~~Plan_04 / Phase D~~ — **resolved session 12**: D0 NEEDS-v3-TUNING → v3 round → owner final OK → merged to main (`1861b8d`). Accepted residual risks recorded in plan_04's D0 package (--help-dump events, instruction blobs, C5 type-accuracy semantics).
@@ -148,13 +148,15 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 
 ## Next concrete steps
 
-0. **Phase E merged to main** `f274d27` (2026-06-12, Gemini 26/26 re-verified). ~~Next: **plan_06 (Phase F — membox distill `--dry-run`)**, then Phase 9 skill files.~~ — **both landed in PR #5** (`feature/history-pull`): distill workflow (`membox distill --dry-run`) + skill file (`skills/membox-skill.md`) delivered. Next: atomic apply batching, FTS conflict pairing, LLM conflict comparator, gate v4 (see deferred items below).
-0b. ~~Phase D merge~~ — **done session 12** (`1861b8d`). ~~draft plan_05 (Phase E — query-side memory)~~ — **done session 13** (`f274d27`). ~~plan_06 (Phase F distill workflow + skill file)~~ — **done PR #5** (`feature/history-pull`). Deferred items to fold in: consolidate CLI N+1 source counts, atomic apply batching, FTS-based conflict candidate pairing, LLM-backed conflict comparator (injectable Protocol), gate v4 candidate (--help-dump event family).
-1. ~~Phase C (triage + memory units, migration 8)~~ — **implemented 2026-06-11**, merged to main session 11 (`d6e6c99`).
-1b. ~~Phase D plan + implementation~~ — **implemented session 12** on `feature/phase-d-consolidation` (D1–D5 + review fixes); see step 0 for the remaining D0 gate.
-2. ~~Re-snapshot eval corpus + update temporal gold answers~~ — **done 2026-06-11** (plan_02): q23–q26 sources re-snapshotted (old copies in gitignored `eval/corpus-pre-resnapshot/`), gold updated, full Gemini 26/26 @ `--budget 4000` recorded as the new baseline (see Notes; budget-comparability rule applies).
-3. Ingest-performance work (embed cache, batched embedding calls, chunk-level concurrency) — start on a new `feature/*` branch. **Do not chain merge+test in one Bash call** (lesson from session 8).
-4. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms.
+0. **Lifecycle Track A–F complete** — all phases merged to main via PR #5 (`feature/history-pull`, 2026-06-12). ~~Phase E merged to main `f274d27`.~~ ~~plan_06 (Phase F distill workflow + skill file) — done PR #5.~~
+0b. **Phase 8 (tree-sitter AST) deferred** — owner decision 2026-06-12. Stabilization and v0.1.0 release take priority. See `docs/roadmap.md` Stabilization Track and Phase 8 deferral note.
+1. **S1 Dogfooding** — initial fixture-based pass filed D1–D6 and those defects now have regression coverage. Remaining work: run the full end-to-end flow on representative real membox sessions: `history pull` → `process` → `memory triage/extract/consolidate` → `distill` → `query --include-memory`.
+2. ~~S2 Robustness~~ — complete in current code: malformed JSONL reporting, idempotent re-import, worker crash recovery, and clean missing-session-root errors.
+3. ~~S3 Deferred review items from PR #5 / plan_06~~ — complete in current code: batched source counts, atomic apply, FTS review pairs, injectable comparator protocol, and `heuristic-v4`.
+4. **S4 Performance sanity** — import + process timing on a large real history; document baseline.
+5. **S5 Release** — README quickstart (history pull/distill), changelog via `scripts/generate_changelog.py`, version bump via `scripts/bump_version.py`, tag v0.1.0.
+6. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms.
+7. ~~Phase C~~ — done session 11. ~~Phase D~~ — done session 12. ~~Re-snapshot eval corpus~~ — done 2026-06-11.
 
 ---
 
