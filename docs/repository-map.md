@@ -129,6 +129,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/distill.py` — Pure workflow-distillation policy for lifecycle Phase F memory units.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
+      - `src/membox/core/project.py` — Project-scope inference helpers shared by core and CLI code.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
       - `src/membox/core/triage.py` — membox triage — pure domain logic for the memory lifecycle gates.
       - `src/membox/core/worker.py` — Ingestion queue worker — drain loop, lease management, crash recovery (M6).

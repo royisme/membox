@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import make_agent
-from membox.core.agent import _infer_project
+from membox.core.project import infer_project
 
 
 def query(
@@ -55,7 +55,7 @@ def query(
     agent = make_agent(db, no_llm=no_llm, warn=True)
     memory_project = None
     if include_memory and not all_projects:
-        memory_project = project or _infer_project(Path.cwd() / "_")
+        memory_project = project or infer_project(Path.cwd() / "_")
     result = agent.query(
         question,
         max_hops=max_hops,

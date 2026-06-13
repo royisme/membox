@@ -8,11 +8,11 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
-from membox.core.agent import _infer_project
 from membox.core.consolidate import (
     ConsolidationPlan,
     build_consolidation_plan,
 )
+from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 from membox.core.triage import GATE_VERSION, LEGACY_GATE_VERSIONS, activation_passes, triage_trace
 from membox.model.schema import (
@@ -35,7 +35,7 @@ _DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database fil
 
 def _default_project(project: str | None) -> str:
     """Return explicit project or infer it from the current working directory."""
-    return project or _infer_project(Path.cwd() / "_")
+    return project or infer_project(Path.cwd() / "_")
 
 
 def _take_lease(store: KnowledgeStore, project: str) -> None:
