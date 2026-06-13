@@ -120,6 +120,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/queue.py` — Asynchronous ingestion queue operations (spec §3.9, M6).
         - `src/membox/core/store/relations.py` — Relation persistence: relation CRUD and evidence links.
         - `src/membox/core/store/retrieval.py` — BFS multi-hop graph retrieval with hybrid scoring, token-budget truncation, and compact output.
+        - `src/membox/core/store/vectors.py` — Vector encoding and similarity helpers shared by store operation mixins.
       - `src/membox/core/__init__.py` — Core layer: SQLite storage, predicate normalization, and orchestration.
       - `src/membox/core/agent.py` — membox agent — MemoryAgent orchestration layer.
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.

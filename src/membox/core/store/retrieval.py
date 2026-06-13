@@ -344,7 +344,7 @@ class RetrievalOps:
             tie-breaking (hops asc, then newest doc_date desc).
         """
         from membox.config import RetrievalConfig
-        from membox.core.store.entities import _cosine
+        from membox.core.store.vectors import cosine
 
         cfg = config or RetrievalConfig()
         hop_decay = cfg.hop_decay
@@ -411,7 +411,7 @@ class RetrievalOps:
                 rel_blob = self.get_relation_embedding(rid)
                 if rel_blob is not None and len(rel_blob) == len(query_embedding):
                     try:
-                        cos = _cosine(query_embedding, rel_blob)
+                        cos = cosine(query_embedding, rel_blob)
                     except ValueError:
                         cos = 0.0
                     sim_val = (1.0 + cos) / 2.0

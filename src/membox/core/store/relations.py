@@ -57,9 +57,9 @@ class RelationOps:
         Returns:
             relation_id (existing or newly created).
         """
-        from membox.core.store.entities import _vec_to_blob
+        from membox.core.store.vectors import vec_to_blob
 
-        blob = _vec_to_blob(embedding) if embedding else None
+        blob = vec_to_blob(embedding) if embedding else None
         with self._cm.transaction() as c:
             c.execute(
                 "INSERT OR IGNORE INTO relations(source_id, target_id, predicate) VALUES (?, ?, ?)",
@@ -233,7 +233,7 @@ class RelationOps:
         Returns:
             Float vector, or None if no embedding has been stored.
         """
-        from membox.core.store.entities import _blob_to_vec
+        from membox.core.store.vectors import blob_to_vec
 
         row = (
             self._cm.connection()
@@ -242,7 +242,7 @@ class RelationOps:
         )
         if row is None or row[0] is None:
             return None
-        return _blob_to_vec(bytes(row[0]))
+        return blob_to_vec(bytes(row[0]))
 
     def list_relations(self) -> list[Relation]:
         """Return all relations with source and target names resolved.
