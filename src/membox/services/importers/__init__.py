@@ -11,12 +11,14 @@ store layer, and incremental-import orchestration lives in
 from __future__ import annotations
 
 from membox.services.importers.base import HistoryImporter
+from membox.services.importers.claude_jsonl import ClaudeJsonlImporter
 from membox.services.importers.codex_jsonl import CodexJsonlImporter
 from membox.services.importers.membox_jsonl import MemboxHistoryJsonlImporter
 from membox.services.importers.pi_jsonl import PiJsonlImporter
 
 IMPORTER_FORMATS: dict[str, type] = {
     "membox": MemboxHistoryJsonlImporter,
+    "claude": ClaudeJsonlImporter,
     "codex": CodexJsonlImporter,
     "pi": PiJsonlImporter,
 }
@@ -46,6 +48,7 @@ def get_importer(format_name: str) -> HistoryImporter:
 
 __all__ = [
     "IMPORTER_FORMATS",
+    "ClaudeJsonlImporter",
     "CodexJsonlImporter",
     "HistoryImporter",
     "MemboxHistoryJsonlImporter",

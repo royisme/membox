@@ -24,6 +24,14 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/design/graph-fts-fusion.md`
     - `docs/design/retrieval-architecture.md`
   - `docs/issue/`
+    - `docs/issue/agent-as-llm-provider/`
+      - `docs/issue/agent-as-llm-provider/README.md`
+    - `docs/issue/checkpoint-command/`
+      - `docs/issue/checkpoint-command/README.md`
+    - `docs/issue/claude-adapter/`
+      - `docs/issue/claude-adapter/README.md`
+    - `docs/issue/dream-consolidation/`
+      - `docs/issue/dream-consolidation/README.md`
     - `docs/issue/pr5-deferred/`
       - `docs/issue/pr5-deferred/R1-atomic-apply-batching.md`
       - `docs/issue/pr5-deferred/R2-fts-conflict-pairing.md`
@@ -144,6 +152,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/services/importers/`
         - `src/membox/services/importers/__init__.py` — History log importers — one module per upstream format, parsing only.
         - `src/membox/services/importers/base.py` — HistoryImporter protocol — the contract every log-format adapter satisfies.
+        - `src/membox/services/importers/claude_jsonl.py` — Importer for Claude Code session logs (``claude`` adapt format).
         - `src/membox/services/importers/codex_jsonl.py` — Importer for Codex CLI rollout logs (``codex`` adapt format).
         - `src/membox/services/importers/common.py` — Shared helpers for history importers: JSONL iteration and stable IDs.
         - `src/membox/services/importers/membox_jsonl.py` — Importer for ``membox`` — the normalized fixture adapt format.
@@ -162,6 +171,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
   - `tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
+  - `tests/test_claude_importer.py` — Tests for the Claude Code JSONL history importer.
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_consolidation.py` — Lifecycle Phase D memory-consolidation tests.
