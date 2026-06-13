@@ -207,6 +207,27 @@ membox queue
 membox process   # drain remaining items
 ```
 
+### Remember a Document into the Knowledge Graph (no LLM needed)
+
+When no LLM is configured (zero-config interactive), the calling agent
+**is** the extractor. The two-command flow uses membox only for prompt
+construction and storage:
+
+```bash
+# 1. Print the canonical extraction prompt (wraps the file + JSON schema)
+membox extract-prompt docs/spec.md
+
+# 2. You run that prompt, produce ExtractedGraph JSON, then feed it back:
+membox ingest-graph --from-json - --source docs/spec.md
+#   stdin JSON (or --from-json path.json)
+#   --source reads the file as the document text; otherwise it is just a label
+```
+
+No API key is required — `extract-prompt` is a static template and
+`ingest-graph` bypasses the LLM entirely (validates JSON, then stores
+entities and relations). Use `membox ingest-file` only when an LLM is
+configured and the agent should *not* perform the extraction itself.
+
 ## Best Practices
 
 1. **Always use `--project`** to scope operations. Without it, commands

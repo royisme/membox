@@ -157,20 +157,25 @@ class TestCliIngest:
         db = tmp_path / "memory.db"
         result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--sync"])
         assert result.exit_code == 0
-        assert "no-op extractor" in result.stderr
+        assert "no extractor configured" in result.stderr
+        assert "extract-prompt" in result.stderr
+        assert "ingest-graph" in result.stderr
         assert "Ingested." in result.stdout
 
     def test_ingest_default_is_async_enqueue(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # M6: the default path enqueues without LLM calls or chunking; the
-        # no-op notice belongs to the materialization path, not the enqueue.
+        # no-op notice is part of the agent-as-provider footgun fix and must
+        # fire in BOTH sync and async paths so a silent zero-entity ingest
+        # never recurs.
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         db = tmp_path / "memory.db"
         result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--no-spawn"])
         assert result.exit_code == 0
         assert "Enqueued" in result.stdout
-        assert "no-op extractor" not in result.stderr
+        assert "no extractor configured" in result.stderr
+        assert "extract-prompt" in result.stderr
 
     def test_ingest_no_llm_flag_forces_dummy_with_key_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -183,7 +188,8 @@ class TestCliIngest:
             app, ["ingest", "hello world", "--db", str(db), "--no-llm", "--sync"]
         )
         assert result.exit_code == 0
-        assert "no-op extractor" in result.stderr
+        assert "no extractor configured" in result.stderr
+        assert "extract-prompt" in result.stderr
 
     def test_ingest_sync_writes_document_row_even_with_dummy(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -247,7 +253,8 @@ class TestCliIngest:
         doc.write_text("membox is a memory layer", encoding="utf-8")
         result = runner.invoke(app, ["ingest-file", str(doc), "--db", str(db), "--sync"])
         assert result.exit_code == 0
-        assert "no-op extractor" in result.stderr
+        assert "no extractor configured" in result.stderr
+        assert "extract-prompt" in result.stderr
 
     def test_ingest_concurrency_flag_is_accepted_and_used(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -264,11 +271,10 @@ class TestCliIngest:
         def _spy_make_agent(
             db_path: str,
             no_llm: bool = False,
-            warn: bool = False,
             concurrency: int | None = None,
         ) -> object:
             captured.append(concurrency)
-            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, concurrency=concurrency)
 
         monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
         result = runner.invoke(
@@ -294,11 +300,10 @@ class TestCliIngest:
         def _spy_make_agent(
             db_path: str,
             no_llm: bool = False,
-            warn: bool = False,
             concurrency: int | None = None,
         ) -> object:
             captured.append(concurrency)
-            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, concurrency=concurrency)
 
         monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
         result = runner.invoke(app, ["ingest", "hello world", "--db", str(db), "--sync"])
@@ -331,11 +336,10 @@ class TestCliIngest:
         def _spy_make_agent(
             db_path: str,
             no_llm: bool = False,
-            warn: bool = False,
             concurrency: int | None = None,
         ) -> object:
             captured.append(concurrency)
-            return orig_make_agent(db_path, no_llm=no_llm, warn=warn, concurrency=concurrency)
+            return orig_make_agent(db_path, no_llm=no_llm, concurrency=concurrency)
 
         monkeypatch.setattr(_ingest_mod, "make_agent", _spy_make_agent)
         result = runner.invoke(
@@ -356,7 +360,8 @@ class TestCliQueryAndListing:
         db = tmp_path / "memory.db"
         result = runner.invoke(app, ["query", "what is membox?", "--db", str(db)])
         assert result.exit_code == 0
-        assert "no-op extractor" in result.stderr
+        assert "no extractor configured" in result.stderr
+        assert "extract-prompt" in result.stderr
 
     def test_query_include_memory_uses_project_scope(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

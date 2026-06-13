@@ -11,8 +11,10 @@ import typer
 
 from membox.cli.commands.checkpoint import checkpoint
 from membox.cli.commands.distill import distill
+from membox.cli.commands.extract_prompt import extract_prompt
 from membox.cli.commands.history import history_app
 from membox.cli.commands.ingest import ingest, ingest_file
+from membox.cli.commands.ingest_graph import ingest_graph
 from membox.cli.commands.listing import list_entities, list_relations
 from membox.cli.commands.memory import memory_app
 from membox.cli.commands.query import query
@@ -29,6 +31,8 @@ app.command()(version)
 app.command()(ingest)
 app.command()(checkpoint)
 app.command("ingest-file")(ingest_file)
+app.command("extract-prompt")(extract_prompt)
+app.command("ingest-graph")(ingest_graph)
 app.command()(query)
 app.command()(distill)
 app.command()(process)

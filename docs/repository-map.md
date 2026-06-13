@@ -105,8 +105,10 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
         - `src/membox/cli/commands/checkpoint.py` — ``membox checkpoint`` — one-shot lifecycle capture (pull → triage → extract).
         - `src/membox/cli/commands/distill.py` — `membox distill` read-only workflow packaging analysis command.
+        - `src/membox/cli/commands/extract_prompt.py` — `membox extract-prompt` — emit the canonical extraction prompt for the agent.
         - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace pull and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
+        - `src/membox/cli/commands/ingest_graph.py` — `membox ingest-graph` — accept an agent-produced ExtractedGraph JSON.
         - `src/membox/cli/commands/listing.py` — `membox list-entities` and `membox list-relations` commands.
         - `src/membox/cli/commands/memory.py` — `membox memory` commands for lifecycle Phase C units.
         - `src/membox/cli/commands/query.py` — `membox query` command.
@@ -171,6 +173,7 @@ Functional Python files include their module header so tools can reuse the file 
 - `tests/`
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
+  - `tests/test_agent_provider.py` — Tests for the agent-as-LLM-provider CLI protocol and the no-extractor footgun fix.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
   - `tests/test_checkpoint.py` — Tests for the ``membox checkpoint`` one-shot lifecycle wrapper.
   - `tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
