@@ -49,10 +49,10 @@ def _unit() -> MemoryUnitRecord:
     )
 
 
-def test_fresh_db_reaches_migration_8(tmp_path: Path) -> None:
-    """Fresh stores apply the Phase C migration."""
+def test_fresh_db_reaches_migration_9(tmp_path: Path) -> None:
+    """Fresh stores apply every migration through 0009."""
     store = KnowledgeStore(str(tmp_path / "memory.db"))
-    assert get_user_version(store._conn()) == 8
+    assert get_user_version(store._conn()) == 9
     tables = {
         row[0]
         for row in store._conn()
@@ -71,7 +71,7 @@ def test_fresh_db_reaches_migration_8(tmp_path: Path) -> None:
 
 
 def test_v7_db_upgrades_to_memory_units(tmp_path: Path) -> None:
-    """A database at user_version 7 upgrades to 8 without reset."""
+    """A database at user_version 7 upgrades through 8 and 9 to 9 without reset."""
     db_path = str(tmp_path / "v7.db")
     conn = sqlite3.connect(db_path)
     for version, action in MIGRATIONS[:7]:
@@ -80,7 +80,7 @@ def test_v7_db_upgrades_to_memory_units(tmp_path: Path) -> None:
     conn.close()
 
     store = KnowledgeStore(db_path)
-    assert get_user_version(store._conn()) == 8
+    assert get_user_version(store._conn()) == 9
 
 
 def test_create_memory_unit_rejects_unknown_label(tmp_path: Path) -> None:
@@ -91,6 +91,69 @@ def test_create_memory_unit_rejects_unknown_label(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unknown memory labels"):
         store.create_memory_unit(unit)
+
+
+# ---------------------------------------------------------------------------
+# Migration 0009: agent-as-provider rationale columns on memory_units
+# ---------------------------------------------------------------------------
+
+
+def test_migration_0009_adds_why_how_next_columns(tmp_path: Path) -> None:
+    """Migration 0009 adds the three rationale columns to memory_units."""
+    store = KnowledgeStore(str(tmp_path / "memory.db"))
+    cols = {row[1] for row in store._conn().execute("PRAGMA table_info(memory_units);").fetchall()}
+    assert {"why", "how_to_apply", "next_step"}.issubset(cols)
+    assert get_user_version(store._conn()) >= 9
+
+
+def test_migration_0009_is_idempotent(tmp_path: Path) -> None:
+    """Re-running migration 0009 leaves the schema unchanged."""
+    from membox.core.store.migrations import _migrate_0009
+
+    db_path = str(tmp_path / "memory.db")
+    store = KnowledgeStore(db_path)
+    conn = store._conn()
+    # Capture pre-state.
+    pre_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_units);").fetchall()}
+    assert {"why", "how_to_apply", "next_step"}.issubset(pre_cols)
+    # Re-run the migration callable — should be a no-op (idempotent).
+    _migrate_0009(conn)
+    post_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_units);").fetchall()}
+    assert post_cols == pre_cols
+
+
+def test_create_memory_unit_round_trips_why_how_next(tmp_path: Path) -> None:
+    """create_memory_unit persists why/how_to_apply/next_step; get_memory_unit hydrates them."""
+    store = KnowledgeStore(str(tmp_path / "units.db"))
+    unit = _unit()
+    unit.why = "because the schema owner requested it"
+    unit.how_to_apply = "run the migration before opening the store"
+    unit.next_step = "add the agent-as-provider ingest-graph happy path test"
+
+    unit_id = store.create_memory_unit(unit)
+
+    fetched = store.get_memory_unit(unit_id)
+    assert fetched is not None
+    assert fetched.why == "because the schema owner requested it"
+    assert fetched.how_to_apply == "run the migration before opening the store"
+    assert fetched.next_step == "add the agent-as-provider ingest-graph happy path test"
+
+
+def test_create_memory_unit_without_why_how_next_defaults_to_none(tmp_path: Path) -> None:
+    """A unit without rationale fields round-trips with None — checkpoint path."""
+    store = KnowledgeStore(str(tmp_path / "units.db"))
+    unit = _unit()
+    unit.why = None
+    unit.how_to_apply = None
+    unit.next_step = None
+
+    unit_id = store.create_memory_unit(unit)
+
+    fetched = store.get_memory_unit(unit_id)
+    assert fetched is not None
+    assert fetched.why is None
+    assert fetched.how_to_apply is None
+    assert fetched.next_step is None
 
 
 def test_create_memory_unit_requires_source(tmp_path: Path) -> None:

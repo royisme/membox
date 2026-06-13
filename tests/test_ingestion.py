@@ -42,14 +42,14 @@ class TestMigration0002:
     """Migration 0002 adds metadata columns and meta table."""
 
     def test_latest_version_is_2(self) -> None:
-        # Latest is now 6 (M4 supersession semantics adds superseded_by column).
-        assert latest_version() == 8
+        # Latest is now 9 (M4 Part A2 adds why/how_to_apply/next_step).
+        assert latest_version() == 9
 
     def test_fresh_db_reaches_version_2(self, tmp_path: Path) -> None:
-        # Fresh DB is migrated through all versions; current latest is 6.
+        # Fresh DB is migrated through all versions; current latest is 9.
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
         version = get_user_version(store._conn())
-        assert version == 8
+        assert version == 9
 
     def test_fresh_db_has_all_new_columns(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "fresh.db"))
@@ -84,7 +84,7 @@ class TestMigration0002:
         # Open via KnowledgeStore — should trigger all current migrations.
         store = KnowledgeStore(db_path)
         conn2 = store._conn()
-        assert get_user_version(conn2) == 8
+        assert get_user_version(conn2) == 9
         cols_v2 = {row[1] for row in conn2.execute("PRAGMA table_info(documents);").fetchall()}
         assert {"project", "source_path", "section", "doc_date", "version"}.issubset(cols_v2)
 

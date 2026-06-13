@@ -2,20 +2,35 @@
 
 Bypasses the LLM extractor: the calling agent has already performed
 extraction; membox validates the JSON and writes it to the store via
-``MemoryAgent.ingest_extracted``.
+``MemoryAgent.ingest_extracted``.  When the graph also carries an
+``units`` array, those memory units are persisted as
+:class:`~membox.model.schema.MemoryUnitRecord` rows too.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from pydantic import ValidationError
 
 from membox.cli._common import make_agent
-from membox.model.schema import ExtractedGraph
+from membox.core.project import infer_project
+from membox.model.schema import (
+    ExtractedGraph,
+    ExtractedUnit,
+    MemorySourceKind,
+    MemoryUnitRecord,
+    MemoryUnitSource,
+    MemoryUnitStatus,
+)
+
+if TYPE_CHECKING:
+    from membox.core.store import KnowledgeStore
 
 _DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
 
@@ -134,14 +149,90 @@ def ingest_graph(
     )
     fed_entities = len(graph.entities)
     fed_relations = len(graph.relations)
+    fed_units = len(graph.units)
     stored_entities = int(result["entities"])
     stored_relations = int(result["relations"])
     doc_id = int(result["doc_id"])
+    stored_units = _ingest_graph_units(
+        agent.store,
+        graph.units,
+        project=project or infer_project(Path.cwd() / "_"),
+        source=source,
+    )
     typer.echo(
         f"ingest-graph: stored {stored_entities} entities, "
-        f"{stored_relations} relations (doc_id={doc_id}); "
-        f"fed {fed_entities}/{fed_relations}"
+        f"{stored_relations} relations, {stored_units} units (doc_id={doc_id}); "
+        f"fed {fed_entities}/{fed_relations}/{fed_units}"
     )
+
+
+def _ingest_graph_units(
+    store: KnowledgeStore,
+    units: Iterable[ExtractedUnit],
+    *,
+    project: str,
+    source: str,
+) -> int:
+    """Persist every ``ExtractedUnit`` in *graph.units* as a memory unit.
+
+    The source row is always recorded as :attr:`MemorySourceKind.DOCUMENT`:
+    these units are *extracted by the agent from a source document/text*, not
+    asserted directly by the user. Using ``MANUAL`` here would be wrong — the
+    promotion policy treats ``MANUAL`` as explicit user confirmation and would
+    auto-promote every agent-ingested unit to crystal on the next consolidate,
+    defeating the ≥3-independent-source durability bar crystals exist to
+    enforce. ``DOCUMENT`` requires real promotion criteria (independent
+    sources / high-confidence decision) to crystallize.
+
+    Args:
+        store: The :class:`KnowledgeStore` to write to.
+        units: The ``graph.units`` iterable from the validated ``ExtractedGraph``.
+        project: Project scope (explicit CLI value, or inferred from CWD).
+        source: The user-supplied ``--source`` value (provenance label or
+            file path).  Recorded as the unit's ``source_ref``.
+
+    Returns:
+        Number of units stored.
+
+    Raises:
+        pydantic.ValidationError: If any unit fails ``_validate_memory_unit``
+            (unknown label, etc.).  Pydantic's ValidationError already
+            surfaces a clear, retriable message in the CLI handler.
+    """
+    stored = 0
+    source_kind = MemorySourceKind.DOCUMENT
+    for index, extracted in enumerate(units):
+        snippet = extracted.content[:300] if extracted.content else ""
+        # Each unit gets a per-unit source_message_id so multiple units from
+        # the same --source are NOT deduped against each other (the store
+        # dedupes on (source_kind, source_ref, source_message_id)).  The
+        # source_ref itself stays as the user-supplied --source per spec.
+        unit_msg_id = f"unit:{index}:{extracted.title}"
+        unit = MemoryUnitRecord(
+            project=project,
+            unit_type=extracted.unit_type,
+            status=MemoryUnitStatus.ACTIVE_UNIT,
+            title=extracted.title,
+            content=extracted.content,
+            context=extracted.context,
+            importance_score=0.5,
+            confidence_score=0.7,
+            why=extracted.why,
+            how_to_apply=extracted.how_to_apply,
+            next_step=extracted.next_step,
+            labels=extracted.labels,
+            sources=[
+                MemoryUnitSource(
+                    source_kind=source_kind,
+                    source_ref=source,
+                    source_message_id=unit_msg_id,
+                    quote=snippet,
+                )
+            ],
+        )
+        store.create_memory_unit(unit)
+        stored += 1
+    return stored
 
 
 __all__ = ["ingest_graph"]

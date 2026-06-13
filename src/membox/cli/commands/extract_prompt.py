@@ -16,13 +16,16 @@ import typer
 from membox.model.schema import ExtractedGraph
 from membox.services.prompts import (
     EXTRACTION_SYSTEM_PROMPT,
+    MEMORY_UNIT_SYSTEM_PROMPT,
     QUERY_KEYWORDS_SYSTEM_PROMPT,
 )
 
 _FOR_HELP = (
     "Which extraction prompt to emit. 'entities' (default) emits the full "
     "entity/relation graph prompt + ExtractedGraph JSON schema; 'query' emits "
-    "the query-seed prompt + a JSON array-of-strings schema."
+    "the query-seed prompt + a JSON array-of-strings schema; 'units' emits "
+    "the memory-unit extraction prompt + ExtractedGraph JSON schema (with the "
+    "'units' array populated; entities/relations may be empty)."
 )
 
 _QUERY_SCHEMA: dict[str, object] = {
@@ -38,6 +41,14 @@ _FINAL_INSTRUCTION_ENTITIES = (
 _FINAL_INSTRUCTION_QUERY = (
     "Output ONLY a JSON array of up to 3 entity name strings. "
     "Do not include any prose, code fences, or commentary."
+)
+_FINAL_INSTRUCTION_UNITS = (
+    "Output ONLY a single JSON object conforming to the schema above, with "
+    "the 'units' array populated (entities/relations may be empty arrays). "
+    "Fill in 'why' for decisions, learnings, and procedures; fill in "
+    "'how_to_apply' and 'next_step' for procedures and plans when the "
+    "document supports them. Do not include any prose, code fences, or "
+    "commentary — the JSON is piped directly into `membox ingest-graph`."
 )
 
 
@@ -118,6 +129,38 @@ def _build_query_prompt(content: str) -> str:
     )
 
 
+def _build_units_prompt(content: str) -> str:
+    """Compose the memory-unit extraction prompt block.
+
+    The schema is the same ExtractedGraph the entities prompt uses, so the
+    agent can populate the ``units`` array (with optional entities/relations)
+    and feed the resulting JSON straight into ``membox ingest-graph``.
+
+    Args:
+        content: Document text to wrap.
+
+    Returns:
+        Self-contained prompt the agent can execute verbatim.
+    """
+    schema_json = json.dumps(ExtractedGraph.model_json_schema(), indent=2, ensure_ascii=False)
+    return (
+        "## Instructions\n"
+        f"{MEMORY_UNIT_SYSTEM_PROMPT}\n"
+        "\n"
+        "## Output JSON schema\n"
+        "Respond with a JSON object matching this schema:\n"
+        "```json\n"
+        f"{schema_json}\n"
+        "```\n"
+        "\n"
+        "## Document\n"
+        f"{content}\n"
+        "\n"
+        "## Final instruction\n"
+        f"{_FINAL_INSTRUCTION_UNITS}\n"
+    )
+
+
 def extract_prompt(
     file: str = typer.Argument(..., help="File to extract from, or '-' for stdin"),
     for_: str = typer.Option("entities", "--for", help=_FOR_HELP),
@@ -130,17 +173,22 @@ def extract_prompt(
 
     Args:
         file: Path to the document, or ``"-"`` for stdin.
-        for_: Prompt kind — ``"entities"`` (default) or ``"query"``.
+        for_: Prompt kind — ``"entities"`` (default), ``"query"``, or ``"units"``.
     """
     kind = for_.strip().lower()
-    if kind not in {"entities", "query"}:
+    if kind not in {"entities", "query", "units"}:
         typer.echo(
-            f"Error: --for must be 'entities' or 'query' (got '{for_}').",
+            f"Error: --for must be 'entities', 'query', or 'units' (got '{for_}').",
             err=True,
         )
         raise typer.Exit(1)
     content = _read_source(file)
-    prompt = _build_query_prompt(content) if kind == "query" else _build_entities_prompt(content)
+    if kind == "query":
+        prompt = _build_query_prompt(content)
+    elif kind == "units":
+        prompt = _build_units_prompt(content)
+    else:
+        prompt = _build_entities_prompt(content)
     sys.stdout.write(prompt)
     if not prompt.endswith("\n"):
         sys.stdout.write("\n")

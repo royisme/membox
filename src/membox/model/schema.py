@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SourceKind(StrEnum):
@@ -166,6 +166,9 @@ class MemoryUnitRecord(BaseModel):
     updated_at: str | None = None
     recall_count: int = 0
     last_recalled_at: str | None = None
+    why: str | None = None
+    how_to_apply: str | None = None
+    next_step: str | None = None
 
 
 class HistorySessionRecord(BaseModel):
@@ -297,11 +300,52 @@ class ExtractedRelation(BaseModel):
     predicate: str = Field(description="Short verb phrase, e.g. 'uses', 'developed'")
 
 
+class ExtractedUnit(BaseModel):
+    """A memory unit extracted by an LLM/agent from one document.
+
+    Mirrors the agent-facing subset of :class:`MemoryUnitRecord`: enough
+    information to ingest a unit without going through deterministic
+    checkpoint triage.  ``why``/``how_to_apply``/``next_step`` are optional
+    so callers can emit partial rationale; the consolidation validator
+    flags units that should have them but do not.
+    """
+
+    unit_type: MemoryUnitType
+    title: str
+    content: str
+    context: str = ""
+    why: str | None = None
+    how_to_apply: str | None = None
+    next_step: str | None = None
+    labels: list[str] = Field(default_factory=list)
+
+    @field_validator("labels")
+    @classmethod
+    def _validate_labels(cls, value: list[str]) -> list[str]:
+        """Reject labels outside the closed :data:`MEMORY_LABELS` set.
+
+        Surfaces as :class:`pydantic.ValidationError` during
+        ``ExtractedGraph.model_validate`` so ``membox ingest-graph`` can
+        produce a clear retriable error (no traceback) for agent output
+        that violates the closed label vocabulary.
+        """
+        unknown = sorted(set(value) - MEMORY_LABELS)
+        if unknown:
+            msg = f"unknown memory labels: {', '.join(unknown)}"
+            raise ValueError(msg)
+        return value
+
+
 class ExtractedGraph(BaseModel):
-    """Full extraction result: entities and relations from one document."""
+    """Full extraction result: entities, relations, and memory units.
+
+    ``units`` defaults to an empty list so existing M3 JSON payloads
+    (entities/relations only) keep validating unchanged.
+    """
 
     entities: list[ExtractedEntity]
     relations: list[ExtractedRelation]
+    units: list[ExtractedUnit] = Field(default_factory=list)
 
 
 class Entity(BaseModel):

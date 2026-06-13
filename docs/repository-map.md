@@ -138,6 +138,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/chunking.py` — Markdown-aware document chunking for membox ingestion.
       - `src/membox/core/consolidate.py` — Pure consolidation policy for lifecycle Phase D memory units.
       - `src/membox/core/distill.py` — Pure workflow-distillation policy for lifecycle Phase F memory units.
+      - `src/membox/core/export.py` — Categorize memory units for MEMORY.md-style export.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
       - `src/membox/core/lifecycle.py` — Lifecycle orchestration: one-shot checkpoint = pull → triage → extract.
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
@@ -194,6 +195,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_lifecycle_acceptance.py` — C5 acceptance harness for the Phase C heuristic triage gate.
   - `tests/test_lifecycle_eval_fixtures.py` — Tests for committed Phase C lifecycle eval fixtures.
   - `tests/test_m3_retrieval.py` — Phase 7.5 M3 — tests for hybrid retrieval, scoring, knapsack, compact output.
+  - `tests/test_memory_export.py` — Tests for `membox memory export --as memory-md` (B1).
   - `tests/test_memory_units.py` — Lifecycle Phase C memory-unit storage tests.
   - `tests/test_normalize.py` — Phase 3 tests: canonical predicate synonym dictionary.
   - `tests/test_queue.py` — Phase 7.5 M6 asynchronous-ingestion-queue tests.
