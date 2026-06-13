@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 _FORMAT_BY_SOURCE_KIND: dict[str, str] = {
     SourceKind.CODEX_JSONL.value: "codex",
+    SourceKind.CLAUDE_JSONL.value: "claude",
     SourceKind.PI_JSONL.value: "pi",
     SourceKind.MEMBOX_CAPTURE.value: "membox",
     SourceKind.MANUAL.value: "membox",
