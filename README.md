@@ -68,6 +68,12 @@ membox memory extract --apply     # create memory units
 membox memory consolidate --apply # promote crystals, supersede stale
 ```
 
+Or run steps 1 and 2 in one shot with `checkpoint` (pull → triage → extract):
+
+```bash
+membox checkpoint --adapt claude   # defaults to --apply; use --dry-run to preview
+```
+
 ### 3. Query memory
 
 ```bash
