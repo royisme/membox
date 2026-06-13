@@ -85,6 +85,8 @@ Functional Python files include their module header so tools can reuse the file 
     - `eval/lifecycle/comparator_cases.yaml`
     - `eval/lifecycle/expectations.yaml`
     - `eval/lifecycle/README.md`
+  - `eval/results/`
+    - `eval/results/perf-baseline-v0.1.0.md`
   - `eval/gold.yaml`
   - `eval/README.md`
 - `examples/`
