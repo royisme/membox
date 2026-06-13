@@ -70,10 +70,22 @@ def _source(unit_id: int) -> MemoryUnitSource:
 def _unit(raw: dict[str, Any]) -> MemoryUnitRecord:
     """Build one memory unit from a YAML case record."""
     unit_id = int(raw["id"])
+    unit_type = MemoryUnitType(str(raw["unit_type"]))
+    # M4 Part A2 added the rationale gate. Synthetic comparator cases use
+    # MANUAL sources (agent-extracted by definition), so they would be
+    # pre-rejected without a why/how/next. Provide stable defaults so the
+    # comparator itself is what the eval exercises.
+    why = "comparator eval fixture — rationale not under test"
+    how_to_apply = "comparator eval recipe" if unit_type == MemoryUnitType.PROCEDURE else None
+    next_step = (
+        "comparator eval next step"
+        if unit_type in (MemoryUnitType.PROCEDURE, MemoryUnitType.PLAN)
+        else None
+    )
     return MemoryUnitRecord(
         id=unit_id,
         project="membox-lifecycle",
-        unit_type=MemoryUnitType(str(raw["unit_type"])),
+        unit_type=unit_type,
         status=MemoryUnitStatus(str(raw["status"])),
         title=str(raw["title"]),
         content=str(raw["content"]),
@@ -84,6 +96,9 @@ def _unit(raw: dict[str, Any]) -> MemoryUnitRecord:
         valid_to=None if raw.get("valid_to") is None else str(raw["valid_to"]),
         labels=[str(label) for label in raw.get("labels", [])],
         sources=[_source(unit_id)],
+        why=why,
+        how_to_apply=how_to_apply,
+        next_step=next_step,
     )
 
 

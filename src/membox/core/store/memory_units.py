@@ -278,8 +278,8 @@ class MemoryUnitOps:
                 INSERT INTO memory_units
                     (project, unit_type, status, title, content, content_hash, context,
                      importance_score, confidence_score, temporal_type, valid_from, valid_to,
-                     superseded_by, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                     superseded_by, why, how_to_apply, next_step, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(project, unit_type, content_hash) DO NOTHING
                 """,
                 (
@@ -296,6 +296,9 @@ class MemoryUnitOps:
                     unit.valid_from,
                     unit.valid_to,
                     unit.superseded_by,
+                    unit.why,
+                    unit.how_to_apply,
+                    unit.next_step,
                 ),
             )
             unit_id = _lookup_unit_id(c, unit.project, unit.unit_type.value, content_hash)
@@ -343,7 +346,8 @@ class MemoryUnitOps:
             SELECT id, project, unit_type, status, title, content, context,
                    importance_score, confidence_score, temporal_type,
                    valid_from, valid_to, superseded_by, created_at, updated_at,
-                   recall_count, last_recalled_at
+                   recall_count, last_recalled_at,
+                   why, how_to_apply, next_step
             FROM memory_units WHERE id=?
             """,
             (unit_id,),
@@ -377,7 +381,8 @@ class MemoryUnitOps:
             SELECT id, project, unit_type, status, title, content, context,
                    importance_score, confidence_score, temporal_type,
                    valid_from, valid_to, superseded_by, created_at, updated_at,
-                   recall_count, last_recalled_at
+                   recall_count, last_recalled_at,
+                   why, how_to_apply, next_step
             FROM memory_units
             {where}
             ORDER BY id DESC
@@ -508,7 +513,8 @@ class MemoryUnitOps:
             SELECT id, project, unit_type, status, title, content, context,
                    importance_score, confidence_score, temporal_type,
                    valid_from, valid_to, superseded_by, created_at, updated_at,
-                   recall_count, last_recalled_at
+                   recall_count, last_recalled_at,
+                   why, how_to_apply, next_step
             FROM memory_units
             WHERE {" AND ".join(clauses)}
               AND status NOT IN ('archived', 'superseded', 'retracted')
@@ -602,7 +608,8 @@ class MemoryUnitOps:
             SELECT id, project, unit_type, status, title, content, context,
                    importance_score, confidence_score, temporal_type,
                    valid_from, valid_to, superseded_by, created_at, updated_at,
-                   recall_count, last_recalled_at
+                   recall_count, last_recalled_at,
+                   why, how_to_apply, next_step
             FROM memory_units
             WHERE {" AND ".join(clauses)}
             ORDER BY id
@@ -1187,6 +1194,9 @@ def _unit_from_row(conn: sqlite3.Connection, row: tuple[object, ...]) -> MemoryU
         updated_at=None if row[14] is None else str(row[14]),
         recall_count=int(str(row[15])),
         last_recalled_at=None if row[16] is None else str(row[16]),
+        why=None if row[17] is None else str(row[17]),
+        how_to_apply=None if row[18] is None else str(row[18]),
+        next_step=None if row[19] is None else str(row[19]),
         labels=labels,
         sources=sources,
     )

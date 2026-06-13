@@ -23,6 +23,7 @@ from typer.testing import CliRunner
 from membox.cli import app
 from membox.services.prompts import (
     EXTRACTION_SYSTEM_PROMPT,
+    MEMORY_UNIT_SYSTEM_PROMPT,
     QUERY_KEYWORDS_SYSTEM_PROMPT,
 )
 
@@ -93,7 +94,28 @@ class TestExtractPrompt:
         doc.write_text("hi", encoding="utf-8")
         result = runner.invoke(app, ["extract-prompt", str(doc), "--for", "bogus"])
         assert result.exit_code == 1
-        assert "must be 'entities' or 'query'" in result.stderr
+        assert "must be 'entities', 'query', or 'units'" in result.stderr
+
+    def test_extract_prompt_for_units_emits_unit_prompt_and_schema(self, tmp_path: Path) -> None:
+        """`--for units` emits the MEMORY_UNIT prompt + the ExtractedGraph schema."""
+        doc = tmp_path / "doc.md"
+        body = "We decided to ship migration 9; the procedure is to call ingest-graph."
+        doc.write_text(body, encoding="utf-8")
+        result = runner.invoke(app, ["extract-prompt", str(doc), "--for", "units"])
+        assert result.exit_code == 0, result.output
+        out = result.stdout
+        # System prompt is sourced from services/prompts.
+        assert MEMORY_UNIT_SYSTEM_PROMPT in out
+        # The three rationale fields are spelled out in the final instruction.
+        assert "why" in out
+        assert "how_to_apply" in out
+        assert "next_step" in out
+        # Document is wrapped in the prompt.
+        assert body in out
+        # The ExtractedGraph JSON schema is included so the agent can populate 'units'.
+        assert '"units"' in out
+        assert '"entities"' in out
+        assert '"relations"' in out
 
 
 class TestIngestGraph:
@@ -245,6 +267,195 @@ class TestIngestGraph:
         )
         assert result.exit_code == 1
         assert "file not found" in result.stderr
+
+    def test_ingest_graph_units_stored_matches_fed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When the graph carries an ``units`` array, those units are stored too."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        doc = tmp_path / "doc.md"
+        doc.write_text("We decided to use migration 9 and added a procedure.", encoding="utf-8")
+        payload = json.dumps(
+            {
+                "entities": [
+                    {"name": "Membox", "type": "Project", "description": "Memory layer"},
+                ],
+                "relations": [
+                    {"source": "We", "target": "Membox", "predicate": "decided on"},
+                ],
+                "units": [
+                    {
+                        "unit_type": "decision",
+                        "title": "Use migration 9 for why/how/next",
+                        "content": "We chose to ship rationale columns on memory_units as migration 9.",
+                        "context": "M4 Part A2",
+                        "why": "so the agent-as-provider path can persist agent rationale",
+                        "labels": ["architecture", "storage"],
+                    },
+                    {
+                        "unit_type": "procedure",
+                        "title": "Ingest units via ingest-graph",
+                        "content": "Caller emits an ExtractedGraph with a units array; membox stores it.",
+                        "context": "M4 Part A2",
+                        "why": "agents need to be able to write memory units without checkpoint triage",
+                        "how_to_apply": "1) run extract-prompt --for units; 2) pipe JSON into ingest-graph --from-json -",
+                        "next_step": "extend tests to cover the units-only path",
+                        "labels": ["workflow"],
+                    },
+                ],
+            }
+        )
+        result = runner.invoke(
+            app,
+            [
+                "ingest-graph",
+                "--from-json",
+                "-",
+                "--source",
+                str(doc),
+                "--db",
+                str(db),
+            ],
+            input=payload,
+        )
+        assert result.exit_code == 0, result.output
+        assert "stored 1 entities, 1 relations, 2 units (doc_id=" in result.stdout
+        assert "fed 1/1/2" in result.stdout
+
+        # Open the DB and verify the two units have why/how/next stored.
+        from membox.core.store import KnowledgeStore
+
+        store = KnowledgeStore(str(db))
+        rows = (
+            store._conn()
+            .execute(
+                "SELECT title, why, how_to_apply, next_step, status FROM memory_units ORDER BY id"
+            )
+            .fetchall()
+        )
+        assert len(rows) == 2
+        assert rows[0][0] == "Use migration 9 for why/how/next"
+        assert rows[0][1] == "so the agent-as-provider path can persist agent rationale"
+        assert rows[0][2] is None
+        assert rows[0][3] is None
+        assert rows[0][4] == "active_unit"
+        assert rows[1][0] == "Ingest units via ingest-graph"
+        assert (
+            rows[1][1] == "agents need to be able to write memory units without checkpoint triage"
+        )
+        assert "1) run extract-prompt" in (rows[1][2] or "")
+        assert rows[1][3] == "extend tests to cover the units-only path"
+        assert rows[1][4] == "active_unit"
+
+    def test_ingest_graph_units_only_works(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A graph that carries only units (no entities/relations) is valid."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        payload = json.dumps(
+            {
+                "entities": [],
+                "relations": [],
+                "units": [
+                    {
+                        "unit_type": "fact",
+                        "title": "SQLite is the storage backend",
+                        "content": "Membox stores everything in a local SQLite file.",
+                        "labels": ["storage"],
+                    },
+                ],
+            }
+        )
+        result = runner.invoke(
+            app,
+            [
+                "ingest-graph",
+                "--from-json",
+                "-",
+                "--source",
+                "label-only",
+                "--db",
+                str(db),
+            ],
+            input=payload,
+        )
+        assert result.exit_code == 0, result.output
+        assert "stored 0 entities, 0 relations, 1 units (doc_id=" in result.stdout
+
+    def test_ingest_graph_backward_compat_m3_payload_without_units(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """M3 JSON with no 'units' key still validates and ingests unchanged."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        doc = tmp_path / "doc.md"
+        doc.write_text("Alice and Bob use Membox.", encoding="utf-8")
+        payload = json.dumps(
+            {
+                "entities": [
+                    {"name": "Alice", "type": "Person", "description": ""},
+                    {"name": "Bob", "type": "Person", "description": ""},
+                    {"name": "Membox", "type": "Project", "description": "Memory layer"},
+                ],
+                "relations": [
+                    {"source": "Alice", "target": "Membox", "predicate": "uses"},
+                    {"source": "Bob", "target": "Membox", "predicate": "uses"},
+                ],
+            }
+        )
+        result = runner.invoke(
+            app,
+            [
+                "ingest-graph",
+                "--from-json",
+                "-",
+                "--source",
+                str(doc),
+                "--db",
+                str(db),
+            ],
+            input=payload,
+        )
+        assert result.exit_code == 0, result.output
+        assert "stored 3 entities, 2 relations, 0 units (doc_id=" in result.stdout
+        assert "fed 3/2/0" in result.stdout
+
+    def test_ingest_graph_unknown_label_exits_1(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Agent-emitted units with unknown labels exit 1 with a clear message (no traceback)."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        db = tmp_path / "memory.db"
+        bad = {
+            "entities": [],
+            "relations": [],
+            "units": [
+                {
+                    "unit_type": "fact",
+                    "title": "Mislabeled claim",
+                    "content": "This unit uses a label outside the closed set.",
+                    "labels": ["nonsense-label"],
+                }
+            ],
+        }
+        result = runner.invoke(
+            app,
+            [
+                "ingest-graph",
+                "--from-json",
+                "-",
+                "--source",
+                "label-only",
+                "--db",
+                str(db),
+            ],
+            input=json.dumps(bad),
+        )
+        assert result.exit_code == 1
+        assert "invalid ExtractedGraph JSON" in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 class TestIngestFootgunFix:

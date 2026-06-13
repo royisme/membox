@@ -405,6 +405,8 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
     prefix = "would " if dry_run else ""
     for issue in plan.validator_rejections:
         typer.echo(f"validator reject {issue.unit_id} title={issue.title!r} reason={issue.reason}")
+    for issue in plan.validator_flags:
+        typer.echo(f"validator flag {issue.unit_id} title={issue.title!r} reason={issue.reason}")
     for conflict in plan.review_pairs():
         typer.echo(
             f"conflict review {conflict.left_id}<->{conflict.right_id} "
@@ -431,11 +433,18 @@ def _print_consolidation_plan(plan: ConsolidationPlan, *, dry_run: bool) -> None
     )
     n_promoted = len(plan.promotions)
     n_rejected = len(plan.validator_rejections)
+    n_flagged = len(plan.validator_flags)
     rejection_breakdown = _summarize_rejections(plan.validator_rejections)
-    summary_suffix = f" ({rejection_breakdown})" if rejection_breakdown else ""
-    console.print(
-        f"[bold]summary:[/bold] promoted {n_promoted} / rejected {n_rejected}{summary_suffix}"
+    flag_breakdown = _summarize_rejections(plan.validator_flags)
+    summary_parts = [
+        f"promoted {n_promoted}",
+        f"rejected {n_rejected}",
+        f"flagged {n_flagged}",
+    ]
+    breakdown = (f" rejections=({rejection_breakdown})" if rejection_breakdown else "") + (
+        f" flags=({flag_breakdown})" if flag_breakdown else ""
     )
+    console.print(f"[bold]summary:[/bold] {' / '.join(summary_parts)}{breakdown}")
 
 
 def _summarize_rejections(rejections: list[ConsolidationIssue]) -> str:

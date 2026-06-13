@@ -70,6 +70,14 @@ to expose them for auditing.
 Migration 0008 (Lifecycle Phase C — Triage + Memory Units) creates the
 ``history_triage`` audit table, ``memory_units`` plus source/label/status-log
 tables, and unicode61 + trigram FTS5 sidecars over unit title/content/context.
+
+Migration 0009 (M4 Part A2 — Agent-as-Provider Memory Units) adds three
+nullable ``TEXT`` columns to ``memory_units``: ``why`` (the rationale behind
+a decision/learning/procedure), ``how_to_apply`` (the procedure's concrete
+recipe), and ``next_step`` (the immediate follow-up for a procedure/plan).
+These are agent/LLM-extracted semantics, not deterministic checkpoint
+fields, so they default to NULL on rows produced by the checkpoint path
+(see ``core/lifecycle.py`` and ``_unit_from_trace`` in ``cli/commands/memory.py``).
 """
 # ruff: noqa: S608
 
@@ -677,6 +685,31 @@ def _create_memory_units_fts(
     )
 
 
+def _migrate_0009(conn: sqlite3.Connection) -> None:
+    """Apply M4 Part A2 agent-as-provider schema changes.
+
+    Adds three nullable ``TEXT`` columns to ``memory_units`` — ``why``,
+    ``how_to_apply``, ``next_step`` — that carry agent/LLM-extracted
+    semantics.  Uses ``ALTER TABLE … ADD COLUMN`` so existing data is
+    preserved; new columns default to NULL.  Idempotent: a column that
+    already exists is skipped.
+
+    Args:
+        conn: Open SQLite connection already inside a transaction.
+    """
+    new_columns = [
+        ("why", "TEXT"),
+        ("how_to_apply", "TEXT"),
+        ("next_step", "TEXT"),
+    ]
+    existing: set[str] = {
+        row[1] for row in conn.execute("PRAGMA table_info(memory_units);").fetchall()
+    }
+    for col_name, col_type in new_columns:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE memory_units ADD COLUMN {col_name} {col_type};")
+
+
 MIGRATIONS: list[Migration] = [
     (1, _DDL_0001),
     (2, _migrate_0002),
@@ -686,6 +719,7 @@ MIGRATIONS: list[Migration] = [
     (6, _migrate_0006),
     (7, _migrate_0007),
     (8, _migrate_0008),
+    (9, _migrate_0009),
 ]
 
 

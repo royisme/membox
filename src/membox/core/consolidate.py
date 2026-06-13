@@ -42,12 +42,16 @@ the per-query budget. Distinct from MAX_CONTENT_LENGTH (4000) which guards the
 general unit cap.
 """
 
-MIN_MEANINGFUL_TOKENS = 8
+MIN_MEANINGFUL_TOKENS = 3
 """Vague-content floor for crystal promotion.
 
-A claim worth promoting should carry at least ~8 meaningful (>=4-letter)
-tokens. Below that we flag as vague: short labels or pure restatements of the
-title cannot bear their own weight in recall context.
+A claim must carry at least 3 meaningful (>=4-letter) tokens, else it is flagged
+as vague. This is deliberately conservative: the heuristic must catch true noise
+("ok thanks", "see above", "done") — 0-1 meaningful tokens — without rejecting
+legitimately *concise* substantive claims. Crisp agent-extracted decisions such
+as "Adopt WAL mode for all connections" (3 meaningful tokens) are real durable
+knowledge, not vagueness, and must pass. A higher floor over-rejects the concise
+units the agent-as-provider flow produces by design.
 """
 
 _VAGUE_CONTENT_LENGTH_CEILING = 80
@@ -119,6 +123,7 @@ class ConsolidationPlan:
     decay_archives: list[ConsolidationTransition] = field(default_factory=list)
     decay_reviews: list[ConsolidationIssue] = field(default_factory=list)
     validator_rejections: list[ConsolidationIssue] = field(default_factory=list)
+    validator_flags: list[ConsolidationIssue] = field(default_factory=list)
 
     def ordered_transitions(self) -> list[ConsolidationTransition]:
         """Return status transitions in the deterministic apply order."""
@@ -187,7 +192,7 @@ def build_consolidation_plan(
     comparator_threshold: float = 0.50,
 ) -> ConsolidationPlan:
     """Build a deterministic dry-run/apply plan for Phase D consolidation."""
-    validator_rejections = validate_units(units)
+    validator_rejections, validator_flags = validate_units(units)
     rejected_ids = {issue.unit_id for issue in validator_rejections}
     eligible_units = [unit for unit in units if unit.id is not None and unit.id not in rejected_ids]
     conflicts = detect_conflicts(eligible_units)
@@ -261,6 +266,7 @@ def build_consolidation_plan(
         decay_archives=decay_archives,
         decay_reviews=decay_reviews,
         validator_rejections=validator_rejections,
+        validator_flags=validator_flags,
     )
     if comparator is None:
         return plan
@@ -287,19 +293,38 @@ def should_be_crystal_candidate(unit: MemoryUnitRecord) -> bool:
     )
 
 
-def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
-    """Run the Phase D validator over units without mutating them."""
-    issues: list[ConsolidationIssue] = []
+def validate_units(
+    units: list[MemoryUnitRecord],
+) -> tuple[list[ConsolidationIssue], list[ConsolidationIssue]]:
+    """Run the Phase D validator over units without mutating them.
+
+    Returns:
+        ``(rejections, flags)``: hard rejections block promotion, advisory
+        flags surface without blocking.  Hard rules (no source, content
+        length, vague content, crystal budget, weak provenance, duplicate
+        titles, stale paths, unsupported claims) always reject.
+
+        The M4 Part A2 why/how/next rationale rules are GATED for
+        agent/LLM-extracted units (any source whose source_kind is *not*
+        HISTORY_MESSAGE / HISTORY_EVENT — i.e. the agent wrote them with
+        full semantic context) and FLAGGED (advisory) for heuristic
+        units whose why/how/next are absent because the deterministic
+        checkpoint path never sets them.
+    """
+    rejections: list[ConsolidationIssue] = []
+    flags: list[ConsolidationIssue] = []
     seen_titles: dict[tuple[str, str], int] = {}
     for unit in units:
         if unit.id is None:
             continue
         if not unit.sources:
-            issues.append(ConsolidationIssue(unit.id, unit.title, "no source"))
+            rejections.append(ConsolidationIssue(unit.id, unit.title, "no source"))
         content_len = len(unit.content.strip())
         content_in_bounds = MIN_CONTENT_LENGTH <= content_len <= MAX_CONTENT_LENGTH
         if not content_in_bounds:
-            issues.append(ConsolidationIssue(unit.id, unit.title, "content length out of bounds"))
+            rejections.append(
+                ConsolidationIssue(unit.id, unit.title, "content length out of bounds")
+            )
         # Vague-content heuristic: only meaningful when content is in-bounds
         # (length check already handled the empty/oversized case). Flag units
         # whose content is too thin to carry durable signal — either fewer than
@@ -329,13 +354,13 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
                     and len(meaningful) < 12
                 )
                 if too_few or title_echo:
-                    issues.append(
+                    rejections.append(
                         ConsolidationIssue(
                             unit.id, unit.title, "vague content (insufficient signal)"
                         )
                     )
         if content_in_bounds and content_len > CRYSTAL_MAX_CONTENT_LENGTH:
-            issues.append(
+            rejections.append(
                 ConsolidationIssue(
                     unit.id,
                     unit.title,
@@ -343,7 +368,7 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
                 )
             )
         if unit.sources and not _has_strong_provenance(unit):
-            issues.append(
+            rejections.append(
                 ConsolidationIssue(
                     unit.id,
                     unit.title,
@@ -353,7 +378,7 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
         title_key = (unit.project, unit.title.strip().casefold())
         previous = seen_titles.get(title_key)
         if previous is not None:
-            issues.append(
+            rejections.append(
                 ConsolidationIssue(unit.id, unit.title, f"duplicate title also used by {previous}")
             )
         else:
@@ -368,11 +393,67 @@ def validate_units(units: list[MemoryUnitRecord]) -> list[ConsolidationIssue]:
             if not ref or ref in seen_stale_refs:
                 continue
             if Path(ref).is_absolute() and not Path(ref).exists():
-                issues.append(ConsolidationIssue(unit.id, unit.title, f"stale source path: {ref}"))
+                rejections.append(
+                    ConsolidationIssue(unit.id, unit.title, f"stale source path: {ref}")
+                )
                 seen_stale_refs.add(ref)
         if unit.sources and _unsupported_claim(unit):
-            issues.append(ConsolidationIssue(unit.id, unit.title, "unsupported claim heuristic"))
+            rejections.append(
+                ConsolidationIssue(unit.id, unit.title, "unsupported claim heuristic")
+            )
+        # M4 Part A2 rationale rules.  Agent/LLM-extracted units are GATED
+        # (rejected from promotion); heuristic units are FLAGGED (advisory,
+        # do not block).  See _is_agent_extracted.
+        for issue in _rationale_issues(unit):
+            if _is_agent_extracted(unit):
+                rejections.append(issue)
+            else:
+                flags.append(issue)
+    return rejections, flags
+
+
+def _is_agent_extracted(unit: MemoryUnitRecord) -> bool:
+    """Return whether *unit* was produced by an agent/LLM (not the heuristic).
+
+    Heuristic units carry HISTORY_MESSAGE / HISTORY_EVENT source kinds
+    (the deterministic checkpoint path in
+    :func:`cli.commands.memory._unit_from_trace`); every other kind
+    (DOCUMENT, RELATION, UNIT, MANUAL) is treated as agent/LLM-extracted
+    and is therefore subject to the LIVE rationale gate.
+    """
+    heuristic_kinds = {
+        MemorySourceKind.HISTORY_MESSAGE.value,
+        MemorySourceKind.HISTORY_EVENT.value,
+    }
+    return not all(source.source_kind.value in heuristic_kinds for source in unit.sources)
+
+
+def _rationale_issues(unit: MemoryUnitRecord) -> list[ConsolidationIssue]:
+    """Yield rationale-rule issues for one unit (empty list when satisfied)."""
+    if unit.id is None:
+        return []
+    issues: list[ConsolidationIssue] = []
+    needs_why = unit.unit_type in {
+        MemoryUnitType.DECISION,
+        MemoryUnitType.LEARNING,
+        MemoryUnitType.PROCEDURE,
+    }
+    if needs_why and not _has_text(unit.why):
+        issues.append(ConsolidationIssue(unit.id, unit.title, "decision missing rationale (why)"))
+    if unit.unit_type in {MemoryUnitType.PROCEDURE, MemoryUnitType.PLAN} and not _has_text(
+        unit.next_step
+    ):
+        issues.append(ConsolidationIssue(unit.id, unit.title, "procedure/plan missing next_step"))
+    if unit.unit_type == MemoryUnitType.PROCEDURE and not _has_text(unit.how_to_apply):
+        issues.append(ConsolidationIssue(unit.id, unit.title, "procedure missing how_to_apply"))
     return issues
+
+
+def _has_text(value: str | None) -> bool:
+    """Return whether *value* is a non-empty / non-whitespace string."""
+    if value is None:
+        return False
+    return bool(value.strip())
 
 
 def _has_non_latin_content(text: str) -> bool:
@@ -563,6 +644,7 @@ def _apply_llm_comparator(
         decay_archives=[transition for transition in plan.decay_archives if keep(transition)],
         decay_reviews=plan.decay_reviews,
         validator_rejections=plan.validator_rejections,
+        validator_flags=plan.validator_flags,
     )
 
 

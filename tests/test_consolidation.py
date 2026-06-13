@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -56,6 +57,15 @@ class LowScoreComparator:
         ]
 
 
+_UNSET: object = object()
+"""Sentinel meaning 'argument not provided' — lets tests pass an explicit None.
+
+Typed as ``object`` so the ``_unit()`` helper can accept an explicit
+``None`` (the "missing rationale" case) without mypy narrowing it back to
+``str | None`` at the call site.
+"""
+
+
 def _source(
     ref: str = "manual:1",
     kind: MemorySourceKind = MemorySourceKind.MANUAL,
@@ -79,8 +89,26 @@ def _unit(
     sources: list[MemoryUnitSource] | None = None,
     valid_to: str | None = None,
     context: str = "",
+    why: str | None | object = _UNSET,
+    how_to_apply: str | None | object = _UNSET,
+    next_step: str | None | object = _UNSET,
 ) -> MemoryUnitRecord:
-    """Return a valid memory unit for Phase D tests."""
+    """Return a valid memory unit for Phase D tests.
+
+    Defaults set ``why="test rationale"`` (and ``how_to_apply``/``next_step``
+    for PROCEDURE/PLAN) so most existing tests pass the M4 Part A2 rationale
+    gate.  Tests that exercise the gate explicitly pass ``None``.
+    """
+    if why is _UNSET:
+        why = "test rationale"
+    if how_to_apply is _UNSET:
+        how_to_apply = "test procedure recipe" if unit_type == MemoryUnitType.PROCEDURE else None
+    if next_step is _UNSET:
+        next_step = (
+            "test next step"
+            if unit_type in (MemoryUnitType.PROCEDURE, MemoryUnitType.PLAN)
+            else None
+        )
     return MemoryUnitRecord(
         project="membox",
         unit_type=unit_type,
@@ -96,6 +124,9 @@ def _unit(
         if sources is None
         else sources,
         valid_to=valid_to,
+        why=cast("str | None", why),
+        how_to_apply=cast("str | None", how_to_apply),
+        next_step=cast("str | None", next_step),
     )
 
 
@@ -611,7 +642,7 @@ def test_crystal_budget_blocks_oversized_content() -> None:
         sources=sources,
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     reasons = [issue.reason for issue in issues]
     assert any("content exceeds crystal budget" in reason for reason in reasons)
 
@@ -633,7 +664,7 @@ def test_crystal_budget_negative_clean_unit_under_cap_passes() -> None:
         sources=sources,
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     assert not any("content exceeds crystal budget" in issue.reason for issue in issues)
 
 
@@ -645,7 +676,7 @@ def test_provenance_strength_blocks_thin_sources() -> None:
         sources=[_source("history:only", MemorySourceKind.HISTORY_MESSAGE, quote="")],
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     reasons = [issue.reason for issue in issues]
     assert "insufficient provenance for crystal (needs a quote or ≥2 sources)" in reasons
 
@@ -664,7 +695,7 @@ def test_provenance_strength_negative_passes_with_quote() -> None:
         ],
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     assert not any("insufficient provenance for crystal" in issue.reason for issue in issues)
 
 
@@ -679,7 +710,7 @@ def test_provenance_strength_negative_passes_with_two_refs() -> None:
         ],
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     assert not any("insufficient provenance for crystal" in issue.reason for issue in issues)
 
 
@@ -690,7 +721,7 @@ def test_vague_content_flags_short_content() -> None:
         content="ok thanks",
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
     assert "vague content (insufficient signal)" in [issue.reason for issue in issues]
 
 
@@ -704,7 +735,24 @@ def test_vague_content_negative_passes_meaningful() -> None:
         ),
     )
     unit.id = 1
-    issues = validate_units([unit])
+    issues, _flags = validate_units([unit])
+    assert not any("vague content (insufficient signal)" in issue.reason for issue in issues)
+
+
+def test_vague_content_negative_passes_concise_substantive_claim() -> None:
+    """A short but substantive claim (e.g. an agent-extracted decision) is not vague.
+
+    Regression guard: the agent-as-provider flow produces deliberately concise
+    units. A crisp decision like "Adopt WAL mode for all connections" carries
+    only ~3 meaningful tokens but is real durable knowledge — it must NOT be
+    flagged as vague, or agent units could never be promoted.
+    """
+    unit = _unit(
+        title="Use SQLite WAL",
+        content="Adopt WAL mode for all connections.",
+    )
+    unit.id = 1
+    issues, _flags = validate_units([unit])
     assert not any("vague content (insufficient signal)" in issue.reason for issue in issues)
 
 
@@ -718,7 +766,7 @@ def test_stale_path_extended_to_non_document(tmp_path: Path) -> None:
         sources=[_source(missing_path, MemorySourceKind.HISTORY_MESSAGE)],
     )
     non_document_unit.id = 1
-    issues = validate_units([non_document_unit])
+    issues, _flags = validate_units([non_document_unit])
     assert any(issue.reason == f"stale source path: {missing_path}" for issue in issues)
 
     present_path = tmp_path / "exists.txt"
@@ -729,7 +777,7 @@ def test_stale_path_extended_to_non_document(tmp_path: Path) -> None:
         sources=[_source(str(present_path), MemorySourceKind.HISTORY_MESSAGE)],
     )
     present_unit.id = 2
-    issues_present = validate_units([present_unit])
+    issues_present, _flags_present = validate_units([present_unit])
     assert not any("stale source path" in issue.reason for issue in issues_present)
 
 
@@ -761,6 +809,7 @@ def test_consolidate_summary_counts_promoted_and_rejected(tmp_path: Path) -> Non
     assert "summary:" in result.output
     assert "promoted 1" in result.output
     assert "rejected 1" in result.output
+    assert "flagged 0" in result.output
     assert "vague content" in result.output
     promotable_unit = store.get_memory_unit(promotable_id)
     assert promotable_unit is not None
@@ -768,3 +817,189 @@ def test_consolidate_summary_counts_promoted_and_rejected(tmp_path: Path) -> Non
     rejected_unit = store.get_memory_unit(rejected_id)
     assert rejected_unit is not None
     assert rejected_unit.status == MemoryUnitStatus.ACTIVE_UNIT
+
+
+# ---------------------------------------------------------------------------
+# M4 Part A2 — Agent/LLM-extracted rationale gate (LIVE) + heuristic FLAG
+# ---------------------------------------------------------------------------
+
+
+def test_agent_extracted_decision_missing_why_is_gated() -> None:
+    """An agent/LLM-extracted DECISION with no why goes into validator_rejections."""
+    unit = _unit(
+        title="Pick database",
+        content="Owner picked SQLite for local-first durability and zero ops.",
+        unit_type=MemoryUnitType.DECISION,
+        why=None,
+        sources=[_source("doc:picks", MemorySourceKind.DOCUMENT)],
+    )
+    unit.id = 1
+    rejections, flags = validate_units([unit])
+    reasons = [issue.reason for issue in rejections]
+    assert "decision missing rationale (why)" in reasons
+    # The same unit must NOT also be flagged (gate is mutually exclusive).
+    assert all(issue.unit_id != 1 for issue in flags)
+
+
+def test_heuristic_decision_missing_why_is_flagged_only() -> None:
+    """A heuristic (HISTORY_MESSAGE-source) DECISION missing why is advisory, not gated."""
+    unit = _unit(
+        title="Heuristic decision",
+        content="Heuristic checkpoint produced this claim from a history message.",
+        unit_type=MemoryUnitType.DECISION,
+        why=None,
+        sources=[_source("history:msg-1", MemorySourceKind.HISTORY_MESSAGE)],
+    )
+    unit.id = 1
+    rejections, flags = validate_units([unit])
+    assert all(issue.unit_id != 1 for issue in rejections)
+    flag_reasons = [issue.reason for issue in flags]
+    assert "decision missing rationale (why)" in flag_reasons
+
+
+def test_agent_procedure_missing_how_to_apply_is_gated() -> None:
+    """An agent-extracted PROCEDURE missing how_to_apply is rejected."""
+    unit = _unit(
+        title="Run the migration",
+        content=(
+            "We run the migration script before opening the store to keep the "
+            "schema versioned across the developer team."
+        ),
+        unit_type=MemoryUnitType.PROCEDURE,
+        why="we want durable rationale",
+        how_to_apply=None,
+        sources=[_source("doc:proc", MemorySourceKind.DOCUMENT)],
+    )
+    unit.id = 1
+    rejections, flags = validate_units([unit])
+    reasons = [issue.reason for issue in rejections]
+    assert "procedure missing how_to_apply" in reasons
+    assert all(issue.unit_id != 1 for issue in flags)
+
+
+def test_agent_procedure_plan_missing_next_step_is_gated() -> None:
+    """Agent-extracted PROCEDURE/PLAN missing next_step is rejected."""
+    proc = _unit(
+        title="Procedure without next",
+        content=(
+            "We followed the procedure to add a migration for the new columns. "
+            "The team adopted the workflow across the engineering org."
+        ),
+        unit_type=MemoryUnitType.PROCEDURE,
+        why="rationale",
+        how_to_apply="recipe",
+        next_step=None,
+        sources=[_source("doc:proc", MemorySourceKind.DOCUMENT)],
+    )
+    proc.id = 1
+    plan_unit = _unit(
+        title="Plan without next",
+        content=(
+            "The plan covered the rollout strategy, key milestones, and the "
+            "operational readiness checklist the team agreed on."
+        ),
+        unit_type=MemoryUnitType.PLAN,
+        why="rationale",
+        next_step=None,
+        sources=[_source("doc:plan", MemorySourceKind.DOCUMENT)],
+    )
+    plan_unit.id = 2
+    rejections, flags = validate_units([proc, plan_unit])
+    reasons = [issue.reason for issue in rejections]
+    assert "procedure/plan missing next_step" in reasons
+    assert all(issue.unit_id not in (1, 2) for issue in flags)
+
+
+def test_unit_with_full_rationale_is_neither_gated_nor_flagged() -> None:
+    """A unit with why/how/next set is clean (no gate, no flag)."""
+    unit = _unit(
+        title="Clean decision",
+        content=(
+            "We chose SQLite for local-first durability and zero operational "
+            "footprint across the developer team."
+        ),
+        unit_type=MemoryUnitType.DECISION,
+        why="because trade-offs were reviewed",
+        sources=[_source("doc:clean", MemorySourceKind.DOCUMENT)],
+    )
+    unit.id = 1
+    rejections, flags = validate_units([unit])
+    assert all(issue.unit_id != 1 for issue in rejections)
+    assert all(issue.unit_id != 1 for issue in flags)
+
+
+def test_consolidation_plan_exposes_validator_flags_for_heuristic_units(tmp_path: Path) -> None:
+    """build_consolidation_plan populates validator_flags for heuristic-only why-issues."""
+    db = str(tmp_path / "memory.db")
+    store = KnowledgeStore(db)
+    # Heuristic decision — should appear in flags, not in rejections, not blocked.
+    # Use two history sources so the provenance gate (which is hard) does not
+    # also reject it, isolating the rationale-flag behavior under test.
+    heuristic_id = store.create_memory_unit(
+        _unit(
+            title="Heuristic decision",
+            content=(
+                "Heuristic checkpoint produced this durable claim from a "
+                "history message in a previous session."
+            ),
+            unit_type=MemoryUnitType.DECISION,
+            why=None,
+            sources=[
+                _source("history:msg-x", MemorySourceKind.HISTORY_MESSAGE, quote="msg-x"),
+                _source("history:msg-y", MemorySourceKind.HISTORY_MESSAGE, quote="msg-y"),
+            ],
+        )
+    )
+    # Agent-extracted decision missing why — must be in rejections and blocked from promotions.
+    agent_id = store.create_memory_unit(
+        _unit(
+            title="Agent decision",
+            content=(
+                "Agent produced this with full context and durable signal "
+                "from the document the agent just read."
+            ),
+            unit_type=MemoryUnitType.DECISION,
+            why=None,
+            sources=[
+                _source("doc:agent", MemorySourceKind.DOCUMENT, quote="the agent saw this claim")
+            ],
+        )
+    )
+    units = store.list_units_for_consolidation(project="membox")
+    counts = {
+        unit.id: store.count_independent_sources(unit.id) for unit in units if unit.id is not None
+    }
+    plan = build_consolidation_plan(units, counts)
+
+    flag_ids = {issue.unit_id for issue in plan.validator_flags}
+    rejection_ids = {issue.unit_id for issue in plan.validator_rejections}
+    assert heuristic_id in flag_ids
+    assert agent_id in rejection_ids
+    # Flagged heuristic must remain eligible — does NOT remove from eligible pool.
+    assert heuristic_id not in rejection_ids
+    # build_consolidation_plan does NOT pass promoted units that were rejected.
+    promoted_ids = {transition.unit_id for transition in plan.promotions}
+    assert agent_id not in promoted_ids
+
+
+def test_consolidate_summary_includes_flagged_count(tmp_path: Path) -> None:
+    """The CLI summary line shows promoted/rejected/flagged counts."""
+    db = str(tmp_path / "memory.db")
+    store = KnowledgeStore(db)
+    # Heuristic decision with no why → flag.
+    store.create_memory_unit(
+        _unit(
+            title="Heuristic decision",
+            content="Heuristic checkpoint produced this from a history message.",
+            unit_type=MemoryUnitType.DECISION,
+            why=None,
+            sources=[_source("history:msg-y", MemorySourceKind.HISTORY_MESSAGE)],
+        )
+    )
+    result = runner.invoke(
+        app,
+        ["memory", "consolidate", "--db", db, "--project", "membox", "--dry-run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "flagged 1" in result.output
+    assert "decision missing rationale (why)" in result.output
