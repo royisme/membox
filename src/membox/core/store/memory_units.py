@@ -14,6 +14,7 @@ from membox.core.store.fts import (
     fts5_or_query,
     fts5_query_from_terms,
 )
+from membox.core.store.leases import lease_is_live, lease_is_mine, parse_lease, render_lease
 from membox.model.schema import (
     MEMORY_LABELS,
     HistoryTriageRecord,
@@ -956,20 +957,13 @@ class MemoryUnitOps:
 
     def acquire_lifecycle_lease(self, project: str) -> bool:
         """Acquire the lifecycle lease for one project."""
-        from membox.core.store.queue import (
-            _lease_is_live,
-            _lease_is_mine,
-            _parse_lease,
-            _render_lease,
-        )
-
         key = f"lifecycle_lease:{project}"
-        payload = _render_lease()
+        payload = render_lease()
         with self._cm.transaction() as c:
             row = c.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
             if row:
-                lease = _parse_lease(str(row[0]))
-                if lease is not None and _lease_is_live(lease, 30.0) and not _lease_is_mine(lease):
+                lease = parse_lease(str(row[0]))
+                if lease is not None and lease_is_live(lease, 30.0) and not lease_is_mine(lease):
                     return False
             c.execute(
                 """
@@ -982,13 +976,11 @@ class MemoryUnitOps:
 
     def release_lifecycle_lease(self, project: str) -> None:
         """Release the lifecycle lease for one project when owned by this process."""
-        from membox.core.store.queue import _lease_is_mine, _parse_lease
-
         key = f"lifecycle_lease:{project}"
         with self._cm.transaction() as c:
             row = c.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
-            lease = _parse_lease(str(row[0])) if row else None
-            if lease is None or _lease_is_mine(lease):
+            lease = parse_lease(str(row[0])) if row else None
+            if lease is None or lease_is_mine(lease):
                 c.execute("DELETE FROM meta WHERE key=?;", (key,))
 
     def _independent_source_keys(

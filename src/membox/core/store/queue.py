@@ -13,11 +13,14 @@ resets stale ``processing`` rows back to ``pending`` (crash recovery).
 
 from __future__ import annotations
 
-import datetime
-import json
-import os
-import socket
 from typing import TYPE_CHECKING, TypedDict
+
+from membox.core.store.leases import (
+    lease_is_live,
+    lease_is_mine,
+    parse_lease,
+    render_lease,
+)
 
 if TYPE_CHECKING:
     from membox.core.store.connection import ConnectionManager
@@ -35,17 +38,16 @@ class QueueItem(TypedDict):
 
 
 _LEASE_KEY = "worker_lease"
+_lease_is_live = lease_is_live
+_lease_is_mine = lease_is_mine
+_parse_lease = parse_lease
+_render_lease = render_lease
 
 DEFAULT_LEASE_TTL: float = 60.0
 """Seconds a lease heartbeat stays valid before the lease counts as expired."""
 
 DEFAULT_MAX_RETRIES: int = 3
 """Maximum ``retries`` value after which a failed row is permanently failed."""
-
-
-def _utcnow() -> datetime.datetime:
-    """Return the current UTC time as an aware datetime."""
-    return datetime.datetime.now(tz=datetime.UTC)
 
 
 class QueueOps:
@@ -307,73 +309,3 @@ class QueueOps:
             return False
         lease = _parse_lease(str(row[0]))
         return lease is not None and _lease_is_live(lease, ttl)
-
-
-# ---------------------------------------------------------------------------
-# Module-level lease helpers (also importable for tests)
-# ---------------------------------------------------------------------------
-
-
-def _render_lease() -> str:
-    """Serialize a lease record for the current process as JSON."""
-    return json.dumps(
-        {
-            "pid": os.getpid(),
-            "hostname": socket.gethostname(),
-            "heartbeat": _utcnow().isoformat(),
-        }
-    )
-
-
-def _parse_lease(value: str) -> dict[str, object] | None:
-    """Parse a lease JSON string; return None when malformed.
-
-    Args:
-        value: Raw ``meta.value`` string for the ``worker_lease`` key.
-
-    Returns:
-        Parsed lease dict, or None when the value is not a JSON object.
-    """
-    try:
-        parsed = json.loads(value)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
-
-
-def _lease_is_live(lease: dict[str, object], ttl: float) -> bool:
-    """Return True when the lease heartbeat is younger than *ttl* seconds.
-
-    A lease with a missing or unparseable heartbeat counts as expired.
-
-    Args:
-        lease: Parsed lease dict.
-        ttl: Time-to-live in seconds.
-
-    Returns:
-        Liveness verdict.
-    """
-    raw = lease.get("heartbeat")
-    if not isinstance(raw, str):
-        return False
-    try:
-        heartbeat = datetime.datetime.fromisoformat(raw)
-    except ValueError:
-        return False
-    if heartbeat.tzinfo is None:
-        heartbeat = heartbeat.replace(tzinfo=datetime.UTC)
-    return (_utcnow() - heartbeat).total_seconds() < ttl
-
-
-def _lease_is_mine(lease: dict[str, object]) -> bool:
-    """Return True when the lease is owned by the current process.
-
-    Args:
-        lease: Parsed lease dict.
-
-    Returns:
-        True when both pid and hostname match this process.
-    """
-    return lease.get("pid") == os.getpid() and lease.get("hostname") == socket.gethostname()

@@ -114,6 +114,7 @@ Functional Python files include their module header so tools can reuse the file 
         - `src/membox/core/store/entities.py` — Entity persistence: CRUD, alias registry, and find-or-create deduplication.
         - `src/membox/core/store/fts.py` — SQLite FTS query helpers shared by store operation mixins.
         - `src/membox/core/store/history.py` — History trace storage operations (lifecycle Phase B).
+        - `src/membox/core/store/leases.py` — JSON lease helpers for meta-table ownership records.
         - `src/membox/core/store/memory_units.py` — Memory-unit storage operations for lifecycle Phase C.
         - `src/membox/core/store/meta_guard.py` — Embedding-model guard for the membox meta table.
         - `src/membox/core/store/migrations.py` — Schema migrations for the membox SQLite database, driven by ``PRAGMA user_version``.
