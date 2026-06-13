@@ -2,24 +2,25 @@
 
 A local knowledge graph + RAG memory layer for coding agents.
 
-**Status: research / experimental.** This repository is the working space where
-I explore how a small, self-contained memory system should be designed and
-implemented for agents that need persistent, queryable knowledge without
-relying on hosted databases or external services. Treat it as a reference
-implementation, not a production dependency.
+Membox gives coding agents durable, project-scoped memory that survives
+session restarts. It combines a knowledge graph (entities + relations with
+provenance) with FTS5 full-text search and a lifecycle pipeline that turns
+agent session history into reusable memory units.
+
+**Status: pre-release (v0.1.0 stabilization in progress).**
 
 ## What it is
 
-- A local-first store: everything lives in a single SQLite file on disk.
-- A typed knowledge graph: entities, relations, and source documents, with
-  schema-enforced shapes (Pydantic).
-- An injectable LLM layer: extraction and embedding go through `Protocol`s,
-  so the same code paths exercise with `DummyExtractor` / `DummyEmbedder`
-  in tests and with real providers (`OpenAI`, `Ollama`, `vLLM`, `DeepSeek` —
-  anything OpenAI-compatible via `base_url`) in production.
-- A CLI designed for agent invocation: `ingest` / `query` / `list-entities` /
-  `list-relations` are intentionally shaped so that an agent can call them
-  from a skill file without an HTTP daemon or MCP server.
+- **Local-first**: everything lives in a single SQLite file. No database
+  server, no hosted services, no MCP/HTTP daemon.
+- **Knowledge graph + FTS hybrid**: entities, relations, and source documents
+  with BFS multi-hop retrieval fused with BM25 keyword search.
+- **Session memory lifecycle**: `Trace → Unit → Crystal` — automatically
+  extracts durable memories from agent conversation history.
+- **CLI-first**: agents interact via the `membox` CLI, driven by a skill file.
+- **Injectable LLM layer**: extraction and embedding go through `Protocol`s;
+  tests run with deterministic fakes, production swaps in
+  OpenAI/Ollama/vLLM/DeepSeek.
 
 ## What it is not
 
@@ -31,13 +32,14 @@ implementation, not a production dependency.
 
 ## Install
 
-Requires Python 3.13 and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
+git clone <repo-url> membox && cd membox
 uv sync
 ```
 
-Optional LLM dependencies (OpenAI client, tree-sitter) install with:
+Optional LLM dependencies (OpenAI client, tree-sitter):
 
 ```bash
 uv sync --extra llm
@@ -45,78 +47,209 @@ uv sync --extra llm
 
 ## Quick start
 
+### 1. Pull session history
+
 ```bash
-# Run tests
-uv run pytest
+# Set your agent's session storage root
+export MEMBOX_SESSION_ROOT=~/.pi/agent/sessions
 
-# Lint & format
-uv run ruff check .
-uv run ruff format .
+# Auto-discover and import all sessions for the current project
+membox history pull --adapt pi
 
-# Type check (strict)
-uv run mypy src
+# Or import a single file directly
+membox history pull --adapt membox session.jsonl
 ```
 
-## CLI usage
+### 2. Run the memory lifecycle
 
 ```bash
-membox ingest "Alice works at Acme." --source memo.txt
-membox ingest-file README.md
-membox query "Where does Alice work?" --max-hops 2
+membox memory triage --apply      # classify trace items
+membox memory extract --apply     # create memory units
+membox memory consolidate --apply # promote crystals, supersede stale
+```
+
+### 3. Query memory
+
+```bash
+# Graph + FTS retrieval with memory recall
+membox query "project context and key decisions" --include-memory --budget 4000
+
+# Search session history
+membox history search "migration error" --project myrepo
+
+# Inspect memory units
+membox memory list --status crystal
+membox memory list --status active_unit
+```
+
+### 4. Ingest documents into the knowledge graph
+
+```bash
+membox ingest "codebase-rag is implemented in Python" --source "README.md"
+membox ingest-file docs/spec.md --project myrepo
+membox ingest-file docs/HANDOFF.md --project myrepo
+
+# Check async ingest queue
+membox queue
+membox process              # drain pending items
+```
+
+## CLI reference
+
+### Knowledge graph
+
+```bash
+membox ingest "text" --source "source"       # ingest text (async by default)
+membox ingest-file docs/arch.md --project X   # ingest a file
+membox query "question" --max-hops 2 --budget 4000  # query graph + FTS
+membox query "..." --include-memory           # include crystal/unit memory
 membox list-entities
 membox list-relations
+membox process                               # drain async ingest queue
+membox queue                                 # show queue status
 ```
 
-By default `membox` reads `OPENAI_API_KEY` from the environment for
-extraction and embedding. Pass `--no-llm` to use the deterministic dummy
-backends (useful for tests and offline exploration).
+### Session history (trace layer)
 
-## Python API
-
-```python
-from membox import MemoryAgent, OpenAIExtractor, OpenAIEmbedder
-
-agent = MemoryAgent(
-    store="memory.db",
-    extractor=OpenAIExtractor(),
-    embedder=OpenAIEmbedder(),
-)
-agent.ingest("Alice works at Acme.", source="memo.txt")
-result = agent.query("Where does Alice work?", max_hops=2)
+```bash
+membox history pull --adapt pi               # auto-discover + import sessions
+membox history pull --adapt codex file.jsonl  # single-file import
+membox history search "query" --project X     # search history
+membox history around <message-id>            # inspect context
+membox history fetch <id> [--raw]             # fetch original payload
+membox history file path/to/file.py           # file history
+membox history failures                       # show tool errors
 ```
 
-Without an LLM:
+### Memory units (lifecycle)
 
-```python
-from membox import MemoryAgent, DummyExtractor, DummyEmbedder
-
-agent = MemoryAgent("memory.db", extractor=DummyExtractor(), embedder=DummyEmbedder())
+```bash
+membox memory triage --apply                 # classify trace items
+membox memory extract --apply                # extract memory units
+membox memory consolidate --apply            # promote crystals, decay stale
+membox memory list --status crystal          # list crystals
+membox memory list --status active_unit      # list active units
+membox memory show <id>                      # inspect a unit
+membox memory supersede <old> <new>          # replace a unit
+membox memory retract <id> --reason "..."    # invalidate a unit
+membox memory restore <id>                   # restore archived unit
 ```
 
-## Layout
+### Workflow distillation
+
+```bash
+membox distill --project X --dry-run          # find repeated workflows
+```
+
+## Architecture
+
+```
+Trace → Unit → Crystal
+
+┌─────────────────────────────────────────────────────┐
+│                   CLI (Typer + Rich)                 │
+│  history pull │ memory triage/extract/consolidate    │
+│  ingest │ query │ distill │ queue                    │
+├─────────────────────────────────────────────────────┤
+│               Core (Orchestration)                   │
+│  agent.py │ history_import │ triage │ consolidate    │
+├─────────────────────────────────────────────────────┤
+│               Store (SQLite + WAL)                   │
+│  entities │ relations │ documents │ history_*        │
+│  memory_units │ ingest_queue │ FTS5 sidecars         │
+├─────────────────────────────────────────────────────┤
+│             Services (Domain Layer)                  │
+│  extraction.py │ embedding.py │ importers/           │
+├─────────────────────────────────────────────────────┤
+│             Providers (Protocol Adapters)            │
+│  openai_compat.py (OpenAI/Ollama/vLLM/DeepSeek)      │
+└─────────────────────────────────────────────────────┘
+```
 
 ```
 src/membox/
-├── model/       Pydantic data shapes
-├── core/        SQLite storage (store/), predicate normalization, agent
-├── services/    Domain layer: extraction, embedding, prompt templates
-├── providers/   Protocol adapters (OpenAI-compatible HTTP, future Gemini)
+├── model/       Pydantic data shapes (Entity, Relation, MemoryUnit, ...)
+├── core/        Storage (store/), normalization, agent, lifecycle logic
+├── services/    Extraction, embedding, session importers, prompts
+├── providers/   Protocol adapters (OpenAI-compatible HTTP)
 └── cli/         Typer commands — presentation only
 ```
 
-See [docs/spec.md](docs/spec.md) for the full design and [docs/roadmap.md](docs/roadmap.md)
-for current progress (Phases 1–7 verified via tests; 8–10 pending).
+## Memory lifecycle
 
-## Why these design choices
+The lifecycle pipeline turns raw agent session history into durable memory:
+
+```text
+trace ──► triaged ──► unit_candidate ──► active_unit ──► crystal_candidate ──► crystal
+                                                        │
+                                                   archived | superseded | retracted
+```
+
+| State | Meaning | Queryable |
+|---|---|---|
+| **trace** | Raw session messages and tool events | `history search` only |
+| **active_unit** | Extracted memory worth keeping | `memory list`, `query --include-memory` |
+| **crystal** | Durable, consolidated knowledge | Default recall in `query --include-memory` |
+| **superseded** | Replaced by a newer unit | Audit only |
+| **retracted** | Invalidated | Audit only |
+
+Memory types (closed taxonomy): `preference`, `decision`, `procedure`, `fact`,
+`learning`, `plan`, `event`, `context`.
+
+## Design decisions
 
 | Decision | Rationale |
 |---|---|
-| SQLite + WAL + per-thread connection | Zero ops overhead; multi-process / multi-agent safe without a database server |
-| Direct SQL (no ORM) | The find-or-create critical section and per-thread lifecycle need fine-grained control that ORM abstractions hide |
-| Pydantic for data shapes | One schema definition powers validation, serialization, and the public API |
-| `Protocol`-injected extractors / embedders | Tests run without live APIs; production swaps in OpenAI/Ollama/vLLM without touching the agent |
-| Schema migrations via `PRAGMA user_version` | Forward-compatible schema changes for existing `.db` files, no Alembic dependency |
-| Skill file as agent integration surface | Agent reads the skill and calls the CLI directly — no MCP / HTTP daemon required |
+| SQLite + WAL + per-thread connection | Zero ops overhead; multi-process / multi-agent safe |
+| Direct SQL (no ORM) | Fine-grained control over find-or-create and per-thread lifecycle |
+| `Protocol`-injected extractors / embedders | Tests without live APIs; production swaps providers |
+| Skill file as integration surface | Agent reads skill → calls CLI; no daemon needed |
+| Heuristic triage gate | Deterministic, offline, no hidden LLM cost in tests |
+| Async ingest queue (transient worker) | Fast writes; LLM extraction deferred to `membox process` |
+| Token-budgeted retrieval | Honest coverage footer; no silent truncation |
+| Single global DB with `project` columns | Cross-project queries; no ATTACH federation |
+
+## Agent integration
+
+Membox ships a skill file at `skills/membox-skill.md` that teaches agents how to
+use the CLI. Agents load the skill at session start and call `membox` commands
+directly from the shell — no MCP server, no HTTP endpoint.
+
+Typical agent workflow:
+
+```bash
+# Session start — recall context
+membox query "project context, key decisions, conventions" --include-memory --budget 4000
+
+# Session end — feed session history into the lifecycle
+export MEMBOX_SESSION_ROOT=~/.pi/agent/sessions
+membox history pull --adapt pi
+membox memory triage --apply
+membox memory extract --apply
+membox memory consolidate --apply
+```
+
+## Development
+
+```bash
+uv run pytest                    # run tests (570 passing)
+uv run ruff check src/ tests/    # lint
+uv run ruff format src/ tests/   # format
+uv run mypy src/                 # type check (strict)
+```
+
+All tests use deterministic fake extractors/embedders — no external API keys
+required. CI runs on Python 3.13 across macOS, Linux, and Windows.
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [docs/spec/spec_01_core.md](docs/spec/spec_01_core.md) | Knowledge graph + RAG core spec |
+| [docs/spec/spec_02_memory_lifecycle.md](docs/spec/spec_02_memory_lifecycle.md) | Memory lifecycle spec (Trace → Unit → Crystal) |
+| [docs/roadmap.md](docs/roadmap.md) | Implementation roadmap and current status |
+| [docs/code-standards.md](docs/code-standards.md) | Coding style and conventions |
+| [skills/membox-skill.md](skills/membox-skill.md) | Agent skill file (CLI usage instructions) |
 
 ## License
 
