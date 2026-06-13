@@ -52,7 +52,7 @@ def ingest(
     concurrency: int | None = typer.Option(None, "--concurrency", help=_CONCURRENCY_HELP),
 ) -> None:
     """Ingest text into the knowledge graph (asynchronously by default)."""
-    agent = make_agent(db, no_llm=no_llm, warn=sync, concurrency=concurrency)
+    agent = make_agent(db, no_llm=no_llm, concurrency=concurrency)
     if sync:
         agent.ingest(text, source)
         console.print("[green]Ingested.[/green]")
@@ -100,7 +100,7 @@ def ingest_file(
     if not file.exists():
         typer.echo(f"Error: file not found: {file}", err=True)
         raise typer.Exit(1)
-    agent = make_agent(db, no_llm=no_llm, warn=sync, concurrency=concurrency)
+    agent = make_agent(db, no_llm=no_llm, concurrency=concurrency)
     metadata = IngestMetadata(project=project, doc_date=doc_date)
     if sync:
         results = agent.ingest_file(file, metadata=metadata)

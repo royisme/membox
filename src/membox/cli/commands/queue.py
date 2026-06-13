@@ -25,7 +25,7 @@ def process(
     """
     from membox.core.worker import drain_queue
 
-    agent = make_agent(db, no_llm=no_llm, warn=True)
+    agent = make_agent(db, no_llm=no_llm)
     stats = drain_queue(agent, retry_failed=retry_failed)
     console.print(
         f"Processed: [green]{stats['done']} done[/green], "

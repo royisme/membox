@@ -52,7 +52,7 @@ def query(
     Use --include-superseded to expose relations that were superseded by a
     newer version of the same source document.
     """
-    agent = make_agent(db, no_llm=no_llm, warn=True)
+    agent = make_agent(db, no_llm=no_llm)
     memory_project = None
     if include_memory and not all_projects:
         memory_project = project or infer_project(Path.cwd() / "_")
