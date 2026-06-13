@@ -103,6 +103,7 @@ Functional Python files include their module header so tools can reuse the file 
     - `src/membox/cli/`
       - `src/membox/cli/commands/`
         - `src/membox/cli/commands/__init__.py` — CLI command modules, one per command group.
+        - `src/membox/cli/commands/checkpoint.py` — ``membox checkpoint`` — one-shot lifecycle capture (pull → triage → extract).
         - `src/membox/cli/commands/distill.py` — `membox distill` read-only workflow packaging analysis command.
         - `src/membox/cli/commands/history.py` — ``membox history`` command group — session-trace pull and search.
         - `src/membox/cli/commands/ingest.py` — `membox ingest` and `membox ingest-file` commands.
@@ -136,6 +137,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/core/consolidate.py` — Pure consolidation policy for lifecycle Phase D memory units.
       - `src/membox/core/distill.py` — Pure workflow-distillation policy for lifecycle Phase F memory units.
       - `src/membox/core/history_import.py` — History import orchestration and payload fetch (lifecycle Phase B).
+      - `src/membox/core/lifecycle.py` — Lifecycle orchestration: one-shot checkpoint = pull → triage → extract.
       - `src/membox/core/normalize.py` — membox normalize — predicate and name normalization utilities.
       - `src/membox/core/project.py` — Project-scope inference helpers shared by core and CLI code.
       - `src/membox/core/tokens.py` — membox token estimation utilities.
@@ -170,6 +172,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/__init__.py` — Test package marker for membox test modules.
   - `tests/conftest.py` — Pytest configuration and shared fixtures.
   - `tests/test_bfs.py` — Phase 5 tests: multi-hop BFS retrieval via bfs_query and MemoryAgent.retrieve.
+  - `tests/test_checkpoint.py` — Tests for the ``membox checkpoint`` one-shot lifecycle wrapper.
   - `tests/test_chunking.py` — Tests for :mod:`membox.core.chunking` — markdown-aware section chunking.
   - `tests/test_claude_importer.py` — Tests for the Claude Code JSONL history importer.
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.

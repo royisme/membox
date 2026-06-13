@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import typer
 
+from membox.cli.commands.checkpoint import checkpoint
 from membox.cli.commands.distill import distill
 from membox.cli.commands.history import history_app
 from membox.cli.commands.ingest import ingest, ingest_file
@@ -26,6 +27,7 @@ app = typer.Typer(
 
 app.command()(version)
 app.command()(ingest)
+app.command()(checkpoint)
 app.command("ingest-file")(ingest_file)
 app.command()(query)
 app.command()(distill)

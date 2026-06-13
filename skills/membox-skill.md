@@ -147,8 +147,26 @@ That is expected — membox grows with use.
 
 ### Session End — Ingest Handoff
 
+> **Session End** → `membox checkpoint` (capture this session into memory),
+> and/or `membox ingest-file HANDOFF.md` (archive an explicit handoff).
+> **Periodic** → `membox memory consolidate` (dream: promote durable
+> cross-session knowledge to crystals) and `membox distill` (package repeated
+> workflows). Crystals only appear after enough sessions accumulate — a fresh
+> project shows none, and that is expected.
+
 At session end (or after major milestones), feed the session trace into
-the lifecycle pipeline:
+the lifecycle pipeline. The single-command wrapper is the normal flow:
+
+```bash
+# Capture this session: pull → triage → extract in one call
+membox checkpoint --adapt pi --project myrepo
+membox checkpoint --dry-run --adapt pi --project myrepo   # preview
+
+# Then on a coarser cadence, promote cross-session crystals
+membox memory consolidate --project myrepo --apply
+```
+
+Manual per-step form (same effect, useful for debugging one phase at a time):
 
 ```bash
 # 1. Pull the session history

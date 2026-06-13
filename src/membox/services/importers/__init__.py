@@ -18,6 +18,9 @@ from membox.services.importers.pi_jsonl import PiJsonlImporter
 
 IMPORTER_FORMATS: dict[str, type] = {
     "membox": MemboxHistoryJsonlImporter,
+    # Alias for the spec's default ``--adapt membox-capture``; resolves to the
+    # membox importer (matches ``SourceKind.MEMBOX_CAPTURE``).
+    "membox-capture": MemboxHistoryJsonlImporter,
     "claude": ClaudeJsonlImporter,
     "codex": CodexJsonlImporter,
     "pi": PiJsonlImporter,
