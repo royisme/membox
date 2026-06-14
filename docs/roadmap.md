@@ -362,7 +362,7 @@ Baseline timing on a representative real history:
 
 **Goal**: Write skill instruction files for coding agents.
 
-- [x] `skills/membox-skill.md` — Generic skill template
+- [x] `skills/membox/SKILL.md` — Claude Code skill (YAML frontmatter); installable to `~/.claude/skills/` or project `.claude/skills/`
   - [x] Installation instructions
   - [x] Command reference
   - [x] Usage examples

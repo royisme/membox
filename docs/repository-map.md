@@ -99,7 +99,8 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/generate_changelog.py` — Generate CHANGELOG.md sections from conventional commit history.
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
 - `skills/`
-  - `skills/membox-skill.md`
+  - `skills/membox/`
+    - `skills/membox/SKILL.md`
 - `src/`
   - `src/membox/`
     - `src/membox/cli/`

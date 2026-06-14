@@ -217,9 +217,23 @@ Memory types (closed taxonomy): `preference`, `decision`, `procedure`, `fact`,
 
 ## Agent integration
 
-Membox ships a skill file at `skills/membox-skill.md` that teaches agents how to
-use the CLI. Agents load the skill at session start and call `membox` commands
-directly from the shell — no MCP server, no HTTP endpoint.
+Membox ships a **Claude Code skill** at [`skills/membox/SKILL.md`](skills/membox/SKILL.md)
+(YAML frontmatter + usage guide) that teaches agents how to use the CLI. Agents
+load the skill and call `membox` commands directly from the shell — no MCP
+server, no HTTP endpoint.
+
+Install the skill so an agent discovers it automatically:
+
+```bash
+# Claude Code — user-global (every project)
+mkdir -p ~/.claude/skills && cp -r skills/membox ~/.claude/skills/membox
+
+# Claude Code — project-local (this repo only; .claude/ is gitignored)
+mkdir -p .claude/skills && cp -r skills/membox .claude/skills/membox
+```
+
+Other agents: point the skill/instruction loader at `skills/membox/SKILL.md`,
+or paste its contents into the system prompt.
 
 Typical agent workflow:
 
@@ -227,18 +241,29 @@ Typical agent workflow:
 # Session start — recall context
 membox query "project context, key decisions, conventions" --include-memory --budget 4000
 
-# Session end — feed session history into the lifecycle
-export MEMBOX_SESSION_ROOT=~/.pi/agent/sessions
-membox history pull --adapt pi
-membox memory triage --apply
-membox memory extract --apply
-membox memory consolidate --apply
+# Session end — capture this session into memory (no API key needed)
+export MEMBOX_SESSION_ROOT=~/.claude/projects
+membox checkpoint --adapt claude            # pull → triage → extract in one call
+membox memory consolidate --apply           # periodic: promote durable crystals
 ```
+
+### Try it on this repo (dogfooding)
+
+```bash
+uv sync
+export MEMBOX_SESSION_ROOT=~/.claude/projects
+membox checkpoint --adapt claude --db memory.db          # capture membox's own sessions
+membox query "what is the lifecycle design" --include-memory --db memory.db
+membox memory list --status active_unit --db memory.db
+```
+
+The full no-API-key lifecycle (import → triage → extract) runs in a few seconds
+on a real history — see [`eval/results/perf-baseline-v0.1.0.md`](eval/results/perf-baseline-v0.1.0.md).
 
 ## Development
 
 ```bash
-uv run pytest                    # run tests (570 passing)
+uv run pytest                    # run tests (642 passing)
 uv run ruff check src/ tests/    # lint
 uv run ruff format src/ tests/   # format
 uv run mypy src/                 # type check (strict)
