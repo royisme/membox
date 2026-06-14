@@ -71,7 +71,7 @@ def ingest_file(
         help=(
             "Repository / project name for scoping.  When omitted, the name is "
             "inferred from the nearest git repository root (walking up from the "
-            "file's directory), so 'docs/HANDOFF.md' maps to the repo name, not "
+            "file's directory), so '.handoffs/HANDOFF.md' maps to the repo name, not "
             "'docs'.  Falls back to the file's parent directory name if no git "
             "root is found."
         ),

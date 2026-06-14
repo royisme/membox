@@ -93,7 +93,7 @@ membox memory list --status active_unit
 ```bash
 membox ingest "codebase-rag is implemented in Python" --source "README.md"
 membox ingest-file docs/spec.md --project myrepo
-membox ingest-file docs/HANDOFF.md --project myrepo
+membox ingest-file .handoffs/HANDOFF.md --project myrepo
 
 # Check async ingest queue
 membox queue

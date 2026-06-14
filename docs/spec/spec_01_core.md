@@ -143,7 +143,7 @@ This keeps graph and FTS ranking independent while still sharing the caller's to
 - An evidence block (top-*K* triples only) is printed after the triple groups, each entry tagged with `project / source_path / section / doc_date` provenance, e.g.:
 
   ```
-  [membox docs/HANDOFF.md ## Current state 2026-06-09]
+  [membox .handoffs/HANDOFF.md ## Current state 2026-06-09]
   ```
 
 - In merge mode, admitted direct FTS chunks are printed under a `Relevant source chunks` section with the same provenance tag format.
@@ -364,7 +364,7 @@ membox ingest "codebase-rag is implemented in Python" --source "README.md"
 
 # Ingest file (with optional project scoping metadata)
 membox ingest-file docs/architecture.md --db memory.db
-membox ingest-file docs/HANDOFF.md --project myrepo --doc-date 2026-06-09
+membox ingest-file .handoffs/HANDOFF.md --project myrepo --doc-date 2026-06-09
 
 # Query memory (scoped to a project, or global when --project is omitted)
 membox query "What technologies are used in the project?" --max-hops 2
@@ -378,7 +378,7 @@ membox list-relations --db memory.db --project myrepo
 membox analyze-src src/ --language python --db memory.db
 
 # Async ingestion queue (M6)
-membox ingest-file docs/HANDOFF.md --project myrepo  # enqueues and spawns worker; returns in <100ms
+membox ingest-file .handoffs/HANDOFF.md --project myrepo  # enqueues and spawns worker; returns in <100ms
 membox ingest-file large.md --sync                   # blocking mode: enqueue + drain inline
 membox ingest-file large.md --no-spawn               # enqueue only; caller starts worker manually
 membox process                                        # drain the queue; exits when empty

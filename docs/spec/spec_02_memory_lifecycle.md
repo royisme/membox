@@ -63,7 +63,7 @@ Current implementation reality also matters:
 
 - The shipped retrieval default is graph + FTS fusion.
 - The async ingest queue is implemented as a transient worker, not a daemon.
-- This design follows the current locked storage decision in `docs/HANDOFF.md`:
+- This design follows the current locked storage decision in `.handoffs/HANDOFF.md`:
   one default SQLite database with `project` columns for scoping. The older
   `docs/spec-v0.2-draft.md` proposal for separate global/project DB files is
   out of scope for this lifecycle track. If the owner reopens that storage
