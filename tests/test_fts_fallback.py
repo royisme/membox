@@ -150,12 +150,12 @@ class TestFallbackChunks:
         store = KnowledgeStore(str(tmp_path / "s.db"))
         store.insert_document(
             "membox retrieval status: baseline.",
-            source_path="docs/HANDOFF.md",
+            source_path=".handoffs/HANDOFF.md",
             section="Status",
         )
         store.insert_document(
             "membox retrieval status: fallback implemented.",
-            source_path="docs/HANDOFF.md",
+            source_path=".handoffs/HANDOFF.md",
             section="Status",
         )
         chunks = store.fts_fallback_chunks("membox retrieval status")
@@ -270,11 +270,11 @@ class TestFallbackOutput:
     def test_renders_chunk_with_provenance_and_footer(self, tmp_path: Path) -> None:
         store = KnowledgeStore(str(tmp_path / "s.db"))
         chunks: list[tuple[int, str, str | None, str | None, str | None, str | None]] = [
-            (1, "SQLite is the backend.", "membox", "docs/HANDOFF.md", "Status", "2026-06-09")
+            (1, "SQLite is the backend.", "membox", ".handoffs/HANDOFF.md", "Status", "2026-06-09")
         ]
         out = store.fts_fallback_output(chunks, budget=2000)
         assert "SQLite is the backend." in out
-        assert "[membox docs/HANDOFF.md ## Status 2026-06-09]" in out
+        assert "[membox .handoffs/HANDOFF.md ## Status 2026-06-09]" in out
         assert "1/1 FTS chunks" in out
         assert "returned 0/0 triples" in out
 

@@ -191,7 +191,7 @@ cli.py                         ← Typer commands, each calling the agent
 
 ### M5 — Close the Loop
 
-- [x] `membox ingest-file docs/HANDOFF.md` works end-to-end against local Ollama
+- [x] `membox ingest-file .handoffs/HANDOFF.md` works end-to-end against local Ollama
 - [x] This becomes the substrate for Phase 9's skill file (query at session start, ingest at session end)
 
 ### M6 — Asynchronous Ingestion Queue

@@ -1,6 +1,6 @@
 # Plan 02 — Re-snapshot Eval Corpus + Update Temporal Gold Answers
 
-> **Status**: ✅ Completed 2026-06-11 — re-snapshot done, gold updated, full Gemini run **26/26 (100%) @ `--budget 4000`**, temporal 4/4, multi-hop 7/7; baseline recorded in `docs/HANDOFF.md`. **Resolution note**: the re-snapshot tripled corpus volume (~309 → ~912 lines), so the old default `--budget 2000` truncates multi-hop output on the new corpus (Gemini 18/26, multi-hop 2/7 — a benchmark-scale artifact, not a retrieval regression; confirmed by offline budget sweep 2000→21/26 vs 4000→24/26). Owner decision: post-resnapshot eval runs use `--budget 4000`; gates unchanged (overall ≥80%, temporal 4/4, multi-hop ≥6/7); no retrieval-algorithm change pursued.
+> **Status**: ✅ Completed 2026-06-11 — re-snapshot done, gold updated, full Gemini run **26/26 (100%) @ `--budget 4000`**, temporal 4/4, multi-hop 7/7; baseline recorded in `.handoffs/HANDOFF.md`. **Resolution note**: the re-snapshot tripled corpus volume (~309 → ~912 lines), so the old default `--budget 2000` truncates multi-hop output on the new corpus (Gemini 18/26, multi-hop 2/7 — a benchmark-scale artifact, not a retrieval regression; confirmed by offline budget sweep 2000→21/26 vs 4000→24/26). Owner decision: post-resnapshot eval runs use `--budget 4000`; gates unchanged (overall ≥80%, temporal 4/4, multi-hop ≥6/7); no retrieval-algorithm change pursued.
 > **Baseline at risk**: 24/26 (92.3%) — gemini-3.1-flash-lite + gemini-embedding-001, `chunk_share=0.4`, `fts_fallback_k=10`, CJK sidecar. Changing the eval model invalidates baseline comparability (owner decision 2026-06-12). [Superseded: 24/26 is now the historical pre-resnapshot baseline @ budget 2000.]
 
 ## Why now
@@ -44,7 +44,7 @@ Review refinement: run the storage-layer crafted fixture first so supersession s
 
 ### Step 4 — Full eval rerun + baseline record
 
-`uv run python scripts/eval_memory.py --provider gemini --check-gates` on a fresh DB with the re-snapshotted corpus. Gates: overall ≥ 80%, temporal 4/4, multi-hop ≥ 6/7 (do not regress below the shipped 24/26 hit set except where a gold answer legitimately changed). Record the new baseline numbers in `docs/HANDOFF.md` (Notes section reference points) and note the snapshot date in `eval/gold.yaml`'s header comment. The old 24/26 number stays in HANDOFF history as the pre-resnapshot baseline.
+`uv run python scripts/eval_memory.py --provider gemini --check-gates` on a fresh DB with the re-snapshotted corpus. Gates: overall ≥ 80%, temporal 4/4, multi-hop ≥ 6/7 (do not regress below the shipped 24/26 hit set except where a gold answer legitimately changed). Record the new baseline numbers in `.handoffs/HANDOFF.md` (Notes section reference points) and note the snapshot date in `eval/gold.yaml`'s header comment. The old 24/26 number stays in HANDOFF history as the pre-resnapshot baseline.
 
 Cost note: one full run ingests ~58+ chunks (~35 min serial on Gemini — see plan_03; consider landing plan_03's batching first if iteration is expected). Use `--max-files` smoke mode while editing gold answers; reserve the full run for sign-off.
 

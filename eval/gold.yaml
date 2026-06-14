@@ -2,7 +2,7 @@
 # Snapshot date: 2026-06-11 re-snapshot for q23-q26 temporal sources
 # Eval budget: run with --budget 4000 against this corpus (corpus is ~3x the
 # 2026-06-09 snapshot; budget 2000 truncates multi-hop output and is not
-# comparable — baseline 26/26 Gemini @ budget 4000, see docs/HANDOFF.md)
+# comparable — baseline 26/26 Gemini @ budget 4000, see .handoffs/HANDOFF.md)
 # Schema: id, category, question, expected_keywords, source, notes
 #
 # Categories:

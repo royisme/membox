@@ -13,6 +13,11 @@ Functional Python files include their module header so tools can reuse the file 
     - `.github/workflows/auto-merge.yml`
     - `.github/workflows/ci.yml`
   - `.github/dependabot.yml`
+- `.handoffs/`
+  - `.handoffs/active/`
+  - `.handoffs/waiting/`
+  - `.handoffs/HANDOFF.md`
+  - `.handoffs/INDEX.md`
 - `docs/`
   - `docs/agent/`
     - `docs/agent/01-project-contract.md`
@@ -58,7 +63,6 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/spec/spec_01_core.md`
     - `docs/spec/spec_02_memory_lifecycle.md`
   - `docs/code-standards.md`
-  - `docs/HANDOFF.md`
   - `docs/repository-map.md`
   - `docs/roadmap.md`
   - `docs/spec-v0.2-draft.md`

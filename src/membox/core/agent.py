@@ -295,7 +295,7 @@ class MemoryAgent:
         ``project`` defaults to the name of the nearest git repository root
         directory found by walking up from the file's location (see
         ``infer_project``).  This correctly handles files inside subdirectories
-        such as ``docs/HANDOFF.md`` — they map to the repo name, not ``"docs"``.
+        such as ``.handoffs/HANDOFF.md`` — they map to the repo name, not ``".handoffs"``.
         Falls back to the file's parent directory name when no ``.git`` entry is
         found anywhere in the directory hierarchy.  The CLI ``--project`` option
         always overrides this default.

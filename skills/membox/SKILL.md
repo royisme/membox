@@ -69,7 +69,7 @@ membox ingest "codebase-rag is implemented in Python" --source "README.md"
 
 # Ingest a file
 membox ingest-file docs/architecture.md --db memory.db
-membox ingest-file docs/HANDOFF.md --project myrepo
+membox ingest-file .handoffs/HANDOFF.md --project myrepo
 
 # Query the knowledge graph (graph + FTS fusion, token-budgeted)
 membox query "What technologies are used in the project?" --max-hops 2
