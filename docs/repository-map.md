@@ -110,6 +110,9 @@ Functional Python files include their module header so tools can reuse the file 
   - `scripts/update_repository_map.py` — Generate the repository structure map for agents and reviewers.
 - `skills/`
   - `skills/membox/`
+    - `skills/membox/references/`
+      - `skills/membox/references/commands.md`
+      - `skills/membox/references/hooks.md`
     - `skills/membox/SKILL.md`
 - `src/`
   - `src/membox/`
