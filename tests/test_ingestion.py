@@ -548,6 +548,19 @@ class TestCLIIngestFileFlags:
         conn.close()
         assert row[0] == "myrepo"
 
+    def test_ingest_project_flag(self, tmp_path: Path) -> None:
+        """Plain-text ``ingest`` with --project stores the project on the document row."""
+        db = str(tmp_path / "cli.db")
+        runner.invoke(
+            app,
+            ["ingest", "hello world", "--db", db, "--no-llm", "--sync", "--project", "myproj"],
+        )
+        conn = sqlite3.connect(db)
+        rows = conn.execute("SELECT project FROM documents;").fetchall()
+        conn.close()
+        assert rows, "expected at least one document row"
+        assert all(r[0] == "myproj" for r in rows)
+
     def test_ingest_file_doc_date_flag(self, tmp_path: Path) -> None:
         md = tmp_path / "doc.md"
         md.write_text("## S\nBody.", encoding="utf-8")

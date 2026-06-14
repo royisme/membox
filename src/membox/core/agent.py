@@ -64,15 +64,16 @@ class MemoryAgent:
         self._disambiguation_threshold = disambiguation_threshold
         self._ingest_concurrency = max(1, ingest_concurrency)
 
-    def ingest(self, text: str, source: str = "") -> None:
+    def ingest(self, text: str, source: str = "", *, project: str | None = None) -> None:
         """Extract entities and relations from text via LLM and store them.
 
         Args:
             text: Document text to ingest.
             source: Optional source identifier (file path, URL, etc.).
+            project: Repository / project name for scoping (default: unscoped / NULL).
         """
         graph = self._extractor.extract(text)
-        self.ingest_extracted(text, graph, source=source)
+        self.ingest_extracted(text, graph, source=source, project=project)
 
     def ingest_extracted(
         self,
