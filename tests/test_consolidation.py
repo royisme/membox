@@ -17,6 +17,7 @@ from membox.core.consolidate import (
     ConsolidationTransition,
     build_consolidation_plan,
     crystal_policy,
+    detect_conflicts,
     validate_units,
 )
 from membox.core.store import KnowledgeStore
@@ -1003,3 +1004,35 @@ def test_consolidate_summary_includes_flagged_count(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "flagged 1" in result.output
     assert "decision missing rationale (why)" in result.output
+
+
+def test_near_duplicate_pair_not_a_conflict() -> None:
+    """Near-duplicate units with high token overlap are NOT returned as conflicts.
+
+    Two units that say essentially the same thing but use a contrast term like
+    "instead of" are not genuinely conflicting — they are near-duplicates that
+    should only surface as FTS review pairs, not as [conflict] entries.
+    """
+    shared_content = (
+        "Always use WAL mode for SQLite in multi-process environments "
+        "instead of journal mode, because WAL allows concurrent readers."
+    )
+    unit1 = _unit(
+        title="SQLite WAL mode is required",
+        content=shared_content,
+        unit_type=MemoryUnitType.DECISION,
+        labels=["storage"],
+        sources=[_source("history:msg-1", MemorySourceKind.HISTORY_MESSAGE)],
+    )
+    unit2 = _unit(
+        title="SQLite WAL mode is required for multi-process use",
+        content=shared_content + " This is the settled decision.",
+        unit_type=MemoryUnitType.DECISION,
+        labels=["storage"],
+        sources=[_source("history:msg-2", MemorySourceKind.HISTORY_MESSAGE)],
+    )
+    # detect_conflicts requires non-None ids on active units.
+    unit1 = unit1.model_copy(update={"id": 1})
+    unit2 = unit2.model_copy(update={"id": 2})
+    conflicts = detect_conflicts([unit1, unit2])
+    assert conflicts == [], f"near-duplicate pair was incorrectly flagged as conflict: {conflicts}"
