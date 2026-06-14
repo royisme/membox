@@ -21,13 +21,11 @@ def test_default_db_path_ends_with_expected_suffix(
     tmp_path: Path,
 ) -> None:
     """``default_db_path()`` returns a path under home ending in ``.membox/membox.db``."""
-    # ``default_db_path()`` evaluates ``Path.home()`` at call time, which reads
-    # ``$HOME`` live — so patching the env is enough; no module reload needed
-    # (reloading membox.config swaps out the config classes and pollutes other
-    # tests that hold references to the originals).
+    # Patch Path.home() directly: Windows prefers USERPROFILE over HOME, so
+    # env-only monkeypatching does not reliably control this seam in CI.
     from membox.config import default_db_path
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     result = default_db_path()
     assert result == str(tmp_path / ".membox" / "membox.db"), f"unexpected: {result}"
 
