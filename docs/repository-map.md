@@ -212,6 +212,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
   - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
   - `tests/test_supersession.py` — M4 supersession semantics tests.
+  - `tests/test_triage.py` — Unit tests for the membox triage gate (heuristic-v6 additions).
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
 - `.gitignore`
