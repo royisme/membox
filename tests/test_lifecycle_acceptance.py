@@ -802,6 +802,70 @@ def test_v3_explicit_rule_message_still_extracts() -> None:
     assert d.should_extract is True, f"explicit rule rejected (reason={d.reason})"
 
 
+# ---------------------------------------------------------------------------
+# Per-case regression tests for the v5 real-trace boilerplate families.
+# Each sample carries policy words ("always", "cli", "rule") on purpose, to
+# prove the content-shape guard wins over the keyword gate.
+# ---------------------------------------------------------------------------
+
+_FILE_DUMP_BODY = (
+    "1\t# AGENTS.md — Membox Agent Entry Point\n"
+    "2\t\n"
+    "3\tThis file is the main bootstrap. Always read it first.\n"
+    "4\tUse the membox CLI to recall context.\n"
+    "5\tStorage is a local SQLite file."
+)
+
+_TOOL_CALL_JSON = (
+    '{"file_path": "/Users/dev/project/CLAUDE.md", '
+    '"content": "# Rules\\n- Always use the CLI\\n- Never commit to main"}'
+)
+
+_SLASH_COMMAND = (
+    "<command-message>init</command-message>\n"
+    "<command-name>/init</command-name>\n"
+    "<command-args>always read AGENTS.md and the CLI rules</command-args>"
+)
+
+
+def test_v5_line_numbered_file_dump_rejected() -> None:
+    """Family C: Read `cat -n` file dumps never extract, even quoting rules."""
+    d = triage_trace(_FILE_DUMP_BODY, role="tool_result", trace_kind="event")
+    assert d.should_extract is False, f"file dump extracted (reason={d.reason})"
+    assert d.reason == "boilerplate_content"
+
+
+def test_v5_tool_call_json_rejected_even_as_message() -> None:
+    """Family C: JSON tool-call argument blobs never extract on any trace kind."""
+    d = triage_trace(_TOOL_CALL_JSON, role="assistant", trace_kind="message")
+    assert d.should_extract is False, f"tool-call json extracted (reason={d.reason})"
+    assert d.reason == "boilerplate_content"
+
+
+def test_v5_slash_command_scaffolding_rejected() -> None:
+    """Family C: slash-command scaffolding never extracts despite role=user."""
+    d = triage_trace(_SLASH_COMMAND, role="user", trace_kind="message")
+    assert d.should_extract is False, f"slash command extracted (reason={d.reason})"
+    assert d.reason == "boilerplate_content"
+
+
+def test_v5_numbered_prose_not_falsely_flagged() -> None:
+    """Guard: ordinary prose that merely mentions a number is not a file dump."""
+    text = (
+        "Decision: we keep migration 9 as the head. Always run latest_version() "
+        "before adding migration 10 to avoid the stale-worktree numbering bug."
+    )
+    d = triage_trace(text, role="user", trace_kind="message")
+    assert d.should_extract is True, f"genuine prose rejected (reason={d.reason})"
+
+
+def test_v5_explicit_rule_message_still_extracts() -> None:
+    """Guard against over-tightening: c1-style explicit rules still extract."""
+    text = "Remember this rule: always run the lifecycle fixtures before tuning the gate."
+    d = triage_trace(text, role="user", trace_kind="message")
+    assert d.should_extract is True, f"explicit rule rejected (reason={d.reason})"
+
+
 def test_v3_declared_durable_plan_extracts() -> None:
     """c3: a declared plan about a durable topic extracts as a plan unit."""
     text = (
