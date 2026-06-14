@@ -7,12 +7,13 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import make_agent
+from membox.cli.options import DB_OPTION
 from membox.core.project import infer_project
 
 
 def query(
     question: str = typer.Argument(..., help="Question to query against the knowledge graph"),
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
     max_hops: int = typer.Option(2, "--max-hops", help="Maximum BFS hops from seed entities"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     budget: int | None = typer.Option(

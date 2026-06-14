@@ -9,6 +9,7 @@ without secrets.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,18 @@ _PROVIDER_ENV_VARS: dict[str, str] = {
 }
 
 _DEFAULT_ENV_VAR = "OPENAI_API_KEY"
+
+
+def default_db_path() -> str:
+    """Return the default database path: ``~/.membox/membox.db``.
+
+    The CLI resolves the active path as ``--db`` flag > ``MEMBOX_DB`` env var
+    > this default (see :data:`membox.cli.options.DB_OPTION`).
+
+    Returns:
+        Absolute path to the default SQLite database file.
+    """
+    return str(Path.home() / ".membox" / "membox.db")
 
 
 class ProviderConfig(BaseModel):

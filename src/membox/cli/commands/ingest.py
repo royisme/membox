@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console, make_agent
+from membox.cli.options import DB_OPTION
 from membox.model.schema import IngestMetadata
 
 _SYNC_HELP = "Block until ingestion completes (enqueue + drain inline)."
@@ -44,7 +45,7 @@ def _finish_enqueue(db: str, queue_id: int, pending: int, no_spawn: bool) -> Non
 
 def ingest(
     text: str = typer.Argument(..., help="Text to ingest into the knowledge graph"),
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
     source: str = typer.Option("", "--source", help="Source identifier (file path, URL, etc.)"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     sync: bool = typer.Option(False, "--sync", help=_SYNC_HELP),
@@ -63,7 +64,7 @@ def ingest(
 
 def ingest_file(
     file: Path = typer.Argument(..., help="Path to file to ingest"),
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     project: str | None = typer.Option(
         None,

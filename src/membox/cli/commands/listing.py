@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import typer
 from rich.table import Table
 
 from membox.cli._common import console, make_agent
+from membox.cli.options import DB_OPTION
 
 
 def list_entities(
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
 ) -> None:
     """List all entities in the knowledge graph."""
     agent = make_agent(db, no_llm=True)
@@ -24,7 +24,7 @@ def list_entities(
 
 
 def list_relations(
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
 ) -> None:
     """List all relations in the knowledge graph."""
     agent = make_agent(db, no_llm=True)

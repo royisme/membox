@@ -6,10 +6,11 @@ import typer
 from rich.table import Table
 
 from membox.cli._common import console, make_agent
+from membox.cli.options import DB_OPTION
 
 
 def process(
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     retry_failed: bool = typer.Option(
         False,
@@ -34,7 +35,7 @@ def process(
 
 
 def queue_status(
-    db: str = typer.Option("memory.db", "--db", help="Path to SQLite database file"),
+    db: str = DB_OPTION,
 ) -> None:
     """Show ingest queue status: per-status counts and recent failures."""
     agent = make_agent(db, no_llm=True)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ class ConnectionManager:
         self._local = threading.local()
         # Serializes the non-atomic "find-or-create entity" critical section.
         self.write_lock = threading.RLock()
+        if db_path != ":memory:":
+            Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     def connection(self) -> sqlite3.Connection:
         """Return the per-thread SQLite connection, creating it if needed.

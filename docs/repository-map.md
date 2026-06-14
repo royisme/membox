@@ -124,6 +124,7 @@ Functional Python files include their module header so tools can reuse the file 
       - `src/membox/cli/__init__.py` — membox CLI — Typer app assembly.
       - `src/membox/cli/__main__.py` — Allow ``python -m membox.cli`` — used by the M6 worker spawn path.
       - `src/membox/cli/_common.py` — Shared helpers for membox CLI commands: console, agent factory, notices.
+      - `src/membox/cli/options.py` — Shared Typer option definitions for the membox CLI.
     - `src/membox/core/`
       - `src/membox/core/store/`
         - `src/membox/core/store/__init__.py` — membox store — SQLite-backed knowledge graph store.
@@ -189,6 +190,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_cli.py` — Tests for the membox CLI and extraction backend selection factory.
   - `tests/test_concurrency.py` — Phase 6 tests: concurrency hardening — per-thread connections, WAL, RLock, multi-process.
   - `tests/test_consolidation.py` — Lifecycle Phase D memory-consolidation tests.
+  - `tests/test_db_path_resolution.py` — Tests for DB path resolution: default, MEMBOX_DB env var, and --db flag override.
   - `tests/test_disambiguation.py` — Phase 4 tests: entity disambiguation — alias, embedding, and concurrency.
   - `tests/test_distill.py` — Lifecycle Phase F workflow-distillation tests.
   - `tests/test_eval_corpus.py` — Tests that validate the Phase 7.5 M1 evaluation corpus and gold.yaml.

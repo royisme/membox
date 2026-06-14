@@ -19,6 +19,7 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
+from membox.cli.options import DB_OPTION
 from membox.config import HistoryConfig
 from membox.core.history_import import fetch_payload, history_pull, import_history
 from membox.core.project import infer_project
@@ -32,7 +33,7 @@ history_app = typer.Typer(
     no_args_is_help=True,
 )
 
-_DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
+_DB_OPTION = DB_OPTION
 _PROJECT_HELP = (
     "Project scope.  Defaults to the current project (git root name of the "
     "working directory).  Use --all-projects for cross-project output."

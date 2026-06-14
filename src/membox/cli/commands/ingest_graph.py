@@ -19,6 +19,7 @@ import typer
 from pydantic import ValidationError
 
 from membox.cli._common import make_agent
+from membox.cli.options import DB_OPTION
 from membox.core.project import infer_project
 from membox.model.schema import (
     ExtractedGraph,
@@ -32,7 +33,7 @@ from membox.model.schema import (
 if TYPE_CHECKING:
     from membox.core.store import KnowledgeStore
 
-_DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
+_DB_OPTION = DB_OPTION
 
 
 def _read_payload(source: str) -> str:
