@@ -28,6 +28,12 @@ Functional Python files include their module header so tools can reuse the file 
     - `docs/design/cjk-trigram-fts.md`
     - `docs/design/graph-fts-fusion.md`
     - `docs/design/retrieval-architecture.md`
+  - `docs/diagrams/`
+    - `docs/diagrams/01-system-architecture.png`
+    - `docs/diagrams/02-data-flow.png`
+    - `docs/diagrams/03-memory-lifecycle.png`
+    - `docs/diagrams/04-query-sequence.png`
+    - `docs/diagrams/05-ingestion-workflow.png`
   - `docs/issue/`
     - `docs/issue/agent-as-llm-provider/`
       - `docs/issue/agent-as-llm-provider/README.md`
@@ -212,6 +218,7 @@ Functional Python files include their module header so tools can reuse the file 
   - `tests/test_skeleton.py` — Phase 1 skeleton tests: verify import chains, CLI commands, Protocol stubs, and instantiation.
   - `tests/test_storage.py` — Phase 2 storage tests: SQLite DDL, CRUD, FK constraints, dedup, and evidence lineage.
   - `tests/test_supersession.py` — M4 supersession semantics tests.
+  - `tests/test_triage.py` — Unit tests for the membox triage gate (heuristic-v6 additions).
   - `tests/test_version.py` — Tests for membox package metadata.
 - `.editorconfig`
 - `.gitignore`

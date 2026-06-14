@@ -1,6 +1,6 @@
 ---
 name: membox
-description: Durable, project-scoped memory for coding agents via the local `membox` CLI — a knowledge graph + RAG + session-history lifecycle, all local SQLite, no daemon and no API key for the core loop. Use at the start of a session to recall prior decisions, conventions, and context; at the end of a session to checkpoint the session history into memory; and any time to ingest or query project knowledge.
+description: Durable, project-scoped memory for coding agents via the local `membox` CLI — a knowledge graph + RAG + session-history lifecycle, all local SQLite, with no daemon and no API key for the core loop. Use this whenever cross-session memory would help: at the START of a session to recall prior decisions, conventions, and architecture (e.g. "what did we decide about X", "remind me how this works", "have we seen this error before"); at the END of a session to checkpoint the session history into memory; and any time to ingest, query, or "remember" durable project knowledge. Reach for it even when the user doesn't say "membox" — any request to recall, persist, or look up lasting project context should trigger this skill, since the agent's own context window does not survive a restart.
 ---
 
 # Membox — Local Knowledge Graph + RAG Memory Layer for Coding Agents
@@ -30,16 +30,21 @@ globally with `uv tool install .` (then plain `membox`).
 
 ### Installing this skill (so an agent loads it automatically)
 
-This skill ships in the repo at `skills/membox/SKILL.md`. Copy it where your
-agent discovers skills:
+This skill ships in the repo at `skills/membox/SKILL.md` (the single source of
+truth). Make it discoverable by **symlinking** rather than copying — a copy
+silently drifts out of date as the repo's `skills/membox/SKILL.md` evolves,
+whereas a symlink always reflects the latest version:
 
 ```bash
 # Claude Code — user-global (available in every project)
-mkdir -p ~/.claude/skills && cp -r skills/membox ~/.claude/skills/membox
+mkdir -p ~/.claude/skills && ln -sfn "$PWD/skills/membox" ~/.claude/skills/membox
 
 # Claude Code — project-local (only this repo; .claude/ is gitignored)
-mkdir -p .claude/skills && cp -r skills/membox .claude/skills/membox
+mkdir -p .claude/skills && ln -sfn "$PWD/skills/membox" .claude/skills/membox
 ```
+
+If your loader cannot follow symlinks and you must copy (`cp -r skills/membox
+<dest>`), re-copy after every `git pull` to avoid serving stale docs.
 
 Other agents: point the agent's skill/instruction loader at
 `skills/membox/SKILL.md`, or paste its contents into the system prompt. The
@@ -219,6 +224,59 @@ membox memory extract --project myrepo --apply
 # 4. Consolidate — promote, surface conflicts, decay stale
 membox memory consolidate --project myrepo --apply
 ```
+
+### Automating Capture with Hooks
+
+A skill description only influences whether an agent *remembers to* run these
+commands — it cannot guarantee they run. The two highest-value touchpoints are
+also the least reliable to leave to the model: session-start recall is easy to
+skip, and session-end capture is worse — sessions often just end, so the model
+never gets a turn to checkpoint. The fix is to let the **harness** run them
+deterministically. In Claude Code, wire them as hooks in `.claude/settings.json`.
+
+**SessionEnd → capture this session** (the high-value, low-risk one):
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      { "hooks": [ { "type": "command",
+        "command": "MEMBOX_SESSION_ROOT=\"$HOME/.claude/projects\" membox checkpoint --adapt claude || true" } ] }
+    ]
+  }
+}
+```
+
+**SessionStart → recall context** (optional; it injects tokens and adds a little
+latency every session, so keep the budget tight):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "membox query \"project context, key decisions, conventions\" --include-memory --budget 3000 || true" } ] }
+    ]
+  }
+}
+```
+
+Notes:
+
+- Use **`SessionEnd`** for checkpoint (fires once per session), never `Stop`
+  (fires every turn — far too frequent).
+- The hook runs in the project directory, so membox infers `--project` from the
+  git-root name; pass `--project` explicitly if your layout needs it.
+- `|| true` keeps a membox hiccup from blocking session exit. Append
+  `>> "$HOME/.membox/checkpoint.log" 2>&1` to capture output for debugging.
+- **Safe to run every session.** `history pull` is incremental and idempotent:
+  the `history_import_state` table skips unchanged session files by `mtime+size`,
+  resumes the current file from its stored byte offset, and upserts on
+  `(session_id, external_id)`; triage and extract then guard on gate-version and
+  a `consumed_at` marker. Net work per run is **O(new messages)**, not O(all
+  history). The *first* run does a one-time backlog import, and triage is capped
+  by `--limit` (default 100) per run, so a large backlog drains over several
+  sessions — run `membox checkpoint --apply` manually a few times to catch up.
 
 ### Periodic Maintenance
 

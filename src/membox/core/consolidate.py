@@ -649,6 +649,24 @@ def _apply_llm_comparator(
 
 
 def _looks_conflicting(left: MemoryUnitRecord, right: MemoryUnitRecord) -> bool:
+    """Return True when left and right appear to make contradictory claims.
+
+    Near-duplicates are not conflicts — a unit saying essentially the same
+    thing with minor variation is not contradicting itself.  The FTS-pair
+    detector already handles those for review.
+
+    Args:
+        left: First memory unit to compare.
+        right: Second memory unit to compare.
+
+    Returns:
+        True when the pair is a conflict, False when it is a near-duplicate
+        or otherwise non-conflicting.
+    """
+    # Near-duplicates are not conflicts — a unit saying essentially the same
+    # thing with minor variation is not contradicting itself.
+    if _looks_fts_pair(left, right):
+        return False
     left_text = f"{left.title}\n{left.content}".casefold()
     right_text = f"{right.title}\n{right.content}".casefold()
     combined = left_text + "\n" + right_text

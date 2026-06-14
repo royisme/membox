@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from membox.model.schema import MEMORY_LABELS, MemoryTemporalType, MemoryUnitType, MemoryUserIntent
 
-GATE_VERSION = "heuristic-v5"
+GATE_VERSION = "heuristic-v6"
 """Version string persisted with every deterministic triage decision.
 
 v2 (tuned against the C1 lifecycle fixtures): declared-fact prefixes extract
@@ -39,6 +39,11 @@ output), JSON tool-call argument blobs (Write/Edit), and slash-command /
 harness scaffolding never extract, regardless of which policy words they
 happen to contain.  This closes the dominant noise family where raw tool I/O
 became memory units because a quoted file mentioned "always" or "cli".
+
+v6 extends the boilerplate guard with a fourth content shape: bare filesystem
+path lines (e.g. ``src/membox/cli/commands/ingest.py``) with no surrounding
+prose are dropped before the keyword scan, preventing single-path or path-list
+messages from extracting as memory units.
 """
 LEGACY_GATE_VERSIONS = ("heuristic-v4", "heuristic-v3")
 """Gate versions accepted temporarily as CLI escape hatches."""
@@ -207,11 +212,18 @@ _TOOL_INPUT_KEYS: tuple[str, ...] = (
 )
 """Keys that mark a JSON object as a tool-call argument blob (Write/Edit/Bash/…)."""
 
+_BARE_PATH_RE = re.compile(r"^[\w.\-]+(?:/[\w.\-]+)*\.[A-Za-z0-9]{1,8}$")
+"""Match a single bare filesystem path token with no surrounding prose or spaces.
+
+Examples that match: ``src/membox/cli/commands/ingest.py``, ``README.md``.
+Examples that do NOT match: ``Edit src/foo/bar.py to fix the bug`` (has spaces).
+"""
+
 
 def _is_boilerplate_content(text: str) -> bool:
     """Return True when *text* is machine harness I/O, not durable knowledge.
 
-    Recognises three content shapes that raw agent trace produces and that the
+    Recognises four content shapes that raw agent trace produces and that the
     keyword gate would otherwise admit because they happen to quote policy
     words ("always", "cli", "never"):
 
@@ -221,6 +233,10 @@ def _is_boilerplate_content(text: str) -> bool:
        carries a known tool-input key (``"file_path"``, ``"command"``, …).
     3. **Slash-command / harness scaffolding** — ``<command-name>``,
        ``<local-command-stdout>``, and the like.
+    4. **Bare filesystem path lines** — content that is essentially just one or
+       more file-path tokens with no surrounding prose (e.g.
+       ``src/membox/cli/commands/ingest.py``).  Fires when nearly all non-empty
+       lines match the path pattern and contain no spaces.
 
     Args:
         text: Bounded trace text (already truncated to the gate window).
@@ -235,7 +251,25 @@ def _is_boilerplate_content(text: str) -> bool:
     if text.lstrip().startswith("{") and any(key in text for key in _TOOL_INPUT_KEYS):
         return True
     numbered = sum(1 for line in text.splitlines() if _LINE_NUMBERED_PREFIX.match(line))
-    return numbered >= 3
+    if numbered >= 3:
+        return True
+    # Shape 4: content that is essentially just filesystem path(s) — bare path
+    # lines with no spaces that look like file references (e.g. "src/foo/bar.py").
+    # Must fire only when (nearly) all non-empty lines are path-like.
+    non_empty = [ln for ln in text.splitlines() if ln.strip()]
+    if non_empty:
+        path_count = sum(1 for ln in non_empty if _BARE_PATH_RE.match(ln.strip()) and " " not in ln)
+        total = len(non_empty)
+        if total == 1:
+            if path_count == 1:
+                return True
+        elif total < 5:
+            if path_count == total:
+                return True
+        else:
+            if path_count / total >= 0.80:
+                return True
+    return False
 
 
 def triage_trace(

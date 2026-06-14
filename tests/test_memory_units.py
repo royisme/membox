@@ -13,14 +13,20 @@ from membox.core.store import KnowledgeStore
 from membox.core.store.migrations import MIGRATIONS, apply_migrations, get_user_version
 from membox.core.triage import GATE_VERSION
 from membox.model.schema import (
+    HistoryEventKind,
+    HistoryEventRecord,
     HistoryMessageRecord,
     HistorySessionRecord,
+    HistoryTriageRecord,
     MemorySourceKind,
+    MemoryTemporalType,
     MemoryUnitRecord,
     MemoryUnitSource,
     MemoryUnitStatus,
     MemoryUnitType,
+    MemoryUserIntent,
     SourceKind,
+    TraceKind,
 )
 
 runner = CliRunner()
@@ -175,6 +181,67 @@ def test_source_identity_dedup_is_idempotent(tmp_path: Path) -> None:
     assert second == first
     rows = store._conn().execute("SELECT COUNT(*) FROM memory_units;").fetchone()
     assert rows[0] == 1
+
+
+def test_trace_rows_for_triage_filters_by_gate_version(tmp_path: Path) -> None:
+    """Trace rows triaged by an old gate remain eligible for a new gate."""
+    store = KnowledgeStore(str(tmp_path / "units.db"))
+    session = HistorySessionRecord(
+        id="membox-capture:s1",
+        external_id="s1",
+        project="membox",
+        title="test",
+        source_kind=SourceKind.MEMBOX_CAPTURE,
+        source_ref="fixture.jsonl",
+    )
+    message = HistoryMessageRecord(
+        id="membox-capture:s1:msg:1",
+        session_id=session.id,
+        external_id="1",
+        role="user",
+        text="Remember rule: always run migration checks before storage work.",
+        created_at="2026-06-11T00:00:00",
+    )
+    event = HistoryEventRecord(
+        id="membox-capture:s1:evt:1:tool_result",
+        session_id=session.id,
+        message_id=message.id,
+        message_external_id=message.external_id,
+        anchor="1",
+        kind=HistoryEventKind.TOOL_RESULT,
+        tool_name="shell",
+        body="Correction: default branch is main, not master.",
+        created_at="2026-06-11T00:00:01",
+    )
+    store.upsert_history_session(session)
+    store.upsert_history_messages(session, [message])
+    store.upsert_history_events(session, [event])
+
+    for trace_kind, trace_id in (
+        (TraceKind.MESSAGE, message.id),
+        (TraceKind.EVENT, event.id),
+    ):
+        store.upsert_history_triage(
+            HistoryTriageRecord(
+                project="membox",
+                trace_kind=trace_kind,
+                trace_id=trace_id,
+                should_extract=True,
+                unit_type=MemoryUnitType.PREFERENCE,
+                temporal_type=MemoryTemporalType.UNKNOWN,
+                user_intent=MemoryUserIntent.AUTO,
+                extraction_hint="old gate",
+                reason="fixture",
+                gate_version="heuristic-v5",
+            )
+        )
+
+    assert store.trace_rows_for_triage(project="membox", gate_version="heuristic-v5") == []
+    fresh_gate_rows = store.trace_rows_for_triage(project="membox", gate_version=GATE_VERSION)
+    assert {(row["trace_kind"], row["trace_id"]) for row in fresh_gate_rows} == {
+        ("message", message.id),
+        ("event", event.id),
+    }
 
 
 def test_status_transition_logs(tmp_path: Path) -> None:

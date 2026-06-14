@@ -217,7 +217,9 @@ def _run_chain(
         pull = PullResult(sessions=0, messages=0, events=0, skipped_lines=0, files=[])
 
     # 2. Triage.
-    rows = store.trace_rows_for_triage(project=project, since=since, limit=limit)
+    rows = store.trace_rows_for_triage(
+        project=project, since=since, limit=limit, gate_version=GATE_VERSION
+    )
     triaged_rows = 0
     for row in rows:
         decision = triage_trace(

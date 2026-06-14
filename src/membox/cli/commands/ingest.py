@@ -47,6 +47,11 @@ def ingest(
     text: str = typer.Argument(..., help="Text to ingest into the knowledge graph"),
     db: str = DB_OPTION,
     source: str = typer.Option("", "--source", help="Source identifier (file path, URL, etc.)"),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help="Project scope for these documents (default: unscoped / NULL).",
+    ),
     no_llm: bool = typer.Option(False, "--no-llm", help="Force the no-op extraction backend"),
     sync: bool = typer.Option(False, "--sync", help=_SYNC_HELP),
     no_spawn: bool = typer.Option(False, "--no-spawn", help=_NO_SPAWN_HELP),
@@ -55,10 +60,10 @@ def ingest(
     """Ingest text into the knowledge graph (asynchronously by default)."""
     agent = make_agent(db, no_llm=no_llm, concurrency=concurrency)
     if sync:
-        agent.ingest(text, source)
+        agent.ingest(text, source, project=project)
         console.print("[green]Ingested.[/green]")
         return
-    queue_id = agent.enqueue(text, source_path=source or None)
+    queue_id = agent.enqueue(text, source_path=source or None, project=project)
     _finish_enqueue(db, queue_id, agent.store.pending_ingest_count(), no_spawn)
 
 
