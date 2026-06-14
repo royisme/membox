@@ -285,7 +285,7 @@ Normative source: `docs/spec/spec_02_memory_lifecycle.md`. Per-phase plans: `doc
 | S2 | Robustness | ✅ core hardening complete |
 | S3 | Deferred review items (PR #5 / plan_06) | ✅ |
 | S4 | Performance sanity | ✅ baseline recorded (no-API-key lifecycle) |
-| S5 | Release | 🔲 |
+| S5 | Release | ✅ v0.1.0 tagged + pushed (2026-06-13) |
 
 ### S1 — Dogfooding
 
@@ -333,10 +333,10 @@ Baseline timing on a representative real history:
 
 ### S5 — Release
 
-- [ ] README quickstart covering the history-pull → process → distill → query workflow (end-to-end in ~10 commands)
-- [ ] Changelog: `uv run python scripts/generate_changelog.py --version 0.1.0`
-- [ ] Version bump: `uv run python scripts/bump_version.py 0.1.0`
-- [ ] Tag `v0.1.0` and push; confirm CI green on main
+- [x] README quickstart covering the history-pull → process → distill → query workflow (verified command-by-command against the live CLI; added a `checkpoint` one-shot tip)
+- [x] Changelog: `[0.1.0] - 2026-06-13` section generated via `scripts/generate_changelog.py --version 0.1.0`
+- [x] Version: already `0.1.0` in pyproject + `__init__.py` (no bump needed; confirmed via `bump_version.py --check 0.1.0`)
+- [x] Tag `v0.1.0` created (annotated) and pushed to origin; CI green on main
 - [ ] Close or re-milestone any open GitHub issues that are out of scope for v0.1.0
 
 ---
