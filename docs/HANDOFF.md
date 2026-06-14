@@ -6,7 +6,7 @@
 **Current phase**: **v0.1.0 RELEASED** (2026-06-13, annotated tag `v0.1.0` on `git@github.com:royisme/membox.git`, CI green on main `4302111`). Stabilization Track **S1–S5 complete**. Lifecycle Phases A–F + the four session-14 designs (claude adapter, checkpoint, agent-as-provider, dream) are on main; **migration head 0009**; full gate green (642 tests). The full real-session chain runs with **no API key**. Next milestone is the owner's call — Phase 8 (tree-sitter AST) was deferred pre-release and is the obvious candidate; the `~/.codex`-scale perf stress run and the `ingest --project` footgun (item 15) are smaller open items.
 
 ### Pending user decisions before next work item
-- Stale `feature/*` branches (phase 1-7, phase 7.5 sub-branches, lifecycle/phase-b branches now merged) and `develop` — safe to delete after user confirms.
+- ~~Stale `feature/*` branches and `develop`~~ — **cleaned up 2026-06-13 (session 15)**: all merged branches + `develop` deleted (local + `origin/develop`); stale plan_06/docs branches force-deleted. **Kept on purpose**: `origin/feature/refactor-architecture-pass` — 6 unmerged code refactors (extract project inference, fts/lease/vector helpers, deepen plan interface) based on pre-session-14 main; revisit fresh if a refactor pass is wanted, else delete. Local repo is now just `main`.
 - `docs/spec-v0.2-draft.md` (per-project DB storage model) — retired by owner decision on 2026-06-13; the two-DB storage model is rejected, while the surviving global-memory-scope idea is parked in `docs/roadmap.md` Future Tracks.
 
 ### New conventions worth remembering across sessions
@@ -158,7 +158,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 4. ~~Ingest performance~~ — **resolved session 11** (plan_03 P1/P2/P3 landed; mechanism measured at 9.6× fewer provider calls; real Gemini wall-clock still unmeasured — record on next paid ingest).
 5. ~~Residual recall misses (q08, q19)~~ — **resolved session 11** (post-resnapshot budget 4000 covers them; no per-question algorithm change).
 6. **Extraction quality on small local models**: 258/600 entities typed "Unknown"; some garbage whole-sentence entity names; 7 chunks still exceed 2048 completion tokens. Not pursued on Gemini path; revisit only if local Ollama becomes the priority again.
-7. Old branches + `develop` cleanup — delete after user confirms.
+7. ~~Old branches + `develop` cleanup~~ — **done session 15**: all merged branches + `develop` deleted; stale plan_06/docs branches dropped; `origin/feature/refactor-architecture-pass` kept as a refactor reference. Local repo is `main`-only.
 8. ~~Phase 8 (tree-sitter), Phase 9 (skill file)~~ — **Phase 9 skill file delivered PR #5** (2026-06-12). **Phase 8 deferred** to next milestone by owner decision 2026-06-12 — stabilization/v0.1.0 takes priority. See Stabilization Track in `docs/roadmap.md`.
 9. ~~Lifecycle eval fixture design~~ — **resolved session 11**: 7 committed fixtures at `eval/lifecycle/`, harness in `tests/test_lifecycle_acceptance.py`. C5 metrics at heuristic-v2: precision/recall/type-accuracy 1.00, dup rate 0.00, all hard-asserted. Fixture size is the acknowledged fragility — D0 entry condition of plan_04 is the real-trace validation.
 10. ~~`feature/phase-c-eval-ingest-plans` → main merge~~ — **resolved session 11** (`d6e6c99`, merge --no-ff).
@@ -180,7 +180,7 @@ Scaffolding, spec/roadmap, and Phases 1-7 (skeleton → storage → normalizatio
 3. ~~S3 Deferred review items from PR #5 / plan_06~~ — complete in current code: batched source counts, atomic apply, FTS review pairs, injectable comparator protocol, and `heuristic-v4`.
 4. ~~S4 Performance sanity~~ — **done session 15**: baseline at `eval/results/perf-baseline-v0.1.0.md` (import + triage + extract, 5.24 s full lifecycle, 19.5× idempotent re-import). codex-scale (~1.2 GB) stress run deferred as a future data point.
 5. ~~S5 Release~~ — **done 2026-06-13**: v0.1.0 tagged + pushed, CI green. README/changelog finalized.
-6. Cleanup: delete the merged/stale `feature/*` branches and `develop` after the user confirms. (Local branches still present: `develop`, `feature/phase-c-eval-ingest-plans`, `feature/phase-d-consolidation`, `feature/refactor-architecture-pass`, plus `docs/*` and `fix/plan-06-*` branches.)
+6. ~~Cleanup branches~~ — **done session 15**: local repo is `main`-only; `origin/develop` deleted; `origin/feature/refactor-architecture-pass` kept as a refactor reference (delete when no longer wanted).
 7. **Post-v0.1.0 (owner's call)**: Phase 8 tree-sitter AST (deferred pre-release); `~/.codex`-scale perf stress data point; the `ingest --project` footgun (open item 15).
 7. ~~Phase C~~ — done session 11. ~~Phase D~~ — done session 12. ~~Re-snapshot eval corpus~~ — done 2026-06-11.
 
