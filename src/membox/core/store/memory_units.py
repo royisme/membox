@@ -84,17 +84,33 @@ class MemoryUnitOps:
         self,
         *,
         project: str,
+        gate_version: str,
         since: str | None = None,
         limit: int = 100,
     ) -> list[TraceForTriage]:
-        """Return history messages/events not yet triaged for the current gate."""
+        """Return history messages/events not yet triaged at ``gate_version``.
+
+        Rows that already have an entry in ``history_triage`` for the given
+        ``gate_version`` are excluded so re-running triage after a checkpoint
+        does not process the same traces twice.
+
+        Args:
+            project: Project scope to filter by.
+            gate_version: Gate version string; rows already triaged at this
+                version are skipped.
+            since: Optional ISO-8601 lower bound on ``created_at``.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            List of trace rows eligible for triage at the given gate version.
+        """
         clauses = ["project=?"]
         params_one: list[object] = [project]
         if since is not None:
             clauses.append("created_at>=?")
             params_one.append(since)
         where = " AND ".join(clauses)
-        params = [*params_one, *params_one, limit]
+        params = [*params_one, gate_version, *params_one, gate_version, limit]
         rows = (
             self._cm.connection()
             .execute(
@@ -102,10 +118,22 @@ class MemoryUnitOps:
             SELECT 'message' AS trace_kind, id, project, role, text, created_at
             FROM history_messages
             WHERE {where}
+            AND NOT EXISTS (
+                SELECT 1 FROM history_triage
+                WHERE trace_kind='message'
+                  AND trace_id=CAST(history_messages.id AS TEXT)
+                  AND gate_version=?
+            )
             UNION ALL
             SELECT 'event' AS trace_kind, id, project, COALESCE(tool_name, kind), body, created_at
             FROM history_events
             WHERE {where}
+            AND NOT EXISTS (
+                SELECT 1 FROM history_triage
+                WHERE trace_kind='event'
+                  AND trace_id=CAST(history_events.id AS TEXT)
+                  AND gate_version=?
+            )
             ORDER BY created_at
             LIMIT ?
             """,

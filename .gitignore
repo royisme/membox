@@ -61,3 +61,7 @@ eval/corpus-pre-resnapshot/
 !.crew/graphs/
 !.crew/artifacts/.gitkeep
 !.crew/graphs/.gitkeep
+.codegraph/
+.cursor/
+.commandcode/
+.mcp.json

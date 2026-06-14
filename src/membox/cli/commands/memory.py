@@ -82,7 +82,9 @@ def memory_triage(
     _validate_gate(gate)
     effective_project = _default_project(project)
     store = KnowledgeStore(db)
-    rows = store.trace_rows_for_triage(project=effective_project, since=since, limit=limit)
+    rows = store.trace_rows_for_triage(
+        project=effective_project, since=since, limit=limit, gate_version=gate
+    )
     if apply:
         _take_lease(store, effective_project)
     written = 0
