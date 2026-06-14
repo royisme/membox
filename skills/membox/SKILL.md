@@ -68,7 +68,7 @@ Trace → Unit → Crystal
 membox ingest "codebase-rag is implemented in Python" --source "README.md"
 
 # Ingest a file
-membox ingest-file docs/architecture.md --db memory.db
+membox ingest-file docs/architecture.md
 membox ingest-file .handoffs/HANDOFF.md --project myrepo
 
 # Query the knowledge graph (graph + FTS fusion, token-budgeted)
@@ -78,8 +78,8 @@ membox query "key decisions" --include-memory         # includes crystal memory
 membox query "key decisions" --include-memory --all-projects
 
 # List entities and relations
-membox list-entities --db memory.db
-membox list-relations --db memory.db --project myrepo
+membox list-entities
+membox list-relations --project myrepo
 
 # Async queue management
 membox process                    # drain the ingest queue, exit when empty
@@ -302,9 +302,9 @@ configured and the agent should *not* perform the extraction itself.
 |---|---|---|
 | `MEMBOX_SESSION_ROOT` | Agent session storage root for `history pull` / `checkpoint` auto-discovery | (none) |
 | `MEMBOX_INGEST_CONCURRENCY` | Parallel chunk extraction workers | `1` |
+| `MEMBOX_DB` | Override the default database path | `~/.membox/membox.db` |
 
-**Database location**: every command takes `--db PATH`; the default is
-`memory.db` in the **current working directory**. There is no global default
-path yet, so for a persistent shared store pass an explicit `--db`
-(e.g. `--db ~/.membox/membox.db`) consistently, or always run from the same
-directory. All other configuration is via CLI flags — no config file required.
+**Database location**: every command accepts `--db PATH` to specify the
+database explicitly. The resolution order is: `--db` flag > `MEMBOX_DB` env var
+> default `~/.membox/membox.db`. The parent directory is created automatically
+on first use. All other configuration is via CLI flags — no config file required.

@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
+from membox.cli.options import DB_OPTION
 from membox.core.distill import (
     DistillCandidate,
     FilesystemAssetInventory,
@@ -17,7 +18,7 @@ from membox.core.distill import (
 from membox.core.project import infer_project
 from membox.core.store import KnowledgeStore
 
-_DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
+_DB_OPTION = DB_OPTION
 _DURATION_RE = re.compile(r"^(\d+)([dwh])$")
 
 

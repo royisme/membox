@@ -252,9 +252,9 @@ membox memory consolidate --apply           # periodic: promote durable crystals
 ```bash
 uv sync
 export MEMBOX_SESSION_ROOT=~/.claude/projects
-membox checkpoint --adapt claude --db memory.db          # capture membox's own sessions
-membox query "what is the lifecycle design" --include-memory --db memory.db
-membox memory list --status active_unit --db memory.db
+membox checkpoint --adapt claude          # capture membox's own sessions (default: ~/.membox/membox.db)
+membox query "what is the lifecycle design" --include-memory
+membox memory list --status active_unit
 ```
 
 The full no-API-key lifecycle (import → triage → extract) runs in a few seconds

@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 
 from membox.cli._common import console
+from membox.cli.options import DB_OPTION
 from membox.core.consolidate import (
     ConsolidationIssue,
     ConsolidationPlan,
@@ -36,7 +37,7 @@ memory_app = typer.Typer(
     no_args_is_help=True,
 )
 
-_DB_OPTION = typer.Option("memory.db", "--db", help="Path to SQLite database file")
+_DB_OPTION = DB_OPTION
 
 
 def _default_project(project: str | None) -> str:
