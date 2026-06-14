@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from membox.model.schema import MEMORY_LABELS, MemoryTemporalType, MemoryUnitType, MemoryUserIntent
 
-GATE_VERSION = "heuristic-v4"
+GATE_VERSION = "heuristic-v5"
 """Version string persisted with every deterministic triage decision.
 
 v2 (tuned against the C1 lifecycle fixtures): declared-fact prefixes extract
@@ -32,8 +32,15 @@ v4 keeps the v3 deterministic triage heuristics and integrates the
 Stabilization Track gate hardening around it: atomic consolidation apply,
 FTS-style conflict pairing, and optional LLM comparator re-scoring when a
 caller injects one.
+
+v5 (tuned against real-trace dogfooding) adds a content-shape boilerplate
+guard ahead of the keyword scan: line-numbered file dumps (Read ``cat -n``
+output), JSON tool-call argument blobs (Write/Edit), and slash-command /
+harness scaffolding never extract, regardless of which policy words they
+happen to contain.  This closes the dominant noise family where raw tool I/O
+became memory units because a quoted file mentioned "always" or "cli".
 """
-LEGACY_GATE_VERSIONS = ("heuristic-v3",)
+LEGACY_GATE_VERSIONS = ("heuristic-v4", "heuristic-v3")
 """Gate versions accepted temporarily as CLI escape hatches."""
 
 REDACTION_MARKER = "[REDACTED]"
@@ -174,6 +181,63 @@ def redact_secrets(text: str) -> str:
     return text
 
 
+# Content-shape boilerplate signals (gate v5).  These catch machine-generated
+# trace text that the keyword gate cannot distinguish from prose because a
+# quoted file or tool payload incidentally contains policy words.
+_LINE_NUMBERED_PREFIX = re.compile(r"^\s*\d+\t")
+"""A line that begins with ``<digits><TAB>`` — the ``cat -n`` / Read tool format."""
+
+_HARNESS_SCAFFOLD_TAGS: tuple[str, ...] = (
+    "<command-message>",
+    "<command-name>",
+    "<command-args>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+)
+"""Slash-command and local-command harness markers; never durable knowledge."""
+
+_TOOL_INPUT_KEYS: tuple[str, ...] = (
+    '"file_path"',
+    '"old_string"',
+    '"new_string"',
+    '"command"',
+    '"content"',
+    '"todos"',
+    '"pattern"',
+)
+"""Keys that mark a JSON object as a tool-call argument blob (Write/Edit/Bash/…)."""
+
+
+def _is_boilerplate_content(text: str) -> bool:
+    """Return True when *text* is machine harness I/O, not durable knowledge.
+
+    Recognises three content shapes that raw agent trace produces and that the
+    keyword gate would otherwise admit because they happen to quote policy
+    words ("always", "cli", "never"):
+
+    1. **Line-numbered file dumps** — ``cat -n`` / Read tool output, where three
+       or more lines begin with ``<digits><TAB>``.
+    2. **JSON tool-call argument blobs** — text that starts with ``{`` and
+       carries a known tool-input key (``"file_path"``, ``"command"``, …).
+    3. **Slash-command / harness scaffolding** — ``<command-name>``,
+       ``<local-command-stdout>``, and the like.
+
+    Args:
+        text: Bounded trace text (already truncated to the gate window).
+
+    Returns:
+        True when the item should be dropped before the keyword scan.
+    """
+    if not text:
+        return False
+    if any(tag in text for tag in _HARNESS_SCAFFOLD_TAGS):
+        return True
+    if text.lstrip().startswith("{") and any(key in text for key in _TOOL_INPUT_KEYS):
+        return True
+    numbered = sum(1 for line in text.splitlines() if _LINE_NUMBERED_PREFIX.match(line))
+    return numbered >= 3
+
+
 def triage_trace(
     text: str,
     *,
@@ -194,6 +258,18 @@ def triage_trace(
         The deterministic :class:`GateDecision` for this trace item.
     """
     window = text[:4000]
+    if _is_boilerplate_content(window):
+        return GateDecision(
+            should_extract=False,
+            unit_type=MemoryUnitType.CONTEXT,
+            importance_score=0.0,
+            confidence_score=0.0,
+            temporal_type=MemoryTemporalType.UNKNOWN,
+            user_intent=user_intent,
+            extraction_hint=_first_line(window)[:200],
+            reason="boilerplate_content",
+            labels=[],
+        )
     lowered = window.casefold()
     manual = user_intent == MemoryUserIntent.MANUAL
     is_event = trace_kind == "event"

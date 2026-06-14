@@ -67,7 +67,7 @@ def memory_triage(
     gate: str = typer.Option(
         GATE_VERSION,
         "--gate",
-        help="Gate version to write; heuristic-v3 is a temporary escape hatch",
+        help="Gate version to write; heuristic-v4 is a temporary escape hatch",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview decisions without writing"),
     apply: bool = typer.Option(False, "--apply", help="Persist triage decisions"),
@@ -129,7 +129,7 @@ def memory_extract(
     gate: str = typer.Option(
         GATE_VERSION,
         "--gate",
-        help="Gate version to consume; heuristic-v3 is a temporary escape hatch",
+        help="Gate version to consume; heuristic-v4 is a temporary escape hatch",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview units without writing"),
     apply: bool = typer.Option(False, "--apply", help="Write units and consume triage rows"),
