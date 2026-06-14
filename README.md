@@ -30,6 +30,43 @@ agent session history into reusable memory units.
   falls back to exact / casing-normalized matching.
 - Not a framework. The design favors direct, readable code over abstraction.
 
+## Diagrams
+
+A visual tour of how membox fits together.
+
+### System architecture
+
+![Coding agent calls the membox CLI, which drives a MemoryAgent that reads and writes a KnowledgeStore backed by SQLite in WAL mode. Optional, injectable LLM Extractor and Embedder protocols reach an external OpenAI/Ollama provider over HTTPS; everything else runs on the local machine.](docs/diagrams/01-system-architecture.png)
+
+Local KG + RAG memory layer. The core runs on SQLite alone — the LLM extractor
+and embedder are optional and injected through `Protocol` interfaces.
+
+### Data flow
+
+![Data flowing from raw documents through extraction and embedding into the knowledge graph and FTS index, then fused at query time into agent-ready context.](docs/diagrams/02-data-flow.png)
+
+From raw documents to agent-ready context.
+
+### Memory lifecycle
+
+![State machine in which a trace is triaged, extracted into a unit candidate, activated, and consolidated into a crystal, with side paths to crystal-candidate, archived, superseded, and retracted terminal states.](docs/diagrams/03-memory-lifecycle.png)
+
+The `Trace → Unit → Crystal` state machine that turns raw session history into
+durable memory.
+
+### Query sequence
+
+![Sequence of a hybrid query: BFS multi-hop graph traversal and FTS keyword search run, then results are fused and trimmed to a token budget before returning to the agent.](docs/diagrams/04-query-sequence.png)
+
+Hybrid BFS + FTS retrieval, fused under a token budget.
+
+### Ingestion workflow
+
+![Async ingestion: a write is accepted in under 100 ms by enqueuing it, while the LLM extraction work is deferred to a background worker drained by membox process.](docs/diagrams/05-ingestion-workflow.png)
+
+Async ingestion — writes are accepted in under 100 ms; LLM work is deferred to a
+worker (`membox process`).
+
 ## Install
 
 Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
@@ -226,14 +263,16 @@ Install the skill so an agent discovers it automatically:
 
 ```bash
 # Claude Code — user-global (every project)
-mkdir -p ~/.claude/skills && cp -r skills/membox ~/.claude/skills/membox
+mkdir -p ~/.claude/skills && ln -sfn "$PWD/skills/membox" ~/.claude/skills/membox
 
 # Claude Code — project-local (this repo only; .claude/ is gitignored)
-mkdir -p .claude/skills && cp -r skills/membox .claude/skills/membox
+mkdir -p .claude/skills && ln -sfn "$PWD/skills/membox" .claude/skills/membox
 ```
 
-Other agents: point the skill/instruction loader at `skills/membox/SKILL.md`,
-or paste its contents into the system prompt.
+Symlinking (rather than `cp -r`) keeps the installed skill in lockstep with the
+repo's `skills/membox/SKILL.md`; a copy silently drifts out of date. Other
+agents: point the skill/instruction loader at `skills/membox/SKILL.md`, or paste
+its contents into the system prompt.
 
 Typical agent workflow:
 
@@ -280,7 +319,7 @@ required. CI runs on Python 3.13 across macOS, Linux, and Windows.
 | [docs/spec/spec_02_memory_lifecycle.md](docs/spec/spec_02_memory_lifecycle.md) | Memory lifecycle spec (Trace → Unit → Crystal) |
 | [docs/roadmap.md](docs/roadmap.md) | Implementation roadmap and current status |
 | [docs/code-standards.md](docs/code-standards.md) | Coding style and conventions |
-| [skills/membox-skill.md](skills/membox-skill.md) | Agent skill file (CLI usage instructions) |
+| [skills/membox/SKILL.md](skills/membox/SKILL.md) | Agent skill file (CLI usage instructions) |
 
 ## License
 
