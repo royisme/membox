@@ -51,12 +51,11 @@ docs/reference/
 .works/
 .serena/
 .claude/
-.crew/
 eval/corpus/
 eval/corpus-pre-resnapshot/
 
+# ── Build & IDE Tools ───────────────────
 /.crew/
-/.crew
 !.crew/artifacts/
 !.crew/graphs/
 !.crew/artifacts/.gitkeep
