@@ -65,3 +65,4 @@ eval/corpus-pre-resnapshot/
 .cursor/
 .commandcode/
 .mcp.json
+.handoffs/
